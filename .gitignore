@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+app/node_modules/
+package-lock.json.bak
+
+# Next.js build & cache
+.next/
+app/.next/
+out/
+app/out/
+build/
+app/build/
+
+# Environment files and credentials (CRITICAL)
+.env*
+app/.env*
+!.env.example
+!app/.env.example
+*.local
+*.local.sql
+crear_usuario.local.sql
+db/crear_usuario.local.sql
+
+# Database backups & data dumps
+respaldos/*
+!respaldos/.gitkeep
+
+# Logs and debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.claude/
+.vscode/
+.idea/
+
+# TypeScript build info
+*.tsbuildinfo
+app/tsconfig.tsbuildinfo
+app/next-env.d.ts
