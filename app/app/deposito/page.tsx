@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { usePuede } from "@/components/SesionContext";
 import { buscarProductos, devolverEnvio, obtenerPendientes, resumenDeSucursal } from "@/app/actions";
 import { DEPOSITO } from "@/lib/empresa.config";
 import { useDebounced } from "@/lib/hooks";
@@ -9,6 +10,8 @@ import { fechaCorta, nombreSucursal, pesos, type Producto, type Traslado } from 
 type Resumen = { prendas: number; modelos: number; valor: number };
 
 export default function Deposito() {
+  const puedeRemito = usePuede("remito");
+  const puedeCancelar = usePuede("cancelar_envio");
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
   const [lista, setLista] = useState<Producto[]>([]);
@@ -59,6 +62,13 @@ export default function Deposito() {
         <>
           <h2>En camino (enviado, todavía sin recibir)</h2>
           {msg && <p className="alerta" role="alert">{msg}</p>}
+          <div className="fila" style={{ gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            {[...new Set(enCamino.map((t) => `${t.desde}>${t.hasta}`))].map((par) => {
+              const [d, h] = par.split(">");
+              if (!puedeRemito) return null;
+              return <a key={par} className="boton-link" href={`/remito?desde=${d}&hasta=${h}`} target="_blank" rel="noreferrer">Remito PDF: {nombreSucursal(d)} a {nombreSucursal(h)}</a>;
+            })}
+          </div>
           <div className="tarjeta" style={{ overflowX: "auto", marginBottom: 16 }}>
             <table>
               <thead><tr><th>Fecha</th><th>Prenda</th><th>De → a</th><th className="der">Recibidas</th><th></th></tr></thead>
@@ -69,7 +79,7 @@ export default function Deposito() {
                     <td>{t.nombre} <span className="interno">· {t.sku}</span></td>
                     <td>{nombreSucursal(t.desde)} → {nombreSucursal(t.hasta)}</td>
                     <td className="der"><strong>{t.recibidas}</strong> de {t.cantidad}</td>
-                    <td className="der"><button className="chico" onClick={() => devolver(t)}>Cancelar envío</button></td>
+                    <td className="der">{puedeCancelar && <button className="chico" onClick={() => devolver(t)}>Cancelar envío</button>}</td>
                   </tr>
                 ))}
               </tbody>

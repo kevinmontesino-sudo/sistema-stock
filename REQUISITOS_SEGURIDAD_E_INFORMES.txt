@@ -1,0 +1,79 @@
+REQUISITOS DE SEGURIDAD E INFORMES: SISTEMA DE STOCK DE X MENOS MAS PRENDAS
+Para quien trabaje en el sistema (Claude u otra herramienta). Dueno: Kevin Montesino. Segundo administrador: Cesar.
+Fecha: 20/10/2026.
+
+
+CONTEXTO
+Sistema de stock y ventas para un deposito y 3 locales de ropa (Zelarrayan, White, San Lorenzo). Mas de 100 ventas por dia por local. Stack: Next.js 16 (App Router, server actions), TypeScript, Postgres propio en un VPS con Easypanel (base sistema_stock, usuario stock_app). Plan completo en PLAN_OPERATIVO.md. ESTADO (19/10/2026): el login, los roles, la doble verificacion, los permisos en cada accion, la auditoria y la proteccion de los registros contables YA ESTAN HECHOS (ver CONTEXTO_PARA_OTRAS_HERRAMIENTAS.txt, seccion 5). Siguen pendientes: usuario de base con permisos minimos (db/010), puerto 5432 cerrado, HTTPS, backups fuera del servidor, informes, promos y cierre diario.
+
+El sistema va a guardar la facturacion diaria de todos los locales. Es informacion comercial sensible: hay que protegerla.
+
+
+REGLAS PARA QUIEN TRABAJE EN ESTO
+- Una sola herramienta modifica el codigo a la vez. Si dos tocan lo mismo, se pisan.
+- No tocar el cobro, las devoluciones ni las notas de credito sin correr las pruebas de cuentas (subtotal + ajuste = total; lo cobrado = total; la nota cubre lo que pago el cliente).
+- Nunca poner claves, tokens ni datos reales en el codigo ni en git. Todo secreto va en variables de entorno.
+- No borrar datos reales. Antes de cualquier cambio destructivo en la base, sacar un respaldo (npm run respaldo).
+- Probar con prendas de prueba (prefijo ZZ) y borrarlas al terminar.
+
+
+SEGURIDAD: LO QUE HAY QUE CONSTRUIR (en este orden)
+
+1) LOGIN Y ROLES
+- Usuarios con email y contrasena propios (tabla usuarios ya existe, vacia).
+- Roles: administrador (Kevin y Cesar), encargado de local, cajero, deposito.
+- Permisos verificados EN EL SERVIDOR en cada server action y cada ruta (no alcanza con esconder botones; las acciones se pueden invocar por POST directo; hay un TODO(login) en app/actions.ts).
+- Contrasenas con hash fuerte (argon2 o bcrypt), nunca en texto plano.
+- Sesiones con cookie httpOnly, secure y sameSite; vencimiento por inactividad.
+- Bloqueo temporal y limite de intentos fallidos.
+- Verificacion en dos pasos para los administradores.
+- Un cajero solo opera en su sucursal (hoy la sucursal se elige en pantalla: pasar a que la defina el usuario).
+- Rutas que hoy son abiertas y deben quedar protegidas: /remito (PDF), /tickets (vista previa), todas las pantallas y todas las acciones.
+
+2) PANEL DE ADMINISTRACION (solo administradores)
+- Crear, activar y desactivar promos (3x2, 2x1, descuentos; acumulables o no; con fechas y alcance).
+- Informes (ver abajo), usuarios y permisos.
+
+3) DATOS
+- Base de datos cerrada a internet: cerrar el puerto 5432 y usar la red interna de Easypanel (host evolution_postgres:5432 desde la app).
+- Usuario de la base con permisos minimos para la app; el dueno de la base no se usa en la app.
+- Las ventas NO se editan ni se borran. Las correcciones se hacen con notas de credito. Bloquear update y delete sobre ventas, venta_items y venta_pagos (por permisos de la base o triggers).
+- Registro de auditoria (quien, cuando, que, valor anterior y nuevo) de: cambios de precio, ajustes de stock, bajas de prendas, notas de credito, usos de notas, cambios de promos, altas y cambios de usuarios, inicios de sesion fallidos.
+- Cierre diario por local: al terminar el dia se guarda un resumen sellado (ventas, medios de pago, notas) que no cambia despues.
+- Copias de seguridad automaticas todos los dias, guardadas FUERA del servidor, cifradas, con una prueba periodica de restauracion.
+
+4) APLICACION Y RED
+- HTTPS obligatorio, con redireccion desde http.
+- Cabeceras de seguridad (CSP, X-Frame-Options, HSTS, no-sniff) y proteccion contra CSRF en las acciones.
+- Limite de peticiones (rate limiting) en login y en acciones sensibles.
+- Validacion de todas las entradas en el servidor (ya existe en gran parte; mantenerla).
+- No guardar datos sensibles en los logs ni mostrar errores internos al usuario.
+- Actualizar dependencias y revisar avisos de seguridad (npm audit) antes de cada publicacion.
+- Datos personales de clientes (ventas por telefono): guardar solo lo necesario y cumplir la ley argentina de proteccion de datos personales (Ley 25.326).
+
+5) PUBLICACION
+- Despliegue desde GitHub (repositorio privado) en Easypanel, subdominio sistema-stock.xmenosmasprendas.com.
+- Variables de entorno cargadas en Easypanel, nunca en el repositorio.
+- Copias de seguridad de la base activadas antes de abrir al publico.
+- La impresion directa de etiquetas solo funciona en la PC conectada a la impresora: en produccion hace falta un programa de impresion local en la PC del deposito. Mientras tanto, esa PC puede correr su copia local contra la misma base.
+
+
+INFORMES (pantalla solo para administradores)
+Filtros: rango de fechas y sucursal (o todas).
+- Ventas por dia, semana y mes: cantidad de ventas e importe, por sucursal y consolidado.
+- Desglose por medio de pago (transferencia, efectivo, tarjeta, nota de credito).
+- Prendas mas vendidas de la semana y del mes (unidades e importe), y las que menos rotan.
+- Notas de credito emitidas y usadas; devoluciones; prendas falladas.
+- Stock por sucursal y valorizado a precio de lista.
+- Ingresos y envios pendientes de recibir por sucursal.
+- Exportar a CSV o Excel.
+Todo desde los datos que ya se guardan: tablas ventas, venta_items, venta_pagos, notas_credito, nota_credito_items, stock, movimientos, traslados, cargas.
+
+
+CRITERIO DE TERMINADO
+- Ninguna ruta ni accion responde sin una sesion valida con el rol correcto (probar con y sin sesion).
+- Un cajero no puede ver informes ni cambiar precios; un administrador si.
+- Las ventas no se pueden modificar ni borrar desde la aplicacion.
+- Existe el registro de auditoria y se puede consultar.
+- Existe un respaldo diario fuera del servidor y se probo restaurarlo.
+- La base no es accesible desde internet.

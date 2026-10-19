@@ -1,5 +1,5 @@
 export const empresa = {
-  nombre: "Mi empresa",
+  nombre: "X Menos Más Prendas",
   sucursales: [
     { id: "deposito", nombre: "Depósito" },
     { id: "zelarrayan", nombre: "Zelarrayan" },
@@ -22,6 +22,14 @@ export const empresa = {
   codigoEtiqueta: "code128" as "code128" | "qr",
   // Medida del rollo de etiquetas, en milímetros. Ajustar a la impresora y rollo reales.
   etiquetaMm: { ancho: 50, alto: 30 },
+  // Etiquetas: "directa" manda la etiqueta en el lenguaje de la impresora (TSPL) con QZ Tray; "ventana" usa la ventana de impresion del navegador.
+  impresionEtiquetas: "servidor" as "directa" | "ventana" | "servidor",
+  // Parte del nombre de la impresora de etiquetas tal como la ve el sistema (ej. "Xprinter XP-410B" o "Xprinter_XP_410B").
+  impresoraEtiquetas: "410",
+  // Ajustes TSPL (si las etiquetas salen del reves o la separacion no coincide, se cambian aca).
+  // Modo "servidor": el sistema manda un PDF 50x30 con `lp` a esta cola, sin ventana (cola = nombre en CUPS, papel = codigo del PPD).
+  servidor: { cola: "Xprinter_XP_410B", papel: "LB07", oscuridad: 11 },
+  tspl: { direccion: 1, separacionMm: 3 },
   // Ancho del papel del ticket (rollo continuo). 80 mm para la XP-365B; 58 mm para impresoras de ticket chicas.
   ticketMm: { ancho: 80 },
 };

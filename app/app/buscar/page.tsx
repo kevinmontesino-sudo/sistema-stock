@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { usePuede } from "@/components/SesionContext";
 import { ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto, ingresosProducto, obtenerMediosPago } from "@/app/actions";
 import { empresa } from "@/lib/empresa.config";
 import { useDebounced } from "@/lib/hooks";
@@ -8,6 +9,10 @@ import { fechaCorta, nombreSucursal, pesos, precioMedio, type MedioPago, type Pr
 type Panel = "editar" | "ajustar" | "ingresos" | null;
 
 export default function Buscar() {
+  // Solo comodidad de la pantalla: el servidor vuelve a verificar el permiso en cada accion.
+  const puedeEditar = usePuede("editar_producto");
+  const puedeAjustar = usePuede("ajustar_stock");
+  const puedeEliminar = usePuede("eliminar_producto");
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
   const [lista, setLista] = useState<Producto[]>([]);
@@ -142,9 +147,9 @@ export default function Buscar() {
                   ))}
                   <td className="der" style={{ whiteSpace: "nowrap" }}>
                     <button className="chico" onClick={() => verIngresos(p)}>Ingresos</button>{" "}
-                    <button className="chico" onClick={() => abrir(p, "editar")}>Editar</button>{" "}
-                    <button className="chico" onClick={() => abrir(p, "ajustar")}>Ajustar stock</button>{" "}
-                    <button className="chico" onClick={() => borrar(p)}>Eliminar</button>
+                    {puedeEditar && <button className="chico" onClick={() => abrir(p, "editar")}>Editar</button>}{" "}
+                    {puedeAjustar && <button className="chico" onClick={() => abrir(p, "ajustar")}>Ajustar stock</button>}{" "}
+                    {puedeEliminar && <button className="chico" onClick={() => borrar(p)}>Eliminar</button>}
                   </td>
                 </tr>
               ))}

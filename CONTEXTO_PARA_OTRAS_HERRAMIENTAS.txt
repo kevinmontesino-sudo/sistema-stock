@@ -1,0 +1,91 @@
+CONTEXTO DEL PROYECTO PARA OTRAS HERRAMIENTAS (Antigravity, Claude, etc.)
+Sistema de stock y ventas de X Menos Mas Prendas. Dueno: Kevin Montesino. Segundo administrador: Cesar.
+Actualizado: 19/10/2026. Documento maestro de decisiones: PLAN_OPERATIVO.md. Requisitos de seguridad e informes: REQUISITOS_SEGURIDAD_E_INFORMES.txt.
+
+Leer este archivo completo ANTES de tocar nada.
+
+
+1) QUE ES
+Un deposito y 3 locales de ropa (Zelarrayan, White, San Lorenzo). Mas de 100 ventas por dia por local. Se carga mercaderia en el deposito, se imprimen etiquetas con codigo de barras, se reparte a los locales (cada local confirma la recepcion), se vende escaneando, se cobra con 3 medios de pago, se imprime ticket, y se hacen devoluciones con nota de credito.
+
+Stack: Next.js 16 (App Router, Turbopack, React 19, server actions), TypeScript, Postgres 17 en un VPS (Easypanel), librerias: pg, jsbarcode, qrcode.react, pdf-lib. IMPORTANTE: esta version de Next tiene cambios (por ejemplo "middleware" se llama "proxy"). Leer la guia en app/node_modules/next/dist/docs/ antes de usar una API de Next.
+
+Ruta del proyecto: carpeta raiz con dos partes: app/ (la aplicacion) y db/ (scripts SQL numerados). Repositorio privado en GitHub: kevinmontesino-sudo/sistema-stock.
+
+
+2) COMO CORRERLO
+- Desde la carpeta raiz: npm --prefix app run dev  -> http://localhost:3000
+- Comprobaciones antes de entregar: (en app/) npx tsc --noEmit   y   npx eslint app lib components proxy.ts   (deben dar 0 errores; hay 3 avisos conocidos de <img>)
+- Variables de entorno en app/.env.local (NUNCA subir a git, NUNCA pegar su contenido en ningun chat): DATABASE_URL, APP_KEY (cifra los secretos de la doble verificacion; no cambiarla una vez en uso). Ejemplo en app/.env.example.
+- Base de datos: sistema_stock en el VPS. Usuario stock_app (dueno de las tablas). Se aplican migraciones directo con node + pg leyendo DATABASE_URL (ver db/*.sql, numeradas 001 a 010; la 010 es para correr con un superusuario y todavia NO esta aplicada).
+- Scripts utiles (en app/): npm run respaldo (JSON con todas las tablas, carpeta respaldos/ ignorada por git); npm run usuario -- <listar|crear|clave|desbloquear|reset-2fa>.
+
+
+3) ESTADO ACTUAL (lo que ya funciona)
+- Carga de mercaderia con SKU automatico (categoria de 3 letras + 6 digitos por modelo), categorias libres, etiqueta 50x30 mm, impresion directa sin ventana (PDF + comando lp, solo en Mac: la Mac del deposito).
+- Reparto manual y reparto automatico por porcentaje; recepcion con confirmacion en cada local (traslados "en camino").
+- Venta con lector de codigos, 3 medios de pago (transferencia = lista, efectivo = lista -20%, tarjeta = lista +20%), pago mixto, vuelto, caja del dia, ticket de 80 mm con codigo de barras y logo, "Cambios por 15 dias".
+- Devoluciones: nota de credito (vale por lo que el cliente pago, sin vencimiento), se acepta devolver hasta 15 dias despues de la compra, prendas falladas no vuelven al stock, la nota se usa como medio de pago (saldo queda en la misma nota).
+- Remito interno en PDF (A4). Vista previa de tickets en /tickets.
+- Preparado para varias cajas a la vez: bloqueo de stock por fila, orden fijo de bloqueos (sin deadlocks), clave de cobro para que un reintento no duplique la venta, control de que las cuentas cierren.
+- SEGURIDAD (hecha el 19/10): login con roles, sesiones en base de datos, doble verificacion TOTP (obligatoria para administradores en produccion), permisos verificados en el servidor en cada accion, sucursal fija por usuario, bloqueo por intentos fallidos, auditoria, panel de usuarios y visor de auditoria, cabeceras de seguridad, ventas y su historial inmutables en la base. Detalle en la seccion 5.
+- El sistema corre HOY solo en la Mac del deposito, contra la base del VPS. TODAVIA NO esta publicado.
+
+
+4) REGLAS DE NEGOCIO (no cambiar sin que Kevin lo decida)
+- Precio de lista = precio con transferencia. Efectivo = lista menos 20%. Tarjeta = lista mas 20%.
+- Pago mixto: primero lo que el cliente entrega en un medio (monto), el resto con el segundo medio. El efectivo que entrega cubre lista = monto / 0,8.
+- SKU por modelo (nombre + precio de lista). Mismo nombre y precio = mismo SKU (recarga de stock). La fecha "ing dd/mm" es solo interna.
+- Solo se vende lo que hay en el stock del local elegido. El stock que va "en camino" no se puede vender hasta que el local lo recibe.
+- La nota de credito vale lo que el cliente pago por esas prendas (con el ajuste del medio). Al usarla cubre monto / (1 + ajuste) del valor de lista. No vence. Se devuelve hasta 15 dias despues de la compra. Solo vale (no efectivo). Falladas no vuelven al stock.
+- Ticket interno, no fiscal (ARCA mas adelante). Etiquetas 50x30 mm, ticket 80 mm.
+- Promos (3x2 siempre sobre precio de lista, a veces acumulables; 2x1; descuentos por promo): PENDIENTES. Las crea y activa solo un administrador desde un panel. La venta ya tiene el campo descuento_promo.
+- Ventas por telefono en el Deposito: PENDIENTE de definir con Kevin (cobro, entrega, reserva de stock, estados del pedido).
+
+
+5) SEGURIDAD: COMO ESTA ARMADA (no romper)
+- app/proxy.ts: primera barrera, sin cookie solo se ve /login. Las server actions pasan (ellas mismas rechazan).
+- app/lib/seguridad/: clave.ts (scrypt), totp.ts (TOTP RFC 6238 + cifrado AES-256-GCM con APP_KEY), sesion.ts (sesiones en la tabla sesiones; cookie httpOnly; admins 8 h / 2 h de inactividad, resto 14 h / 6 h), permisos.ts (ROLES y matriz PERMISOS: es el UNICO lugar donde se ajustan los permisos), contexto.ts (usuario de la accion en curso, para auditoria y registros), auditoria.ts, limite.ts (5 fallos por usuario o 30 por IP en 15 min), guardia.ts (guardia de pantallas).
+- app/app/actions.ts: TODA accion pasa por seguro(permiso, fn) y usa suc(u, sucursal) para forzar la sucursal del usuario. Toda accion nueva DEBE hacer lo mismo. Nunca confiar en un dato que mande el navegador (sucursal, rol, usuario).
+- Cada seccion tiene un layout.tsx con requerirPermiso(...). /admin/* solo administradores.
+- Roles: admin (Kevin y Cesar), encargado (jefe de un local), vendedor (cajero de un local), deposito. Sucursal: vendedor y encargado quedan fijos en su local; deposito en el Deposito; admin elige.
+- Base de datos: triggers que impiden UPDATE, DELETE y TRUNCATE sobre ventas, venta_items, venta_pagos, nota_credito_items, movimientos, cargas y auditoria; en notas_credito solo se puede bajar el saldo. Solo se saltean con SET LOCAL app.mantenimiento = 'on' (uso manual y excepcional, por ejemplo limpiar datos de prueba). Los pagos de ventas, la auditoria y el historial nunca se modifican desde la app.
+- Auditoria: tabla auditoria (solo se agrega). Se registra: login, fallos, bloqueos, 2FA, cambios de clave, usuarios, cargas, envios, notas emitidas, cambios de precio, ajustes de stock, bajas, accesos denegados.
+- Contrasenas: minimo 10 caracteres y 3 tipos de caracteres. Las que crea un administrador son temporales (se muestran una sola vez y obligan a cambiarlas).
+- Cabeceras de seguridad y CSP en app/next.config.ts. npm audit: 0 vulnerabilidades.
+- Pendiente de seguridad: aplicar db/010_usuario_web.sql con un superusuario y usar el usuario stock_web en produccion; cerrar el puerto 5432 al publicar; HTTPS; copias de seguridad automaticas fuera del servidor con prueba de restauracion; CSP con nonce (mejora); allowedOrigins de las server actions con el dominio final.
+
+
+6) MAPA DE ARCHIVOS
+- app/app/actions.ts: acciones del servidor (venta, carga, movimientos, devolucion, etc.)
+- app/app/login/, app/app/cuenta/: login, codigo de doble verificacion, cambio de clave, alta de 2FA
+- app/app/admin/: usuarios y auditoria (acciones.ts con las acciones solo para admin)
+- app/app/{carga,deposito,mover,ingreso,venta,devolucion,buscar}/page.tsx: pantallas (cliente)
+- app/app/remito/route.ts: remito PDF (protegido); app/app/tickets/: vista previa de tickets
+- app/lib/repo.ts: logica de negocio y SQL con transacciones; app/lib/util.ts: tipos y calculos (calcularPagos, notas); app/lib/db.ts: pool; app/lib/empresa.config.ts: configuracion (sucursales, medios, tamanos, impresora)
+- app/lib/etiquetaPdf.ts, impresoraServidor.ts, remitoPdf.ts: PDFs e impresion. app/components/: Etiqueta, Ticket, TicketNota, Cabecera, Logo, etc.
+- db/00N_*.sql: migraciones. scripts: app/scripts/.
+
+
+7) REGLAS PARA TRABAJAR EN PARALELO (importante)
+- Los commits y el push los hace Antigravity (esta vinculado al GitHub de Kevin). Claude NO hace commits ni push.
+- Dos herramientas NO editan el mismo archivo a la vez. Cada una tiene su zona:
+  * CLAUDE (nucleo): app/app/actions.ts, app/lib/repo.ts, app/lib/util.ts, app/lib/seguridad/**, app/app/login, cuenta, admin/usuarios, admin/auditoria, pantallas de venta/carga/devolucion, base de datos (migraciones), promos y cierre diario.
+  * ANTIGRAVITY (informes y publicacion): app/app/admin/informes/** , app/lib/informes.ts, app/app/admin/informes-acciones.ts (informes de solo lectura: ver REQUISITOS_SEGURIDAD_E_INFORMES.txt); y todo lo de publicacion: Dockerfile, .dockerignore, guia de despliegue en Easypanel (docs/DEPLOY.txt), programa de impresion local para el Deposito.
+  * Si una herramienta necesita tocar un archivo de la otra zona, se lo pide a Kevin y espera.
+- Todo informe nuevo debe: ser solo lectura (SELECT), pasar por una accion que verifique el permiso admin (copiar el patron de app/app/admin/acciones.ts con la funcion admin()), estar bajo app/app/admin/ (el layout ya exige rol administrador) y NUNCA exponer datos sin sesion.
+- Antes de entregar cualquier cambio: tsc y eslint sin errores. Si se toca el cobro, las devoluciones o las notas: correr las pruebas de cuentas (probar transferencia, efectivo, tarjeta y pagos mixtos; subtotal + ajuste = total; lo cobrado = total).
+- Pruebas con datos propios con prefijo ZZ (SKU ZZZ00000N, emails zz-...@prueba.test) y borrarlos al terminar. Como las ventas y el historial son inmutables, la limpieza de pruebas se hace con SET LOCAL app.mantenimiento = 'on' dentro de una transaccion y SOLO sobre los datos ZZ. Antes de cualquier cambio destructivo en la base: npm run respaldo.
+- Para correr un script TypeScript suelto: node "$(npx --yes -p tsx which tsx)" archivo.ts (con node --env-file=.env.local si necesita la base). No agregar tsx como dependencia.
+- No pegar claves, tokens ni el contenido de .env.local en ningun lado. Kevin tiene su contrasena temporal en app/admin-inicial.local (ignorado por git): se borra despues del primer ingreso.
+- No tocar las otras bases del mismo Postgres (cheques_xmenos, system-ventas, sistema de ventas x menos, receptor, postgres).
+
+
+8) PENDIENTES, EN ORDEN
+1. Cierre diario por local, sellado e inalterable (Kevin dijo que le encanta la idea).
+2. Informes para Cesar (ver REQUISITOS_SEGURIDAD_E_INFORMES.txt): ventas por dia/semana/mes por sucursal, por medio de pago, prendas mas vendidas de la semana y del mes, notas, stock, exportar a CSV/Excel.
+3. Panel de promos (solo admin) y motor de promos en la venta (3x2, 2x1, descuentos; definir con Kevin como se activan y si se acumulan).
+4. Ventas por telefono en el Deposito (definir con Kevin).
+5. Publicar en el VPS (Easypanel, subdominio sistema-stock.xmenosmasprendas.com): Dockerfile, variables de entorno (DATABASE_URL del usuario stock_web con host interno, APP_KEY, NODE_ENV=production), HTTPS, cerrar el puerto 5432, backups automaticos, programa de impresion local en la PC del deposito (la impresion de etiquetas hoy solo funciona en la PC conectada a la impresora).
+6. Hardware: Epson TM-T20IV (tickets, 80 mm) x3, lectores x3, 1 PC para San Lorenzo (Kevin esta comprando).
+7. Detalles: nombre cortado en la etiqueta, Reimprimir etiquetas, reimprimir tickets y notas, devolucion sin ticket, QR (decidir uso).

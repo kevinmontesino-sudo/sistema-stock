@@ -1,16 +1,28 @@
 import Link from "next/link";
+import { Logo } from "@/components/Logo";
+import { requerirUsuario } from "@/lib/seguridad/guardia";
+import { puede, type Permiso } from "@/lib/seguridad/permisos";
 
-export default function Inicio() {
+const accesos: { href: string; texto: string; permiso: Permiso }[] = [
+  { href: "/carga", texto: "Carga (depósito)", permiso: "cargar" },
+  { href: "/deposito", texto: "Depósito: lo guardado", permiso: "ver_totales" },
+  { href: "/mover", texto: "Mover stock entre sucursales", permiso: "mover" },
+  { href: "/ingreso", texto: "Ingreso (local)", permiso: "recibir" },
+  { href: "/venta", texto: "Venta", permiso: "vender" },
+  { href: "/devolucion", texto: "Devolución", permiso: "devolver" },
+  { href: "/buscar", texto: "Buscar producto", permiso: "catalogo" },
+  { href: "/admin/usuarios", texto: "Usuarios", permiso: "admin" },
+  { href: "/admin/auditoria", texto: "Auditoría", permiso: "admin" },
+];
+
+export default async function Inicio() {
+  const u = await requerirUsuario();
   return (
     <>
+      <div style={{ margin: "8px 0 16px" }}><Logo alto={90} /></div>
       <h1>¿Qué querés hacer?</h1>
       <div className="home">
-        <Link href="/carga">Carga (depósito)</Link>
-        <Link href="/deposito">Depósito: lo guardado</Link>
-        <Link href="/mover">Mover stock entre sucursales</Link>
-        <Link href="/ingreso">Ingreso (local)</Link>
-        <Link href="/venta">Venta</Link>
-        <Link href="/buscar">Buscar producto</Link>
+        {accesos.filter((a) => puede(u.rol, a.permiso)).map((a) => <Link key={a.href} href={a.href}>{a.texto}</Link>)}
       </div>
     </>
   );

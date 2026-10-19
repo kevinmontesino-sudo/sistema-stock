@@ -367,3 +367,101 @@ La eleccion final la define la prueba con la impresora y el scanner reales (secc
 - **Configuracion por PC (a verificar con la impresora real):** instalar el driver; en las preferencias de la impresora poner papel de 80 mm continuo; dejarla como impresora predeterminada; abrir Chrome con el acceso directo que lleva `--kiosk-printing` para imprimir sin ventana de confirmacion.
 - **Imprimir al cobrar:** la Venta tiene la casilla "Imprimir el ticket automaticamente al cobrar (en esta PC)"; se guarda por PC y viene apagada.
 - **Pendiente:** probar con una impresora real el ancho, el corte y que el driver respete el alto automatico.
+
+## 27. Pendientes definidos el 6 de octubre (para retomar)
+
+**A. Nota de credito interna (devoluciones y cambios) — propuesta, falta que el negocio defina las reglas**
+- Desde Venta se busca la venta original (por numero de ticket) y se eligen las prendas que devuelve el cliente.
+- **La prenda vuelve al stock del local** (movimiento `devolucion`) o se da de baja si esta fallada (con motivo).
+- **Valor de la nota de credito: en valor de lista**, con el factor de lo que pago en esa venta (total / subtotal de lista). Asi un **cambio de talle por la misma prenda no tiene diferencia**, y si pide la plata de vuelta se le devuelve lo que realmente pago (ej. $80.000 si pago en efectivo una prenda de lista $100.000).
+- **Se cobra con la nota de credito como medio de pago** en una venta nueva: cubre valor de lista sin ajuste y el resto se paga con otro medio usando el cobro de dos medios que ya existe. Si sobra, queda saldo a favor.
+- **Caja:** una devolucion de dinero aparece como egreso por medio de pago. Emitir o usar una nota de credito no mueve plata.
+- **Ticket de la nota de credito** con numero y codigo de barras para escanearla en la caja. Es un documento **interno** (no fiscal); si mas adelante se factura con ARCA, las ventas facturadas necesitaran nota de credito electronica.
+- Definiciones pendientes: si es solo vale o tambien devolucion de plata; vigencia del vale; si vale en todos los locales; quien puede emitirla (necesita login y roles).
+
+**B. Precios en la etiqueta**
+- Hoy imprime Transferencia (lista) y Efectivo (lista menos 20%). A definir: si se agrega la tarjeta o solo la lista, y que pasa cuando cambia un precio con etiquetas ya pegadas.
+- Falta un boton **"Reimprimir etiquetas"** en Buscar (hoy solo se reimprime desde el lote de la Carga) y marcar los productos con precio cambiado para reetiquetar.
+
+**C. Codigo QR — a definir para que se usa:** (1) en la etiqueta, en lugar de o ademas del codigo de barras (cambio de una linea: `codigoEtiqueta`), (2) en el ticket o la nota de credito para identificarlos, o (3) QR de pago (Mercado Pago o alias) para cobrar con transferencia o tarjeta.
+
+## 28. Impresion de etiquetas: de la ventana del navegador a TSPL directo (7 de octubre)
+
+- **Prueba con la 410B real (Mac, driver TSC "TTP-244 Pro", papel personalizado 50x30):** imprimiendo desde la ventana de Chrome la etiqueta salio **girada 90 grados y cortada**, con una etiqueta en blanco entre medio, y el **codigo de barras borroso**. Causa: el driver recibe la pagina como horizontal y la gira; los 50 mm de ancho terminan a lo largo del rollo (que solo tiene 30 mm) y se pasan a la etiqueta siguiente; ademas el driver vuelve a rasterizar y las barras quedan irregulares.
+- **Correcciones previas que quedan:** en modo impresion se quito el margen de la pagina, y el salto de pagina va solo entre etiquetas (evita la hoja en blanco).
+- **Solucion: imprimir directo en TSPL** (la 410B lo soporta). El sistema arma el comando de cada etiqueta (`app/lib/tspl.ts`): tamano 50x30 mm, separacion de 3 mm, codigo de barras Code128 dibujado por la propia impresora, SKU y nombre (sin acentos: las fuentes internas son ASCII) y Transferencia / Efectivo. Lo envia a traves de **QZ Tray** (`app/lib/qz.ts`), un programa gratuito y de codigo abierto que se instala solo en la PC que imprime etiquetas (el deposito).
+- **Config (`app/lib/empresa.config.ts`):** `impresionEtiquetas` ("directa" o "ventana"), `impresoraEtiquetas` (parte del nombre de la impresora, "410") y `tspl` (`direccion` 1 o 0 si sale al reves, `separacionMm` 3). En la Carga hay un selector por PC para elegir el modo, un boton de etiqueta de prueba (con marco) y, si falla, un cuadro de error con "Reintentar" y el comando enviado.
+- **Pendiente de verificar con la impresora real:** orientacion (si sale al reves, `direccion` a 0), separacion entre etiquetas, margenes y legibilidad del codigo con el lector.
+
+## 29. Impresion de etiquetas: resultado final (7 de octubre)
+
+- **La seccion 28 (TSPL directo / QZ Tray) se descarto para la 410B real:** aun mandando el comando directo a la cola (`lp -o raw`), la impresora lo imprimio como texto, o sea que no esta interpretando TSPL (ni ZPL probado). El codigo de `tspl.ts` y `qz.ts` queda como opcion para otra impresora, pero **el modo por defecto es "ventana"** (`impresionEtiquetas: "ventana"`).
+- **Funciona con la ventana del navegador (Chrome) con esta configuracion:** impresora **Xprinter XP-410B** (la cola propia, no la "Z-NX/TSC"), **Tamano del papel 50 x 30 mm**, **Orientacion Horizontal**, escala 100%, margenes ninguno. Sale derecha, completa, una por etiqueta, con el codigo de barras nitido.
+- **Esos ajustes viven en la PC, no en la web.** Para que quede por defecto en cada PC con etiquetas (se hace una sola vez, 2 minutos):
+  1. Instalar el driver de la impresora y conectarla.
+  2. Abrir una impresion desde Chrome, elegir la XP-410B, tamano 50 x 30 mm, Horizontal.
+  3. En "Preajustes" guardar como preajuste por omision (o dejarlo como ultimo usado: Chrome recuerda la ultima configuracion por impresora).
+  4. Opcional: abrir Chrome con `--kiosk-printing` para imprimir sin ventana usando esa configuracion.
+- **Para un cliente o sucursal nueva:** repetir esa checklist. Si en el futuro se quiere cero configuracion por PC, la salida es un programa pequeno de impresion instalado en la PC (como QZ Tray) con una impresora que si interprete TSPL/ZPL, o una impresora de red con su propio idioma configurado.
+
+## 30. Remito en PDF y lector configurado (7 de octubre)
+
+- **Remito interno en PDF** (sin impresora): `/remito?desde=deposito&hasta=zelarrayan` genera un A4 con numero, fecha, de/para, detalle por prenda, total y lineas de firma ("Entrego" / "Recibio"). Por defecto incluye lo que sigue **en camino** de ese origen a ese destino; con `&dia=AAAA-MM-DD` incluye todo lo enviado ese dia. En el Deposito, en "En camino", hay un boton "Remito PDF" por cada destino. Es un documento interno, no fiscal (ARCA queda para mas adelante). El numero es fecha + destino (`20261007-SAN`), sin tabla propia por ahora.
+- **Etiquetas:** el modo por defecto manda un PDF 50x30 directo a la cola de la impresora con `lp` (ver `servidor` en `empresa.config.ts`), sin ventana. Solo funciona si el sistema corre en la misma PC que la impresora; para el VPS hace falta un programa de impresion en la PC del deposito.
+- **Lector Nictom LCB6200:** termina cada lectura con TAB de fabrica. Se configura escaneando "CR" en el bloque de terminadores del manual (ultima pagina); ademas Venta e Ingreso aceptan Tab y Enter como fin de lectura.
+
+## 31. Notas de credito (devoluciones y cambios) — implementado (7 de octubre)
+
+- **Ticket de venta con codigo de barras unico** (`V000123`, el numero de venta). Pantalla nueva **Devolucion** (menu): se escanea el ticket, el vendedor elige que prendas y cuantas devuelve, y se emite la **nota de credito** (`N000001`), que se imprime como ticket de 80 mm con monto, fecha de emision y su propio codigo de barras. **La nota NO vence**; lo que tiene limite es devolver: **hasta 15 dias despues de la compra** (`DIAS_DEVOLUCION`), pasado ese plazo el sistema rechaza la devolucion.
+- **Valor de la nota = lo que el cliente pago por esas prendas**, con el ajuste del medio con que pago (efectivo -20%, tarjeta +20%; en pagos mixtos, la proporcion total pagado / lista de esa venta). Asi nadie gana ni pierde por cambiar de medio. La nota guarda ese ajuste (`ajuste_pct`) y, al usarla, cubre `monto / (1 + ajuste)` del valor de lista: un cambio por prendas del mismo valor de lista no cuesta nada.
+- **Solo vale:** la devolucion se hace unicamente en nota de credito; devolver efectivo es un caso extremo que se resuelve fuera del sistema.
+- **Prendas falladas:** en cada renglon se indica cuantas unidades estan falladas; esas dan el mismo vale pero **no vuelven al stock**. Lo que no se marca como fallada vuelve al stock (por defecto).
+- **Stock:** las prendas devueltas (no falladas) vuelven al stock de la sucursal donde se hace la devolucion (movimiento tipo `devolucion`, enlazado a la venta). No se puede devolver mas de lo vendido (se descuentan devoluciones previas, por renglon).
+- **Uso:** en Venta se escanea la nota (`N...`) como si fuera un medio de pago: se descuenta del total y el resto se paga con otro medio (o con mas de uno). Si la compra vale menos que la nota, **queda saldo en la misma nota** hasta que venza. Una nota usada o vencida se rechaza. La caja de hoy muestra lo pagado con notas aparte, sin sumarlo a lo cobrado.
+- **Base:** `db/006_notas_credito.sql` (tablas `notas_credito`, `nota_credito_items`, columna `venta_pagos.nota_credito_id`, medio `nota_credito` inactivo para el historial). Aplicado.
+- **Pendiente / a definir:** quien puede emitir notas (login y roles) y reimprimir una nota ya emitida. Base: `db/008_nota_sin_vencimiento.sql` (vence_en pasa a ser opcional; `nota_credito_items.falladas`).
+
+## 32. Escala: varias cajas a la vez (7 de octubre)
+
+- **Volumen:** mas de 100 ventas por dia por local, 3 locales y el deposito con el mismo sistema. Para Postgres es poco; lo que importa es la concurrencia y no perder ni duplicar ventas.
+- **Stock sin vender de mas:** cada venta bloquea la fila de stock de cada prenda (`for update`). Probado con 20 ventas simultaneas de la ultima unidad: salieron exactamente las que habia.
+- **Sin trabas entre ventas:** las prendas se bloquean siempre en orden de SKU (y las devoluciones en orden de renglon), asi dos ventas cruzadas no se traban (deadlock).
+- **Cobro sin duplicados:** cada intento de cobro lleva una clave (`ventas.clave`, unica); si la respuesta se corta y el cajero reintenta, el servidor devuelve la venta ya registrada. La clave incluye el contenido del carrito: si cambia, es otra venta. Probado con 10 reintentos simultaneos: una sola venta.
+- **Base de datos:** pool de 10 conexiones con tiempos maximos (conexion 8 s, consulta 15 s, bloqueo 8 s) para que una caja no quede colgada; indice por local y fecha (`db/007_escala.sql`); la caja de hoy usa un rango de fechas que aprovecha el indice.
+- **Pendiente para produccion:** publicar la app en el mismo servidor que la base (hoy cada venta hace unas 15 consultas por internet desde la Mac y tarda ~0,6 s; dentro del servidor es mucho menos); programa de impresion local en la PC de cada local; que pasa si se corta internet en un local (hoy no se puede vender sin conexion: definir si hace falta un modo de contingencia); login con roles y auditoria; backups automaticos y monitoreo; la base compartida con otros sistemas (cheques, ventas) comparte recursos: vigilarla o separarla.
+- **Decision (7 de octubre):** los locales casi nunca pierden internet, asi que **no se arma modo contingencia por ahora**. Queda como opcion futura (ventas guardadas en la PC y subidas despues) si el problema aparece; mientras tanto, conexion 4G de respaldo opcional en cada local.
+
+## 33. Estado al cierre del 7 de octubre y lo que sigue
+
+**Estado:** el sistema corre en modo local (en la Mac, contra la base del VPS), sin login por ahora. La base se limpio para empezar la carga real (respaldo previo en `respaldos/`): 0 prendas, 0 ventas; se conservan sucursales, medios de pago y categorias; los SKU arrancan en 000001. Etiquetas: PDF 50x30 directo a la XP-410B (sin dialogo), lector Nictom con terminador CR, remito en PDF, notas de credito, devoluciones.
+
+**Para arrancar manana:** el sistema tiene que estar corriendo (`npm --prefix app run dev`, abrir `localhost:3000`). Mientras no haya impresora de tickets, desmarcar "Imprimir el ticket automaticamente al cobrar" en Venta (si no, abre la ventana de impresion con la impresora de etiquetas). En Carga, el modo de etiquetas debe decir "Directa, sin ventana (recomendada)".
+
+**Pendientes, en orden:**
+1. **Promos en la venta (importante):** que se calculen solas al cobrar. 3x2 (la mas barata no se paga, siempre sobre precio de lista), 2x1, y descuentos por promo (porcentaje o monto) que a veces se acumulan. Hay que definir: como se activan (por categoria, por prenda, por fechas, o las elige el cajero), si se pueden acumular, y como se muestran en el ticket. La base ya tiene `descuento_promo` en la venta, y la nota de credito ya lo tiene en cuenta al calcular lo que se pago.
+2. **Login con roles** (cajero, encargado, deposito, dueño): obligatorio antes de publicar; define quien emite notas y reimprime.
+3. **Balance por local** (despues del login): ventas por dia y por medio de pago, notas de credito emitidas y usadas, devoluciones, stock valorizado, movimientos y diferencias, por local y consolidado.
+4. **Publicar en el VPS** en el mismo servidor que la base (cerrar el puerto 5432, backups automaticos) y programa de impresion local en cada PC con impresora.
+5. Impresoras de tickets de 80 mm para los locales; "Reimprimir etiquetas" en Buscar; nombre de la etiqueta cortado; reimprimir notas y tickets; QR (decidir para que).
+6. Contingencia sin internet: no por ahora (los locales casi no pierden conexion).
+
+## 34. Logo (13 de octubre)
+
+- Archivos: `app/public/logo.png` (colores, para pantalla), `app/public/logo-negro.png` (todo en negro, para tickets, notas y remito: las termicas imprimen solo en negro) y `app/app/icon.png` (pestana del navegador).
+- Donde esta: menu y pantalla de inicio (componente `Logo`: version de colores en modo oscuro, en negro en modo claro), ticket de venta, nota de credito y remito PDF. No va en las etiquetas de 50x30 (no hay lugar). Vista previa en `/tickets`.
+
+## 35. Panel de administracion, promos y ventas por telefono (13 de octubre)
+
+- **Panel de administracion (solo admin: Kevin y Cesar):** ahi se crean, activan y desactivan las promos (3x2, 2x1, descuentos por promo, acumulables o no, con fechas). Los cajeros no las tocan: solo ven que se aplican solas al escanear. Esto **adelanta el login con roles**: hace falta, como minimo, un rol admin con acceso al panel y roles de cajero/deposito sin acceso. Despues de eso: balance por local, usuarios y permisos.
+- **Ventas por telefono en el Deposito (dato clave, definir antes de programar):** el Deposito tambien vende, ademas de los locales. Hoy el Deposito ya puede vender (Venta con sucursal Deposito), pero una venta telefonica tiene necesidades que una de mostrador no: datos del cliente, envio o retiro, cobro anticipado (casi seguro por transferencia), estado del pedido (reservado, preparado, despachado, entregado) y que el stock quede reservado desde que se toma el pedido. A definir con Kevin: cuantos pedidos telefonicos por dia, quien los toma, si se envian por correo/moto/retira el cliente, si se arman a mano y como se confirma el pago.
+
+## 36. Seguridad: login, roles y proteccion de datos (19 de octubre)
+
+- **Hecho:** login con usuario y contrasena (scrypt), roles (admin, encargado, vendedor, deposito), sesiones en la base (cookie httpOnly; administradores 8 h con 2 h de inactividad, el resto 14 h con 6 h), **doble verificacion TOTP** (obligatoria para administradores en produccion, opcional en desarrollo), bloqueo tras 5 intentos fallidos, permisos verificados **en el servidor en cada accion** (nunca solo escondiendo botones), sucursal fija por usuario, panel de usuarios (contrasena temporal que se muestra una sola vez), visor de auditoria, cabeceras de seguridad y CSP, proxy que exige sesion.
+- **Roles y permisos** (editables en `app/lib/seguridad/permisos.ts`): el vendedor vende, recibe y busca en su local; el encargado ademas emite notas de credito, deshace recepciones, mueve stock y ve totales de su local; deposito carga, mueve, imprime etiquetas, cancela envios y vende por telefono; solo el administrador edita precios, ajusta stock, da de baja prendas y entra a usuarios/auditoria.
+- **Datos protegidos en la base** (`db/009_seguridad.sql`): ventas, items, pagos, movimientos, cargas, notas (items) y auditoria **no se pueden editar ni borrar** (las notas de credito solo pueden bajar el saldo). Las correcciones se hacen con notas de credito. Solo se saltea con el modo de mantenimiento, de uso manual.
+- **Auditoria:** cada login, fallo, cambio de clave, alta de usuario, carga, envio, nota emitida, cambio de precio, ajuste de stock, baja y acceso denegado queda registrado con quien, cuando y el valor anterior y nuevo. Ventas, notas y movimientos guardan ademas el usuario que los hizo.
+- **Probado** (con usuarios y datos de prueba, ya borrados): login correcto e incorrecto, un vendedor no puede operar en otro local ni editar precios ni borrar prendas ni entrar a pantallas de otros roles (aunque se salte la pantalla y llame directo a las acciones), contrasena temporal y cambio obligatorio, claves debiles rechazadas, doble verificacion (codigo ya usado y fuera de ventana rechazados), bloqueo por intentos, vencimiento por inactividad, administrador que no puede dejarse sin acceso, triggers de inmutabilidad, venta + nota + uso con registro de quien las hizo. Vectores oficiales del estandar TOTP y pruebas de contrasenas y permisos pasan.
+- **Pendiente:** `db/010_usuario_web.sql` (usuario de base con permisos minimos, para correr con un superusuario); cerrar el puerto 5432; HTTPS; backups fuera del servidor con prueba de restauracion; CSP con nonce; `allowedOrigins` de las server actions con el dominio final; politica de contrasenas y rotacion definida por Kevin.
+- **Antes de entrar por primera vez:** la contrasena temporal de Kevin esta en `app/admin-inicial.local` (ignorado por git); al ingresar se pide cambiarla. Crear a Cesar desde Usuarios (o con `npm run usuario -- crear`).
+

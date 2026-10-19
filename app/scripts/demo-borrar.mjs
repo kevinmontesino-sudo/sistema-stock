@@ -14,6 +14,9 @@ const c = new pg.Client({ connectionString: url });
 await c.connect();
 try {
   await c.query("begin");
+  // Las ventas y su historial estan protegidos en la base (no se editan ni se borran). Este script es una excepcion manual
+  // y solo borra los productos ficticios de demo-skus.json: por eso activa el modo de mantenimiento en ESTA transaccion.
+  await c.query("set local app.mantenimiento = 'on'");
   await c.query("delete from traslados where sku = any($1)", [skus]);
   const ventas = await c.query("select distinct venta_id from venta_items where sku = any($1)", [skus]);
   const ids = ventas.rows.map((r) => r.venta_id);

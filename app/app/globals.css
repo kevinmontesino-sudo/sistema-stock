@@ -44,7 +44,7 @@ a { color: var(--acento); }
 .sucursal { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--suave); }
 
 input, select, button { font: inherit; color: inherit; }
-input[type="text"], input[type="number"], input[type="search"], select {
+input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="password"], select {
   height: 44px; padding: 0 12px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta);
 }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
@@ -86,8 +86,14 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 @media print {
   body { background: #fff; }
   .no-print, main > *:not(.solo-impresion):not(.solo-ticket), .cabecera { display: none !important; }
+  html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+  main { margin: 0 !important; padding: 0 !important; max-width: none !important; }
   .solo-impresion { display: block; }
-  .solo-impresion .etiqueta { border: none; page-break-after: always; break-after: page; }
+  /* Una etiqueta por hoja: la hoja (.giro) un pelo mas baja y salto de pagina solo ENTRE etiquetas (si no, sale una hoja en blanco). */
+  .solo-impresion .giro { position: relative; overflow: hidden; width: var(--etq-w); height: calc(var(--etq-h) - 0.6mm); page-break-after: always; break-after: page; }
+  .solo-impresion .giro:last-child { page-break-after: auto; break-after: auto; }
+  .solo-impresion .etiqueta { border: none; transform-origin: 0 0; position: absolute; top: 0; left: 0; }
+  .solo-impresion .etiqueta.con-marco { border: 0.3mm solid #000; }
 }
 
 .sugerencias { display: flex; flex-direction: column; border: 1px solid var(--borde); border-radius: 8px; margin-top: 4px; overflow: hidden; background: var(--tarjeta); }
@@ -103,6 +109,7 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 .alerta.mala { color: var(--error); border-color: var(--error); background: transparent; }
 
 .ticket { width: var(--ticket-w, 80mm); padding: 4mm; background: #fff; color: #000; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.35; }
+.ticket .ticket-logo { display: block; width: 56mm; max-width: 100%; height: auto; margin: 0 auto 2mm; }
 .ticket h3 { margin: 0 0 2mm; font-size: 15px; text-align: center; }
 .ticket .centro { text-align: center; }
 .ticket .linea { display: flex; justify-content: space-between; gap: 3mm; }
@@ -116,12 +123,12 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 }
 
 .etiqueta.con-barras { flex-direction: column; align-items: stretch; gap: 0.8mm; }
-.barras { display: block; width: 100%; height: 9mm; flex: none; }
+.barras { display: block; height: 10mm; flex: none; align-self: flex-start; }
 .etiqueta-texto { min-width: 0; flex: 1; }
 .etiqueta-cab { display: flex; align-items: baseline; gap: 2mm; white-space: nowrap; overflow: hidden; }
 .etiqueta-sku { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 11px; }
 .etiqueta-nombre { font-size: 9px; overflow: hidden; text-overflow: ellipsis; }
-.etiqueta-precio { font-size: 11px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.etiqueta-precio { font-size: 12px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 .boton-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta); color: var(--texto); text-decoration: none; }
 .insignia { display: inline-block; margin-left: 6px; min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--error); color: #fff; font-size: 12px; font-weight: 700; text-align: center; }
 .medios { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }

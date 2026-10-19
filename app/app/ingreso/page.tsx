@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deshacerIngresoLocal, devolverEnvio, ingresarProducto, obtenerPendientes, recibirTodoElTraslado, totalSucursal,
 } from "@/app/actions";
-import { useSucursal } from "@/lib/hooks";
+import { useSucursal, useEscaner } from "@/lib/hooks";
 import { fechaCorta, nombreSucursal, type Producto, type Traslado } from "@/lib/util";
 
 type Mensaje = { texto: string; mala: boolean };
@@ -16,7 +16,6 @@ export default function IngresoLocal() {
   const [mensaje, setMensaje] = useState<Mensaje | null>(null);
   const [enLocal, setEnLocal] = useState<number | null>(null);
   const [version, setVersion] = useState(0);
-  const buffer = useRef({ texto: "", t: 0 });
   const sucursalRef = useRef(sucursal);
   const refrescar = () => setVersion((v) => v + 1);
 
@@ -40,23 +39,7 @@ export default function IngresoLocal() {
     setVersion((v) => v + 1);
   }, []);
 
-  useEffect(() => {
-    function tecla(e: KeyboardEvent) {
-      if ((e.target as HTMLElement).tagName === "INPUT") return;
-      const b = buffer.current;
-      const ahora = Date.now();
-      if (ahora - b.t > 100) b.texto = "";
-      b.t = ahora;
-      if (e.key === "Enter") {
-        if (b.texto.length >= 3) escanear(b.texto);
-        b.texto = "";
-      } else if (e.key.length === 1) {
-        b.texto += e.key;
-      }
-    }
-    window.addEventListener("keydown", tecla);
-    return () => window.removeEventListener("keydown", tecla);
-  }, [escanear]);
+  useEscaner(escanear);
 
   async function deshacer() {
     const u = lista[0];

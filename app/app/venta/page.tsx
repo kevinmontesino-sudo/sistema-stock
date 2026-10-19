@@ -1,18 +1,20 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerProducto } from "@/app/actions";
+import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto } from "@/app/actions";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { empresa } from "@/lib/empresa.config";
 import { imprimir } from "@/lib/imprimir";
-import { useAutoTicket, useDebounced, useSucursal } from "@/lib/hooks";
+import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
-  calcularPagos, fechaCorta, nombreSucursal, pesos, precioMedio,
-  type MedioPago, type PagoEntrada, type Producto,
+  calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, fechaCorta, montoNotaAplicable, nombreSucursal, pesos, precioMedio,
+  type MedioPago, type NotaCredito, type PagoEntrada, type Producto,
 } from "@/lib/util";
 
 type Linea = { producto: Producto; cant: number };
 type Caja = { id: string; nombre: string; ventas: number; total: number };
 
+// Hash corto del contenido de la venta: la misma clave solo vale para el mismo carrito y los mismos pagos.
+const hashTexto = (t: string) => { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36); };
 const ES_SKU = /^[a-z]{3}\d{6}$/i;
 const SIN_LINEAS: Linea[] = [];
 
@@ -37,9 +39,12 @@ export default function VentaPage() {
   );
   const [manual, setManual] = useState("");
   const [aviso, setAviso] = useState("");
+  const [nota, setNota] = useState<NotaCredito | null>(null);
+  const [saldoNota, setSaldoNota] = useState<{ codigo: string; saldo: number } | null>(null);
   const [ultima, setUltima] = useState<DatosTicket | null>(null);
   const [cobrando, setCobrando] = useState(false);
   const [aImprimir, setAImprimir] = useState(false);
+  const [verTicket, setVerTicket] = useState(false);
   const [medios, setMedios] = useState<MedioPago[]>([]);
   const [medioSel, setMedioSel] = useState<string | null>(null);
   const [mixto, setMixto] = useState(false);
@@ -52,8 +57,9 @@ export default function VentaPage() {
   const [version, setVersion] = useState(0);
   const [sugeridas, setSugeridas] = useState<Producto[]>([]);
   const [sel, setSel] = useState(-1);
-  const buffer = useRef({ texto: "", t: 0 });
   const lineasRef = useRef<Linea[]>([]);
+  // Identifica este intento de cobro: si hay que reintentarlo tras un corte, el servidor no duplica la venta.
+  const claveCobro = useRef(crypto.randomUUID());
 
   useEffect(() => { lineasRef.current = lineas; }, [lineas]);
 
@@ -87,6 +93,17 @@ export default function VentaPage() {
   const agregar = useCallback(async (codigo: string) => {
     const texto = codigo.trim();
     if (!texto) return;
+    if (ES_CODIGO_VENTA.test(texto)) return setAviso("Ese es el ticket de una venta. Para devolver prendas usá «Devolución».");
+    if (ES_CODIGO_NOTA.test(texto)) {
+      const n = await obtenerNota(texto);
+      if (!n.ok) return setAviso(n.motivo);
+      if (n.nota.estado === "usada") return setAviso(`La nota ${n.nota.codigo} ya fue usada`);
+      setAviso("");
+      setUltima(null);
+      setSaldoNota(null);
+      setNota(n.nota);
+      return;
+    }
     const r = await obtenerProducto(texto);
     if (!r.ok) return setAviso(r.motivo);
     agregarProducto(r.producto);
@@ -130,33 +147,25 @@ export default function VentaPage() {
     }
   }
 
-  useEffect(() => {
-    function tecla(e: KeyboardEvent) {
-      if ((e.target as HTMLElement).tagName === "INPUT") return;
-      const b = buffer.current;
-      const ahora = Date.now();
-      if (ahora - b.t > 100) b.texto = "";
-      b.t = ahora;
-      if (e.key === "Enter") {
-        if (b.texto.length >= 3) agregar(b.texto);
-        b.texto = "";
-      } else if (e.key.length === 1) {
-        b.texto += e.key;
-      }
-    }
-    window.addEventListener("keydown", tecla);
-    return () => window.removeEventListener("keydown", tecla);
-  }, [agregar]);
+  useEscaner(agregar);
 
   const subtotal = lineas.reduce((s, f) => s + f.producto.precio * f.cant, 0);
   const cantidadTotal = lineas.reduce((s, f) => s + f.cant, 0);
 
   // Pagos: un solo medio (paga todo) o dos (el primero entrega un monto y el segundo paga lo que falta).
   const entrega1Num = parseInt(entrega1) || 0;
-  const pagos: PagoEntrada[] = mixto
+  // Nota de credito escaneada: entra como un primer pago (cubre lo que alcance) y el resto se paga con un medio normal.
+  const notaMonto = nota && subtotal > 0 ? montoNotaAplicable(subtotal, nota.saldo, nota.ajustePct) : 0;
+  const notaCubre = nota && notaMonto > 0 ? Math.round(notaMonto / (1 + nota.ajustePct / 100)) : 0;
+  const restoLista = Math.max(0, subtotal - notaCubre);
+  const medioNota: MedioPago | null = nota && notaMonto > 0 ? { id: `nota:${nota.codigo}`, nombre: `Nota de crédito ${nota.codigo}`, ajustePct: nota.ajustePct } : null;
+  const pagosBase: PagoEntrada[] = mixto
     ? entrega1Num > 0 ? [{ medioId: pago1, monto: entrega1Num }, { medioId: pago2, monto: null }] : []
     : medioSel ? [{ medioId: medioSel, monto: null }] : [];
-  const calc = pagos.length ? calcularPagos(subtotal, medios, pagos) : null;
+  const pagos: PagoEntrada[] = !medioNota ? pagosBase
+    : restoLista === 0 ? [{ medioId: medioNota.id, monto: notaMonto }, { medioId: "transferencia", monto: null }]
+    : pagosBase.length ? [{ medioId: medioNota.id, monto: notaMonto }, ...pagosBase] : [];
+  const calc = pagos.length ? calcularPagos(subtotal, medioNota ? [...medios, medioNota] : medios, pagos) : null;
   const otroDe = (id: string) => (id === "efectivo" ? "transferencia" : id === "transferencia" ? "efectivo" : "transferencia");
   function elegirPago1(id: string) {
     setPago1(id);
@@ -176,9 +185,12 @@ export default function VentaPage() {
     if (cobrando || !calc || !calc.ok) return;
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
-    const r = await cobrarVenta(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant })), pagos);
+    const r = await cobrarVenta(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, lineas.map((l) => [l.producto.sku, l.cant]), pagos]))}`);
     setCobrando(false);
     if (!r.ok) return setAviso(r.motivo);
+    claveCobro.current = crypto.randomUUID();
+    if (nota && notaMonto > 0 && nota.saldo - notaMonto > 0) setSaldoNota({ codigo: nota.codigo, saldo: nota.saldo - notaMonto });
+    setNota(null);
     setUltima({ ...r.venta, sucursal, recibido: pagoEfectivo && recibidoNum >= pagoEfectivo.monto ? recibidoNum : undefined });
     if (autoTicket) setAImprimir(true);
     setAviso("");
@@ -199,7 +211,10 @@ export default function VentaPage() {
     return () => clearTimeout(t);
   }, [aImprimir]);
 
-  const totalCaja = caja.filas.reduce((s, c) => s + c.total, 0);
+  // Las notas de credito no son plata que entra a la caja: se muestran aparte y no suman al total cobrado.
+  const filasCaja = caja.filas.filter((c) => c.id !== "nota_credito");
+  const notasCaja = caja.filas.find((c) => c.id === "nota_credito");
+  const totalCaja = filasCaja.reduce((s, c) => s + c.total, 0);
   const textoCobrar = !lineas.length ? "Cobrar"
     : !calc ? (mixto ? "Escribí cuánto entrega el cliente" : "Elegí cómo paga")
     : !calc.ok ? "Completá el pago"
@@ -257,14 +272,32 @@ export default function VentaPage() {
           <span style={{ fontSize: 18, fontWeight: 600 }}>{pesos(subtotal)}</span>
         </div>
 
-        {lineas.length > 0 && !mixto && (
+        {nota && (
+          <div className="vuelto" style={{ marginTop: 12 }}>
+            <div className="fila" style={{ justifyContent: "space-between" }}>
+              <span>Nota de crédito <strong>{nota.codigo}</strong> · vale {pesos(nota.saldo)}</span>
+              <button className="chico" onClick={() => setNota(null)}>Quitar nota</button>
+            </div>
+            {lineas.length === 0 ? (
+              <p className="aviso" style={{ margin: "6px 0 0" }}>Escaneá las prendas que se lleva el cliente: la nota se descuenta del total.</p>
+            ) : (
+              <p style={{ margin: "6px 0 0" }}>
+                Se descuenta <strong>{pesos(notaMonto)}</strong>
+                {restoLista === 0 ? ": la nota cubre toda la compra." : <> (cubre {pesos(notaCubre)} de lista). Falta pagar {pesos(restoLista)} a precio de lista.</>}
+                {notaMonto < nota.saldo && <> Queda un saldo de {pesos(nota.saldo - notaMonto)} en la nota.</>}
+              </p>
+            )}
+          </div>
+        )}
+
+        {lineas.length > 0 && !mixto && restoLista > 0 && (
           <>
             <p className="rotulo" style={{ margin: "16px 0 8px" }}>¿Cómo paga?</p>
             <div className="medios">
               {medios.map((m) => (
                 <button key={m.id} className={`medio ${m.id === medioSel ? "elegido" : ""}`} onClick={() => { setMedioSel(m.id); setRecibido(""); }} aria-pressed={m.id === medioSel}>
                   <span className="medio-nombre">{m.nombre}</span>
-                  <span className="medio-monto">{pesos(precioMedio(subtotal, m.ajustePct))}</span>
+                  <span className="medio-monto">{pesos(precioMedio(restoLista, m.ajustePct))}</span>
                   <span className="medio-pct">{etiquetaPct(m.ajustePct)}</span>
                 </button>
               ))}
@@ -381,8 +414,13 @@ export default function VentaPage() {
               </p>
             ) : null;
           })()}
+          {saldoNota && <p className="alerta">A la nota {saldoNota.codigo} le quedan {pesos(saldoNota.saldo)}: el cliente puede usarla de nuevo cuando quiera.</p>}
           <p className="aviso">Ticket interno · No válido como factura.</p>
-          <button style={{ marginTop: 8 }} onClick={() => setAImprimir(true)}>Imprimir ticket</button>
+          <div className="fila" style={{ gap: 8, marginTop: 8 }}>
+            <button onClick={() => setAImprimir(true)}>Imprimir ticket</button>
+            <button onClick={() => setVerTicket((v) => !v)}>{verTicket ? "Ocultar ticket" : "Ver ticket en pantalla"}</button>
+          </div>
+          {verTicket && <div style={{ marginTop: 12, boxShadow: "0 0 0 1px var(--borde)", width: "fit-content" }}><Ticket venta={ultima} /></div>}
         </div>
       )}
       {ultima && (
@@ -399,10 +437,11 @@ export default function VentaPage() {
           <table>
             <thead><tr><th>Medio de pago</th><th className="der">Ventas</th><th className="der">Cobrado</th></tr></thead>
             <tbody>
-              {caja.filas.map((c) => (
+              {filasCaja.map((c) => (
                 <tr key={c.id}><td>{c.nombre}</td><td className="der">{c.ventas}</td><td className="der">{pesos(c.total)}</td></tr>
               ))}
               <tr><td><strong>Total cobrado</strong></td><td className="der"><strong>{caja.ventas} ventas</strong></td><td className="der"><strong>{pesos(totalCaja)}</strong></td></tr>
+              {notasCaja && <tr><td className="aviso">Pagado con notas de crédito (no entra a la caja)</td><td className="der aviso">{notasCaja.ventas}</td><td className="der aviso">{pesos(notasCaja.total)}</td></tr>}
             </tbody>
           </table>
         )}

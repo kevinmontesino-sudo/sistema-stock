@@ -1,11 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { cargarProducto, obtenerMediosPago, obtenerTipos, sugerirProductos, vistaPreviaCarga } from "@/app/actions";
+import { cargarProducto, imprimirEtiquetasServidor, obtenerMediosPago, obtenerTipos, sugerirProductos, vistaPreviaCarga } from "@/app/actions";
 import { Etiqueta, type DatosEtiqueta, type PrecioEtiqueta } from "@/components/Etiqueta";
 import { DEPOSITO, empresa, LOCALES } from "@/lib/empresa.config";
 import { redimensionar } from "@/lib/foto";
 import { imprimir } from "@/lib/imprimir";
-import { useDebounced } from "@/lib/hooks";
+import { useDebounced, useModoEtiquetas, type ModoEtiquetas } from "@/lib/hooks";
+import { imprimirDirecto } from "@/lib/qz";
+import { trabajosTspl } from "@/lib/tspl";
 import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo } from "@/lib/util";
 
 type FilaLote = { sku: string; nombre: string; precio: number; precios: PrecioEtiqueta[]; ultimoIngreso: string; n: number; reparto: Reparto };
@@ -40,6 +42,9 @@ export default function Carga() {
   const [sel, setSel] = useState(-1);
   const [verSug, setVerSug] = useState(true);
   const [vista, setVista] = useState<Vista | null>(null);
+  const [modoEtiq, setModoEtiq] = useModoEtiquetas(empresa.impresionEtiquetas);
+  const [falloImpresion, setFalloImpresion] = useState<{ mensaje: string; cola: DatosEtiqueta[]; tspl: string } | null>(null);
+  const [okImpresion, setOkImpresion] = useState("");
   const nombreRef = useRef<HTMLInputElement>(null);
   const precioRef = useRef<HTMLInputElement>(null);
 
@@ -59,12 +64,38 @@ export default function Carga() {
 
   useEffect(() => {
     if (aImprimir.length === 0) return;
-    const t = setTimeout(() => {
-      imprimir(`${empresa.etiquetaMm.ancho}mm ${empresa.etiquetaMm.alto}mm`);
+    const cola = aImprimir;
+    const t = setTimeout(async () => {
+      if (modoEtiq === "ventana") {
+        imprimir(`${empresa.etiquetaMm.ancho}mm ${empresa.etiquetaMm.alto}mm`);
+        setAImprimir([]);
+        return;
+      }
+      if (modoEtiq === "servidor") {
+        setAImprimir([]);
+        const r = await imprimirEtiquetasServidor(cola);
+        if (r.ok) {
+          setFalloImpresion(null);
+          setOkImpresion(`${r.enviadas} etiqueta${r.enviadas === 1 ? "" : "s"} enviada${r.enviadas === 1 ? "" : "s"} a la impresora`);
+        } else {
+          setOkImpresion("");
+          setFalloImpresion({ mensaje: r.motivo, cola, tspl: "" });
+        }
+        return;
+      }
       setAImprimir([]);
+      const trabajos = trabajosTspl(cola);
+      try {
+        const impresora = await imprimirDirecto(trabajos);
+        setFalloImpresion(null);
+        setOkImpresion(`${cola.length} etiqueta${cola.length === 1 ? "" : "s"} enviada${cola.length === 1 ? "" : "s"} a «${impresora}»`);
+      } catch (e) {
+        setOkImpresion("");
+        setFalloImpresion({ mensaje: e instanceof Error ? e.message : "No se pudo imprimir.", cola, tspl: trabajos.join("\n---\n") });
+      }
     }, 400);
     return () => clearTimeout(t);
-  }, [aImprimir]);
+  }, [aImprimir, modoEtiq]);
 
   const consulta = verSug && dNombre.trim().length >= 2 ? dNombre : "";
   useEffect(() => {
@@ -266,6 +297,22 @@ export default function Carga() {
           <button className="principal" style={{ width: "100%" }} onClick={guardar} disabled={guardando}>
             {guardando ? "Guardando…" : "Guardar e imprimir (Enter)"}
           </button>
+          <button style={{ width: "100%", marginTop: 8 }} onClick={() => setAImprimir((cola) => [...cola,
+            { sku: "REM000001", nombre: "Remera oversize lisa negra", precios: preciosDe(17500, medios) },
+            { sku: "JEA000002", nombre: "Jean wide leg dama", precios: preciosDe(30000, medios) },
+            { sku: "BUZ000003", nombre: "Buzo canguro friza gris", precios: preciosDe(24900, medios) },
+            { sku: "VES000004", nombre: "Vestido largo estampado", precios: preciosDe(9000, medios) },
+          ])}>
+            Imprimir 4 etiquetas de prueba (no guarda nada)
+          </button>
+          <label className="fila" style={{ gap: 8, marginTop: 8, fontSize: 14 }}>
+            <span>Impresión de etiquetas en esta PC</span>
+            <select value={modoEtiq} onChange={(e) => setModoEtiq(e.target.value as ModoEtiquetas)}>
+              <option value="servidor">Directa, sin ventana (recomendada)</option>
+              <option value="directa">Directa a la impresora (QZ Tray)</option>
+              <option value="ventana">Ventana del navegador</option>
+            </select>
+          </label>
           <p className="error" role="alert">{error}</p>
         </div>
 
@@ -281,6 +328,20 @@ export default function Carga() {
           <p className="aviso">La fecha de ingreso es solo interna: no sale en la etiqueta.</p>
         </div>
       </div>
+
+      {okImpresion && <p className="alerta no-print" role="status">{okImpresion}</p>}
+      {falloImpresion && (
+        <div className="alerta mala no-print" role="alert">
+          <strong>No se imprimieron las etiquetas.</strong> {falloImpresion.mensaje}
+          <div className="fila" style={{ marginTop: 8 }}>
+            <button className="chico" onClick={() => { setAImprimir(falloImpresion.cola); setFalloImpresion(null); }}>Reintentar</button>
+          </div>
+          <details style={{ marginTop: 8 }}>
+            <summary>Detalle técnico (comando enviado a la impresora)</summary>
+            <pre style={{ fontSize: 12, overflowX: "auto", margin: "8px 0 0" }}>{falloImpresion.tspl}</pre>
+          </details>
+        </div>
+      )}
 
       <h2 className="no-print">Cargado en este lote</h2>
       <div className="tarjeta no-print">
@@ -307,8 +368,9 @@ export default function Carga() {
         )}
       </div>
 
-      <div className="solo-impresion" aria-hidden="true">
-        {aImprimir.map((d, i) => <Etiqueta key={i} {...d} />)}
+      <div className="solo-impresion" aria-hidden="true"
+        style={{ "--etq-w": `${empresa.etiquetaMm.ancho}mm`, "--etq-h": `${empresa.etiquetaMm.alto}mm` } as React.CSSProperties}>
+        {aImprimir.map((d, i) => <div key={i} className="giro"><Etiqueta {...d} /></div>)}
       </div>
     </>
   );

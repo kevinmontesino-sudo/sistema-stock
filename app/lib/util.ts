@@ -85,9 +85,52 @@ export function calcularPagos(
   }
   if (!resto) return { ok: false, motivo: "Elegí qué medio paga el resto" };
   const falta = subtotal - cubierto;
-  if (falta < 0) return { ok: false, motivo: "Lo que entrega el cliente supera el total de la compra" };
+  // Se tolera 1 peso de sobra: sale de redondear lo que cubre una nota de credito.
+  if (falta < -1) return { ok: false, motivo: "Lo que entrega el cliente supera el total de la compra" };
   if (falta > 0) {
     calc.push({ medioId: resto.id, nombre: resto.nombre, pct: resto.ajustePct, monto: Math.round(falta * (1 + resto.ajustePct / 100)), valorLista: falta });
   }
   return { ok: true, pagos: calc, total: calc.reduce((s, p) => s + p.monto, 0) };
+}
+
+// ---- Notas de credito (devoluciones) ----
+export const codigoVenta = (id: number) => "V" + String(id).padStart(6, "0");
+export const ES_CODIGO_VENTA = /^v\d{6}$/i;
+export const ES_CODIGO_NOTA = /^n\d{6}$/i;
+export const ES_ESCANEO_NOTA = ES_CODIGO_NOTA;
+// La nota de credito no vence; lo que tiene limite es devolver una compra: hasta 15 dias despues.
+export const DIAS_DEVOLUCION = 15;
+
+export type NotaCredito = {
+  codigo: string; ventaId: number; sucursal: string; creada: string;
+  montoInicial: number; saldo: number; ajustePct: number;
+  estado: "vigente" | "usada";
+  items: { nombre: string; cantidad: number; monto: number; falladas: number }[];
+};
+export type VentaDevolvible = {
+  id: number; fecha: string; sucursal: string; total: number;
+  items: { id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; valor: number }[];
+};
+// Cuanto de una nota se usa en una compra de `subtotal` (a precio de lista): lo que alcance, sin pasarse del total.
+// Si alcanza para todo, busca el monto que cubre el subtotal justo (el redondeo del ajuste puede dejar 1 peso de diferencia).
+export function montoNotaAplicable(subtotal: number, saldo: number, ajustePct: number) {
+  const k = 1 + ajustePct / 100;
+  const total = Math.round(subtotal * k);
+  if (saldo < total - 1) return Math.max(0, saldo);
+  const justo = [total, total - 1, total + 1].find((m) => m <= saldo && Math.round(m / k) === subtotal);
+  return justo ?? Math.min(saldo, total);
+}
+
+// Reparto automatico: de `stock` unidades, cuantas van a cada destino segun sus porcentajes.
+// Se redondea hacia abajo y las unidades que sobran van al destino con mas porcentaje; si los porcentajes suman menos de 100, el resto queda en el origen.
+export function repartoPorPorcentaje(stock: number, pct: Record<string, number>): Reparto {
+  const ids = Object.keys(pct).filter((k) => pct[k] > 0);
+  const suma = ids.reduce((s, k) => s + pct[k], 0);
+  if (stock <= 0 || ids.length === 0 || suma > 100) return {};
+  const out: Reparto = {};
+  for (const k of ids) out[k] = Math.floor((stock * pct[k]) / 100);
+  const objetivo = Math.round((stock * suma) / 100);
+  const mayor = ids.reduce((a, b) => (pct[b] > pct[a] ? b : a));
+  out[mayor] += Math.max(0, objetivo - ids.reduce((s, k) => s + out[k], 0));
+  return Object.fromEntries(Object.entries(out).filter(([, n]) => n > 0));
 }

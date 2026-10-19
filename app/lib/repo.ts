@@ -1,9 +1,10 @@
 import type { PoolClient } from "pg";
 import { DEPOSITO, empresa } from "./empresa.config";
 import { type Db, pool, tx } from "./db";
+import { usuarioEnCurso } from "./seguridad/contexto";
 import {
   capitalizar, nombreSucursal, normalizar, totalReparto,
-  calcularPagos, type MedioPago, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
+  calcularPagos, DIAS_DEVOLUCION, type MedioPago, type NotaCredito, type VentaDevolvible, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
 // Error esperado: se le muestra el mensaje al usuario.
@@ -151,8 +152,8 @@ async function mov(
   tipo: string, extra: { motivo?: string; ventaId?: number } = {},
 ) {
   await c.query(
-    "insert into movimientos (sku, cantidad, desde, hasta, tipo, motivo, venta_id) values ($1, $2, $3, $4, $5, $6, $7)",
-    [sku, cantidad, desde, hasta, tipo, extra.motivo ?? null, extra.ventaId ?? null],
+    "insert into movimientos (sku, cantidad, desde, hasta, tipo, motivo, venta_id, usuario_id) values ($1, $2, $3, $4, $5, $6, $7, $8)",
+    [sku, cantidad, desde, hasta, tipo, extra.motivo ?? null, extra.ventaId ?? null, usuarioEnCurso()?.id ?? null],
   );
 }
 
@@ -209,7 +210,7 @@ export async function cargar(a: {
       await c.query("update productos set foto_url = coalesce(foto_url, $2) where sku = $1", [sku, a.foto]);
     }
     await sumarStock(c, sku, DEPOSITO, a.cantidad);
-    await c.query("insert into cargas (sku, cantidad) values ($1, $2)", [sku, a.cantidad]);
+    await c.query("insert into cargas (sku, cantidad, usuario_id) values ($1, $2, $3)", [sku, a.cantidad, usuarioEnCurso()?.id ?? null]);
     await mov(c, sku, a.cantidad, null, DEPOSITO, "carga");
     await repartir(c, sku, DEPOSITO, a.reparto);
     return (await productoPorSku(sku, c))!;
@@ -366,11 +367,19 @@ export async function totalEnSucursal(sucursal: string) {
 // El precio sale siempre de la base, nunca de lo que mande la pantalla.
 // Precio y porcentajes salen siempre de la base, nunca de la pantalla. Solo se puede vender lo que hay en la sucursal.
 // Pagos: transferencia 0%, efectivo -20%, tarjeta +20%; se puede dividir entre varios medios (ver calcularPagos).
-export async function registrarVenta(sucursal: string, items: { sku: string; cant: number }[], pagos: PagoEntrada[]) {
+export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number }[], pagos: PagoEntrada[], clave?: string) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
-  if (items.length === 0) falla("No hay prendas en la venta");
-  for (const i of items) if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
+  if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
+  for (const i of itemsPedidos) if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
+  // Siempre se bloquean las prendas en el mismo orden (por SKU): dos ventas al mismo tiempo no se traban entre si.
+  const items = [...itemsPedidos].sort((a, b) => a.sku.localeCompare(b.sku));
   return tx(async (c) => {
+    // Un reintento del mismo cobro (misma clave) devuelve la venta ya registrada en vez de duplicarla.
+    if (clave) {
+      await c.query("select pg_advisory_xact_lock(hashtext($1))", [clave]);
+      const previa = await c.query<{ id: number }>("select id::int as id from ventas where clave = $1", [clave]);
+      if (previa.rows[0]) return ticketDeVenta(c, previa.rows[0].id);
+    }
     const mr = await c.query<MedioPago>('select id, nombre, ajuste_pct::float8 as "ajustePct" from medios_pago where activo');
     const prods: Producto[] = [];
     for (const i of items) {
@@ -385,21 +394,50 @@ export async function registrarVenta(sucursal: string, items: { sku: string; can
       prods.push(p);
     }
     const subtotal = prods.reduce((s, p, i) => s + p.precio * items[i].cant, 0);
-    const calc = calcularPagos(subtotal, mr.rows, pagos);
+    // Pagos con nota de credito ("nota:N000001"): se bloquea la nota, se valida y entra como un medio mas con su propio ajuste.
+    const notas = new Map<string, { id: number; saldo: number }>();
+    const medios = [...mr.rows];
+    const pagosOk: PagoEntrada[] = [];
+    for (const p of pagos) {
+      if (!p.medioId.toLowerCase().startsWith("nota:")) { pagosOk.push(p); continue; }
+      const cod = p.medioId.slice(5).trim().toUpperCase();
+      if (notas.has(cod)) return falla(`La nota ${cod} está repetida`);
+      const n = await c.query<{ id: number; saldo: number; ajustePct: number }>(
+        `select id::int as id, saldo, ajuste_pct::float8 as "ajustePct" from notas_credito where codigo = $1 for update`,
+        [cod],
+      );
+      const nota = n.rows[0];
+      if (!nota) return falla(`No existe la nota de crédito ${cod}`);
+      if (nota.saldo <= 0) return falla(`La nota ${cod} ya fue usada`);
+      if (p.monto === null || p.monto > nota.saldo) return falla(`La nota ${cod} tiene ${nota.saldo} de saldo`);
+      notas.set(cod, { id: nota.id, saldo: nota.saldo });
+      medios.push({ id: `nota:${cod}`, nombre: `Nota de crédito ${cod}`, ajustePct: nota.ajustePct });
+      pagosOk.push({ medioId: `nota:${cod}`, monto: p.monto });
+    }
+    const calc = calcularPagos(subtotal, medios, pagosOk);
     if (!calc.ok) return falla(calc.motivo);
+    // Control de seguridad: las cuentas tienen que cerrar siempre. Si algo no cierra, la venta no se registra.
+    const sumaMontos = calc.pagos.reduce((t, p) => t + p.monto, 0);
+    const sumaLista = calc.pagos.reduce((t, p) => t + p.valorLista, 0);
+    if (sumaMontos !== calc.total || Math.abs(sumaLista - subtotal) > 1 || calc.pagos.some((p) => p.monto < 0)) {
+      console.error("[venta] las cuentas no cierran", { subtotal, total: calc.total, sumaMontos, sumaLista, pagos: calc.pagos });
+      return falla("Las cuentas de la venta no cierran. No se registró nada: avisá a quien administra el sistema.");
+    }
     const total = calc.total;
     const unico = calc.pagos.length === 1 ? calc.pagos[0] : null;
     const v = await c.query<{ id: number; creado_en: Date }>(
-      `insert into ventas (sucursal_id, subtotal_lista, medio_pago_id, ajuste_medio_pago, ajuste_pct_usado, total)
-       values ($1, $2, $3, $4, $5, $6) returning id, creado_en`,
-      [sucursal, subtotal, unico?.medioId ?? null, total - subtotal, unico?.pct ?? null, total],
+      `insert into ventas (sucursal_id, subtotal_lista, medio_pago_id, ajuste_medio_pago, ajuste_pct_usado, total, clave, usuario_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id, creado_en`,
+      [sucursal, subtotal, unico ? (unico.medioId.startsWith("nota:") ? "nota_credito" : unico.medioId) : null, total - subtotal, unico?.pct ?? null, total, clave ?? null, usuarioEnCurso()?.id ?? null],
     );
     const ventaId = Number(v.rows[0].id);
     for (const p of calc.pagos) {
+      const nota = p.medioId.startsWith("nota:") ? notas.get(p.medioId.slice(5)) : undefined;
       await c.query(
-        "insert into venta_pagos (venta_id, medio_pago_id, monto, valor_lista, ajuste_pct_usado) values ($1, $2, $3, $4, $5)",
-        [ventaId, p.medioId, p.monto, p.valorLista, p.pct],
+        "insert into venta_pagos (venta_id, medio_pago_id, monto, valor_lista, ajuste_pct_usado, nota_credito_id) values ($1, $2, $3, $4, $5, $6)",
+        [ventaId, nota ? "nota_credito" : p.medioId, p.monto, p.valorLista, p.pct, nota?.id ?? null],
       );
+      if (nota) await c.query("update notas_credito set saldo = saldo - $2 where id = $1", [nota.id, p.monto]);
     }
     for (const [idx, p] of prods.entries()) {
       const cant = items[idx].cant;
@@ -422,10 +460,28 @@ export async function registrarVenta(sucursal: string, items: { sku: string; can
   });
 }
 
+// Arma de nuevo el ticket de una venta ya registrada (para devolverlo si el cobro se reintenta).
+async function ticketDeVenta(c: PoolClient, id: number) {
+  const v = await c.query<{ creado_en: Date; subtotal_lista: number; total: number }>("select creado_en, subtotal_lista, total from ventas where id = $1", [id]);
+  const it = await c.query<{ sku: string; nombre: string; precio: number; cant: number }>(
+    "select sku, nombre, precio_lista as precio, cantidad as cant from venta_items where venta_id = $1 order by id", [id]);
+  const pg = await c.query<{ medioId: string; nombre: string; pct: number; monto: number; valorLista: number; codigo: string | null }>(
+    `select case when p.nota_credito_id is null then p.medio_pago_id else 'nota:' || n.codigo end as "medioId",
+       case when p.nota_credito_id is null then m.nombre else 'Nota de crédito ' || n.codigo end as nombre,
+       p.ajuste_pct_usado::float8 as pct, p.monto, p.valor_lista as "valorLista", n.codigo
+     from venta_pagos p join medios_pago m on m.id = p.medio_pago_id left join notas_credito n on n.id = p.nota_credito_id
+     where p.venta_id = $1 order by p.id`, [id]);
+  return {
+    id, fecha: v.rows[0].creado_en.toISOString(), subtotal: v.rows[0].subtotal_lista, ajuste: v.rows[0].total - v.rows[0].subtotal_lista,
+    total: v.rows[0].total, pagos: pg.rows.map((p) => ({ medioId: p.medioId, nombre: p.nombre, pct: p.pct, monto: p.monto, valorLista: p.valorLista })), items: it.rows,
+  };
+}
+
 // Caja del dia de una sucursal: plata cobrada en cada medio (un pago mixto cuenta en cada medio que uso).
 export async function ventasDeHoy(sucursal: string) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
-  const hoy = `(v.creado_en at time zone 'America/Argentina/Buenos_Aires')::date = (now() at time zone 'America/Argentina/Buenos_Aires')::date`;
+  // Rango de hoy (hora de Argentina) para que use el indice por local y fecha.
+  const hoy = `v.creado_en >= (date_trunc('day', now() at time zone 'America/Argentina/Buenos_Aires') at time zone 'America/Argentina/Buenos_Aires')`;
   const r = await pool.query<{ id: string; nombre: string; ventas: number; total: number }>(
     `select pg.medio_pago_id as id, m.nombre, count(distinct pg.venta_id)::int as ventas, coalesce(sum(pg.monto), 0)::float8 as total
      from venta_pagos pg join ventas v on v.id = pg.venta_id join medios_pago m on m.id = pg.medio_pago_id
@@ -510,4 +566,119 @@ export async function resumenSucursal(sucursal: string) {
     [sucursal],
   );
   return r.rows[0];
+}
+
+// Traslados de un origen a un destino para armar el remito: lo que sigue en camino o, si se da un dia (AAAA-MM-DD), todo lo enviado ese dia.
+export async function trasladosParaRemito(desde: string, hasta: string, dia?: string) {
+  const r = await pool.query<FilaTraslado>(
+    `${SELECT_TRASLADO} where t.desde = $1 and t.hasta = $2 and t.estado <> 'devuelto'
+       and ${dia ? "(t.creado_en at time zone 'America/Argentina/Buenos_Aires')::date = $3::date" : "t.estado = 'en_camino'"}
+     order by t.creado_en, t.id`,
+    dia ? [desde, hasta, dia] : [desde, hasta],
+  );
+  return r.rows.map(aTraslado);
+}
+
+// ---- Notas de credito: devoluciones ----
+const SELECT_NOTA = `
+  select n.id::int as id, n.codigo, n.venta_id::int as "ventaId", n.sucursal_id as sucursal, n.creado_en as creada,
+    n.monto_inicial as "montoInicial", n.saldo, n.ajuste_pct::float8 as "ajustePct",
+    coalesce((select jsonb_agg(jsonb_build_object('nombre', vi.nombre, 'cantidad', ni.cantidad, 'monto', ni.monto, 'falladas', ni.falladas) order by ni.id)
+              from nota_credito_items ni join venta_items vi on vi.id = ni.venta_item_id where ni.nota_id = n.id), '[]'::jsonb) as items
+  from notas_credito n`;
+type FilaNota = Omit<NotaCredito, "creada" | "estado"> & { creada: Date };
+const aNota = (f: FilaNota): NotaCredito => ({
+  codigo: f.codigo, ventaId: f.ventaId, sucursal: f.sucursal, creada: new Date(f.creada).toISOString(),
+  montoInicial: f.montoInicial, saldo: f.saldo, ajustePct: f.ajustePct, items: f.items,
+  estado: f.saldo <= 0 ? "usada" : "vigente",
+});
+
+export async function notaPorCodigo(codigo: string) {
+  const r = await pool.query<FilaNota>(`${SELECT_NOTA} where n.codigo = $1`, [codigo.trim().toUpperCase()]);
+  if (!r.rows[0]) falla(`No existe la nota de crédito ${codigo.trim().toUpperCase()}`);
+  return aNota(r.rows[0]);
+}
+
+// Con que se pago una venta, en proporcion: la nota de una prenda vale lo que se pago por ella (con el ajuste del medio).
+const factorDeVenta = (v: { total: number; subtotal_lista: number; descuento_promo: number }) => {
+  const base = v.subtotal_lista - v.descuento_promo;
+  return base > 0 ? v.total / base : 1;
+};
+
+// Busca una venta por el codigo de su ticket (V000123, o solo el numero) para devolver prendas.
+export async function ventaParaDevolucion(codigo: string): Promise<VentaDevolvible> {
+  const m = codigo.trim().match(/^v?0*(\d+)$/i);
+  if (!m) return falla("Escaneá el código de barras del ticket de venta (empieza con V)");
+  const v = await pool.query<{ id: number; creado_en: Date; sucursal_id: string; total: number; subtotal_lista: number; descuento_promo: number }>(
+    "select id::int as id, creado_en, sucursal_id, total, subtotal_lista, descuento_promo from ventas where id = $1", [Number(m[1])],
+  );
+  const venta = v.rows[0];
+  if (!venta) return falla(`No existe la venta N° ${Number(m[1])}`);
+  if (Date.now() - venta.creado_en.getTime() > DIAS_DEVOLUCION * 86_400_000) {
+    return falla(`Esa compra es del ${venta.creado_en.toLocaleDateString("es-AR")}: pasaron más de ${DIAS_DEVOLUCION} días y ya no se acepta la devolución`);
+  }
+  const f = factorDeVenta(venta);
+  const it = await pool.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number }>(
+    `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas,
+       coalesce((select sum(ni.cantidad) from nota_credito_items ni where ni.venta_item_id = vi.id), 0)::int as devueltas
+     from venta_items vi where vi.venta_id = $1 order by vi.id`, [venta.id],
+  );
+  return {
+    id: venta.id, fecha: venta.creado_en.toISOString(), sucursal: venta.sucursal_id, total: venta.total,
+    items: it.rows.map((x) => ({ ...x, valor: Math.round(x.precio * f) })),
+  };
+}
+
+// Emite una nota de credito: devuelve las prendas elegidas al stock de la sucursal y deja un saldo a favor por 15 dias.
+// `falladas` = unidades del renglon que estan falladas: esas dan igual la nota, pero NO vuelven al stock.
+export async function emitirNota(sucursal: string, ventaId: number, items: { itemId: number; cant: number; falladas: number }[]) {
+  if (!esSucursal(sucursal)) falla("Sucursal inexistente");
+  const pedidos = items.filter((i) => i.cant > 0).sort((a, b) => a.itemId - b.itemId);
+  if (pedidos.length === 0) falla("Elegí al menos una prenda para devolver");
+  for (const i of pedidos) {
+    if (!Number.isInteger(i.cant) || !Number.isInteger(i.itemId) || !Number.isInteger(i.falladas) || i.falladas < 0 || i.falladas > i.cant) falla("Cantidad inválida");
+  }
+  return tx(async (c) => {
+    const v = await c.query<{ total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean }>(
+      `select total, subtotal_lista, descuento_promo, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera from ventas where id = $1 for update`, [ventaId],
+    );
+    if (!v.rows[0]) return falla("No existe esa venta");
+    if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra: ya no se acepta la devolución`);
+    const f = factorDeVenta(v.rows[0]);
+    const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number }>(
+      `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas,
+         coalesce((select sum(ni.cantidad) from nota_credito_items ni where ni.venta_item_id = vi.id), 0)::int as devueltas
+       from venta_items vi where vi.venta_id = $1`, [ventaId],
+    );
+    const filas: { item: (typeof vi.rows)[number]; cant: number; falladas: number; monto: number }[] = [];
+    for (const p of pedidos) {
+      const item = vi.rows.find((x) => x.id === p.itemId);
+      if (!item) return falla("Una de las prendas no pertenece a esa venta");
+      if (p.cant > item.vendidas - item.devueltas) {
+        return falla(`De ${item.nombre} se vendieron ${item.vendidas} y ya se devolvieron ${item.devueltas}: solo se pueden devolver ${item.vendidas - item.devueltas}`);
+      }
+      filas.push({ item, cant: p.cant, falladas: p.falladas, monto: Math.round(item.precio * p.cant * f) });
+    }
+    const monto = filas.reduce((s, x) => s + x.monto, 0);
+    if (monto <= 0) return falla("Esa devolución no tiene valor");
+    const n = await c.query<{ id: number; codigo: string }>(
+      `insert into notas_credito (venta_id, sucursal_id, monto_inicial, saldo, ajuste_pct, usuario_id)
+       values ($1, $2, $3, $3, $4, $5) returning id::int as id, codigo`,
+      [ventaId, sucursal, monto, Math.round((f - 1) * 1_000_000) / 10_000, usuarioEnCurso()?.id ?? null],
+    );
+    for (const x of filas) {
+      await c.query(
+        "insert into nota_credito_items (nota_id, venta_item_id, sku, cantidad, falladas, monto) values ($1, $2, $3, $4, $5, $6)",
+        [n.rows[0].id, x.item.id, x.item.sku, x.cant, x.falladas, x.monto],
+      );
+      // Las falladas no vuelven al stock: solo se reponen las que estan bien.
+      const buenas = x.cant - x.falladas;
+      if (buenas > 0) {
+        await sumarStock(c, x.item.sku, sucursal, buenas);
+        await mov(c, x.item.sku, buenas, null, sucursal, "devolucion", { ventaId, motivo: `Nota de crédito ${n.rows[0].codigo}` });
+      }
+    }
+    const r = await c.query<FilaNota>(`${SELECT_NOTA} where n.id = $1`, [n.rows[0].id]);
+    return aNota(r.rows[0]);
+  });
 }

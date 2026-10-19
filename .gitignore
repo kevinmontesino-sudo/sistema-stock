@@ -42,3 +42,7 @@ Thumbs.db
 *.tsbuildinfo
 app/tsconfig.tsbuildinfo
 app/next-env.d.ts
+
+# Informacion comercial privada (proveedores, precios, contactos): no va al repositorio
+LISTA_COMPRAS_HARDWARE.txt
+PEDIDO_COTIZACION_IMPRESORA.txt
