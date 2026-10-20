@@ -42,7 +42,7 @@ export default function Deposito() {
 
   return (
     <>
-      <h1>{nombreSucursal(DEPOSITO)}: lo que tenemos guardado</h1>
+      <h1>Stock y envíos · {nombreSucursal(DEPOSITO)}</h1>
       <div className="fila" style={{ margin: "0 0 12px", gap: 12 }}>
         <div className="tarjeta" style={{ flex: 1, minWidth: 140 }}>
           <div className="rotulo">Prendas</div><div className="total">{resumen ? resumen.prendas.toLocaleString("es-AR") : "…"}</div>

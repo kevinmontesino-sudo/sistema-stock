@@ -1,10 +1,10 @@
 /* eslint-disable @next/next/no-img-element */
 import { empresa } from "@/lib/empresa.config";
 import { CodigoBarras } from "@/components/CodigoBarras";
-import { codigoVenta, DIAS_DEVOLUCION, nombreSucursal, pesos, type PagoCalculado } from "@/lib/util";
+import { DIAS_DEVOLUCION, nombreSucursal, pesos, type PagoCalculado } from "@/lib/util";
 
 export type DatosTicket = {
-  id: number;
+  codigo: string; // codigo al azar del ticket (no el numero interno)
   fecha: string;
   sucursal: string;
   subtotal: number;
@@ -32,7 +32,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
     <div className="ticket">
       <img src="/logo-negro.png" alt={empresa.nombre} className="ticket-logo" />
       <div className="centro">{nombreSucursal(venta.sucursal)}</div>
-      <div className="centro">Ticket N° {venta.id} · {fecha}</div>
+      <div className="centro">Ticket {venta.codigo} · {fecha}</div>
       <hr />
       {venta.items.map((i) => (
         <div key={i.sku} className="linea">
@@ -60,7 +60,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
         </>
       )}
       <hr />
-      <CodigoBarras valor={codigoVenta(venta.id)} />
+      <CodigoBarras valor={venta.codigo} />
       <div className="centro"><strong>Cambios por {DIAS_DEVOLUCION} días</strong></div>
       <div className="centro">Hasta el {limite} presentando este ticket.</div>
       <div className="centro" style={{ margin: "2mm 0" }}><strong>¡Gracias por tu compra!<br />Te esperamos pronto</strong></div>

@@ -1,3 +1,4 @@
+import type { PrecioEtiqueta } from "@/components/Etiqueta";
 import { empresa } from "./empresa.config";
 
 export type Producto = {
@@ -21,6 +22,10 @@ export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; motivo: st
 
 export const normalizar = (s: string) =>
   s.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
+
+// Texto de una linea de precio de la etiqueta: "Efectivo: $ 14.000" o "3 cuotas de $ 6.400".
+export const textoPrecioEtiqueta = (p: { nombre: string; valor: number; cuotas?: number }) =>
+  p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`;
 
 export const pesos = (n: number) => "$ " + n.toLocaleString("es-AR");
 
@@ -94,21 +99,22 @@ export function calcularPagos(
 }
 
 // ---- Notas de credito (devoluciones) ----
-export const codigoVenta = (id: number) => "V" + String(id).padStart(6, "0");
-export const ES_CODIGO_VENTA = /^v\d{6}$/i;
-export const ES_CODIGO_NOTA = /^n\d{6}$/i;
+// Codigo del ticket: V + 8 caracteres al azar (no secuencial: no deja calcular cuantas ventas hace el negocio).
+export const ES_CODIGO_VENTA = /^v[0-9a-f]{8}$/i;
+// Codigo de nota: N + 10 caracteres al azar (no adivinable: la nota es plata al portador).
+export const ES_CODIGO_NOTA = /^n[0-9a-f]{10}$/i;
 export const ES_ESCANEO_NOTA = ES_CODIGO_NOTA;
 // La nota de credito no vence; lo que tiene limite es devolver una compra: hasta 15 dias despues.
 export const DIAS_DEVOLUCION = 15;
 
 export type NotaCredito = {
-  codigo: string; ventaId: number; sucursal: string; creada: string;
+  codigo: string; ventaCodigo: string; sucursal: string; creada: string;
   montoInicial: number; saldo: number; ajustePct: number;
   estado: "vigente" | "usada";
   items: { nombre: string; cantidad: number; monto: number; falladas: number }[];
 };
 export type VentaDevolvible = {
-  id: number; fecha: string; sucursal: string; total: number;
+  codigo: string; fecha: string; sucursal: string; total: number;
   items: { id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; valor: number }[];
 };
 // Cuanto de una nota se usa en una compra de `subtotal` (a precio de lista): lo que alcance, sin pasarse del total.
@@ -133,4 +139,17 @@ export function repartoPorPorcentaje(stock: number, pct: Record<string, number>)
   const mayor = ids.reduce((a, b) => (pct[b] > pct[a] ? b : a));
   out[mayor] += Math.max(0, objetivo - ids.reduce((s, k) => s + out[k], 0));
   return Object.fromEntries(Object.entries(out).filter(([, n]) => n > 0));
+}
+
+// Precios que se imprimen: transferencia (= lista) y efectivo, con el porcentaje que figura en la base.
+export function preciosDe(precio: number, medios: MedioPago[]): PrecioEtiqueta[] {
+  const p: PrecioEtiqueta[] = empresa.etiquetaMedios.flatMap((id) => {
+    const m = medios.find((x) => x.id === id);
+    return m ? [{ nombre: m.nombre, valor: precioMedio(precio, m.ajustePct) }] : [];
+  });
+  // Cuotas: precio con el recargo de la tarjeta dividido en la cantidad de cuotas (redondeado al peso).
+  const { medio, cantidad } = empresa.etiquetaCuotas;
+  const mc = medios.find((x) => x.id === medio);
+  if (mc && cantidad > 0) p.push({ nombre: `${cantidad} cuotas`, valor: Math.round(precioMedio(precio, mc.ajustePct) / cantidad), cuotas: cantidad } );
+  return p.length ? p : [{ nombre: "Precio", valor: precio }];
 }

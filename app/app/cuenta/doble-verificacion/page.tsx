@@ -4,7 +4,8 @@ import { FormularioAcceso } from "@/components/FormularioAcceso";
 import { empresa } from "@/lib/empresa.config";
 import { sesionActual } from "@/lib/seguridad/sesion";
 import { urlOtp } from "@/lib/seguridad/totp";
-import { confirmarDobleVerificacion, secretoParaAlta } from "@/app/login/acciones";
+import { confirmarDobleVerificacion } from "@/app/login/acciones";
+import { secretoParaAlta } from "@/lib/seguridad/alta2fa";
 
 export default async function DobleVerificacion() {
   const s = await sesionActual();

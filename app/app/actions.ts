@@ -1,6 +1,6 @@
 "use server";
 import * as repo from "@/lib/repo";
-import { nombreSucursal, type Reparto } from "@/lib/util";
+import { nombreSucursal, preciosDe, type Reparto } from "@/lib/util";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
 import { imprimirEtiquetasEnServidor } from "@/lib/impresoraServidor";
 import { auditar } from "@/lib/seguridad/auditoria";
@@ -14,7 +14,12 @@ type Ok<T> = ({ ok: true } & T) | { ok: false; motivo: string; sesion?: false; c
 // Toda accion del servidor pasa por aca: las Server Functions se pueden invocar por POST directo, no solo desde las
 // pantallas, asi que SIEMPRE se verifica la sesion, el permiso del rol y (en `suc`) la sucursal. Esconder botones no alcanza.
 async function seguro<T extends object>(permiso: Permiso, fn: (u: UsuarioSesion) => Promise<T>): Promise<Ok<T>> {
-  const u = await usuarioActual();
+  // Si la base no responde, ni la sesion se puede verificar: se avisa claro en vez de romper la pantalla.
+  const u = await usuarioActual().catch((e) => {
+    console.error("[acciones] sin base:", e instanceof Error ? e.message : e);
+    return undefined;
+  });
+  if (u === undefined) return { ok: false, motivo: "No hay conexión con el sistema. Revisá internet y probá de nuevo en unos segundos." };
   if (!u) return { ok: false, motivo: "Tu sesión venció. Volvé a iniciar sesión.", sesion: false };
   if (u.debeCambiarClave) return { ok: false, motivo: "Tenés que cambiar tu contraseña antes de seguir.", cambiarClave: true };
   const ip = await ipDelPedido();
@@ -86,6 +91,8 @@ export async function cargarProducto(a: {
   categoria: string; nombre: string; precio: number; cantidad: number; foto?: string | null; reparto: Reparto;
 }) {
   return seguro("cargar", async () => {
+    // La foto solo puede ser una imagen embebida (data:image): nada de direcciones externas ni otros tipos de dato.
+    if (a.foto && !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]{20,}$/.test(txt(a.foto))) throw new repo.ErrorNegocio("La foto no es una imagen válida.");
     const producto = await repo.cargar({
       categoria: txt(a.categoria), nombre: txt(a.nombre), precio: ent(a.precio), cantidad: ent(a.cantidad),
       foto: a.foto ? txt(a.foto).slice(0, 60000) : null, reparto: reparto(a.reparto),
@@ -126,6 +133,10 @@ export async function obtenerPendientes(sucursal?: string) {
 
 export async function pendientesDe(sucursal: string) {
   return seguro("recibir", async (u) => ({ pendientes: await repo.contarPendientes(suc(u, txt(sucursal))) }));
+}
+
+export async function avisosEnvios(sucursal: string) {
+  return seguro("recibir", async (u) => ({ avisos: await repo.avisosDe(suc(u, txt(sucursal))) }));
 }
 
 export async function recibirTodoElTraslado(id: number, sucursal: string) {
@@ -170,16 +181,17 @@ export async function cajaDeHoy(sucursal: string) {
 }
 
 export async function ventaParaDevolver(codigo: string) {
-  return seguro("devolver", async () => ({ venta: await repo.ventaParaDevolucion(txt(codigo)) }));
+  return seguro("devolver", async (u) => ({ venta: await repo.ventaParaDevolucion(txt(codigo), sucursalFija(u.rol, u.sucursalId)) }));
 }
 
-export async function emitirNotaCredito(sucursal: string, ventaId: number, items: { itemId: number; cant: number; falladas: number }[]) {
+export async function emitirNotaCredito(sucursal: string, ventaCodigo: string, items: { itemId: number; cant: number; falladas: number }[]) {
   return seguro("devolver", async (u) => {
     const nota = await repo.emitirNota(
-      suc(u, txt(sucursal)), ent(ventaId),
+      suc(u, txt(sucursal)), txt(ventaCodigo),
       (Array.isArray(items) ? items : []).map((i) => ({ itemId: ent(i.itemId), cant: ent(i.cant), falladas: ent(i.falladas) || 0 })),
+      sucursalFija(u.rol, u.sucursalId),
     );
-    await auditar("nota_emitida", { nota: nota.codigo, venta: nota.ventaId, monto: nota.montoInicial, sucursal: nota.sucursal, items: nota.items });
+    await auditar("nota_emitida", { nota: nota.codigo, venta: nota.ventaCodigo, monto: nota.montoInicial, sucursal: nota.sucursal, items: nota.items });
     return { nota };
   });
 }
@@ -217,13 +229,28 @@ export async function eliminarProducto(sku: string) {
 }
 
 // ---- Impresion ----
+// Reimprime etiquetas de una prenda que ya existe (se perdio o salio mal): NO toca el stock. El precio sale de la base, no de la pantalla.
+export async function reimprimirEtiqueta(sku: string, cantidad: number) {
+  return seguro("imprimir_etiquetas", async () => {
+    const n = ent(cantidad);
+    if (!(n >= 1 && n <= 100)) throw new repo.ErrorNegocio("Elegí entre 1 y 100 etiquetas.");
+    const p = await repo.productoPorSku(txt(sku));
+    if (!p) throw new repo.ErrorNegocio("No existe esa prenda.");
+    const medios = await repo.listarMediosPago();
+    const etiqueta = { sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios) };
+    await imprimirEtiquetasEnServidor(Array.from({ length: n }, () => etiqueta));
+    await auditar("etiqueta_reimpresa", { sku: p.sku, nombre: p.nombre, precio: p.precio, cantidad: n });
+    return { enviadas: n };
+  });
+}
+
 export async function imprimirEtiquetasServidor(cola: DatosEtiqueta[]) {
   return seguro("imprimir_etiquetas", async () => {
     const limpia = (Array.isArray(cola) ? cola : []).slice(0, 500).map((e) => ({
       sku: txt(e?.sku).slice(0, 40),
       nombre: txt(e?.nombre).slice(0, 120),
       marco: !!e?.marco,
-      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 3).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0 })),
+      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 4).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0, ...(ent(p?.cuotas) > 0 ? { cuotas: Math.min(ent(p.cuotas), 24) } : {}) })),
     }));
     await imprimirEtiquetasEnServidor(limpia);
     return { enviadas: limpia.length };

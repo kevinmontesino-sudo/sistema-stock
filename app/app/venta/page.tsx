@@ -22,7 +22,7 @@ function mensajeSinStock(p: Producto, sucursal: string) {
   const otras = empresa.sucursales
     .filter((s) => s.id !== sucursal && (p.stock[s.id] ?? 0) > 0)
     .map((s) => `${p.stock[s.id]} en ${s.nombre}`);
-  const camino = p.enCamino[sucursal] ? ` Hay ${p.enCamino[sucursal]} en camino a este local: recibilos en Ingreso.` : "";
+  const camino = p.enCamino[sucursal] ? ` Hay ${p.enCamino[sucursal]} en camino a este local: recibilos en Distribuir → Recibir.` : "";
   return `${p.nombre} no tiene stock en ${nombreSucursal(sucursal)}.${otras.length ? ` Hay ${otras.join(", ")}.` : ""}${camino}`;
 }
 const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0 ? "+" : "−"}${Math.abs(pct)}%`);
@@ -393,7 +393,7 @@ export default function VentaPage() {
 
       {ultima && (
         <div className="tarjeta no-print" style={{ marginTop: 16 }}>
-          <h2 style={{ marginTop: 0 }}>Venta N° {ultima.id} registrada</h2>
+          <h2 style={{ marginTop: 0 }}>Venta {ultima.codigo} registrada</h2>
           <table>
             <tbody>
               {ultima.items.map((i) => (

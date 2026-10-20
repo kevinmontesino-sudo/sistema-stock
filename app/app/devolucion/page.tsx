@@ -5,7 +5,7 @@ import { TicketNota } from "@/components/TicketNota";
 import { empresa } from "@/lib/empresa.config";
 import { useEscaner, useSucursal } from "@/lib/hooks";
 import { imprimir } from "@/lib/imprimir";
-import { codigoVenta, DIAS_DEVOLUCION, ES_CODIGO_NOTA, nombreSucursal, pesos, type NotaCredito, type VentaDevolvible } from "@/lib/util";
+import { DIAS_DEVOLUCION, ES_CODIGO_NOTA, nombreSucursal, pesos, type NotaCredito, type VentaDevolvible } from "@/lib/util";
 
 export default function DevolucionPage() {
   const [sucursal] = useSucursal();
@@ -39,7 +39,7 @@ export default function DevolucionPage() {
   async function emitir() {
     if (!venta || guardando || unidades === 0) return;
     setGuardando(true);
-    const r = await emitirNotaCredito(sucursal, venta.id, venta.items.map((i) => ({ itemId: i.id, cant: cant[i.id] ?? 0, falladas: Math.min(falladas[i.id] ?? 0, cant[i.id] ?? 0) })));
+    const r = await emitirNotaCredito(sucursal, venta.codigo, venta.items.map((i) => ({ itemId: i.id, cant: cant[i.id] ?? 0, falladas: Math.min(falladas[i.id] ?? 0, cant[i.id] ?? 0) })));
     setGuardando(false);
     if (!r.ok) return setAviso(r.motivo);
     setAviso("");
@@ -61,7 +61,7 @@ export default function DevolucionPage() {
 
   return (
     <>
-      <h1>Devolución · {nombreSucursal(sucursal)}</h1>
+      <h1>Cambio o devolución · {nombreSucursal(sucursal)}</h1>
       <p className="aviso no-print" style={{ marginTop: -8 }}>
         Escaneá el código de barras del ticket de la compra. Las prendas que se devuelven vuelven al stock de {nombreSucursal(sucursal)}.
       </p>
@@ -75,7 +75,7 @@ export default function DevolucionPage() {
       {venta && (
         <div className="tarjeta no-print">
           <h2 style={{ marginTop: 0 }}>
-            Compra {codigoVenta(venta.id)} · {nombreSucursal(venta.sucursal)} · {new Date(venta.fecha).toLocaleDateString("es-AR")}
+            Compra {venta.codigo} · {nombreSucursal(venta.sucursal)} · {new Date(venta.fecha).toLocaleDateString("es-AR")}
           </h2>
           <table>
             <thead><tr><th>Prenda</th><th className="der">Vendidas</th><th className="der">Ya devueltas</th><th className="der">Vale c/u</th><th className="der">Devuelve</th></tr></thead>

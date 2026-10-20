@@ -38,13 +38,30 @@ a { color: var(--acento); }
   padding: 10px 16px; background: var(--tarjeta); border-bottom: 1px solid var(--borde);
 }
 .cabecera .marca { font-weight: 600; color: var(--texto); text-decoration: none; }
-.cabecera nav { display: flex; gap: 6px; flex: 1; }
-.cabecera nav a { padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--texto); }
+.cabecera nav { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.cabecera nav a { padding: 10px 16px; border-radius: 10px; text-decoration: none; color: var(--texto); font-size: 17px; font-weight: 500; }
 .cabecera nav a.activo { background: var(--acento-fondo); color: var(--acento); font-weight: 600; }
+.usuario { position: relative; font-size: 14px; }
+.usuario summary { cursor: pointer; list-style: none; padding: 8px 12px; border: 1px solid var(--borde); border-radius: 8px; }
+.usuario summary::-webkit-details-marker { display: none; }
+.menu-usuario { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; width: 250px; display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.franja-sucursal { color: #fff; padding: 6px 16px; font-size: 15px; text-align: center; letter-spacing: .02em; }
+.franja-sucursal select { height: 32px; margin-left: 6px; color: var(--texto); }
+.pestanas { display: flex; flex-wrap: wrap; gap: 4px; max-width: 960px; margin: 12px auto 0; padding: 0 16px; }
+.pestanas a { padding: 8px 14px; border-radius: 8px 8px 0 0; text-decoration: none; color: var(--suave); border-bottom: 2px solid transparent; }
+.pestanas a.activo { color: var(--acento); border-bottom-color: var(--acento); font-weight: 600; }
+.avisos { max-width: 960px; margin: 12px auto 0; padding: 0 16px; display: flex; flex-direction: column; gap: 8px; }
+.aviso-envio { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  padding: 10px 14px; border-radius: 10px; background: var(--acento-fondo); border: 1px solid var(--acento); font-size: 15px; }
+.aviso-envio.atrasado { background: #fff1e0; border-color: #d9822b; color: #6b3a07; }
+.aviso-envio .boton { padding: 8px 14px; border-radius: 8px; background: var(--acento); color: #fff; text-decoration: none; font-weight: 600; white-space: nowrap; }
+.aviso-envio.atrasado .boton { background: #d9822b; }
+@media (prefers-color-scheme: dark) { .aviso-envio.atrasado { background: #3a2610; color: #f5c98f; } }
 .sucursal { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--suave); }
 
 input, select, button { font: inherit; color: inherit; }
-input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="password"], select {
+input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="password"], input[type="date"], select {
   height: 44px; padding: 0 12px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta);
 }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
@@ -76,6 +93,10 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 .home { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .home a { display: block; padding: 28px 20px; text-align: center; font-size: 20px; font-weight: 600;
   background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; text-decoration: none; color: var(--texto); }
+.home a small { display: block; margin-top: 6px; font-size: 14px; font-weight: 400; color: var(--suave); }
+.bloque-momento { margin-bottom: 20px; }
+.bloque-momento h2 { font-size: 18px; }
+.bloque-momento.principal .home a { padding: 36px 20px; font-size: 24px; border-color: var(--acento); }
 
 .etiqueta {
   display: flex; align-items: center; gap: 8px; width: var(--etq-w, 50mm); height: var(--etq-h, 30mm); padding: 2mm;
@@ -124,11 +145,15 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 
 .etiqueta.con-barras { flex-direction: column; align-items: stretch; gap: 0.8mm; }
 .barras { display: block; height: 10mm; flex: none; align-self: flex-start; }
+.etiqueta.nombre-largo { padding-top: 1.4mm; gap: 0.4mm; }
+.etiqueta.nombre-largo .barras { height: 8.5mm; }
+.etiqueta.nombre-largo .etiqueta-precio { line-height: 1.1; }
 .etiqueta-texto { min-width: 0; flex: 1; }
-.etiqueta-cab { display: flex; align-items: baseline; gap: 2mm; white-space: nowrap; overflow: hidden; }
+.etiqueta-cab { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.15; }
+.etiqueta-cab .etiqueta-sku { margin-right: 2mm; }
 .etiqueta-sku { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 11px; }
-.etiqueta-nombre { font-size: 9px; overflow: hidden; text-overflow: ellipsis; }
-.etiqueta-precio { font-size: 12px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.etiqueta-nombre { font-size: 9px; }
+.etiqueta-precio { font-size: 10.5px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 .boton-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta); color: var(--texto); text-decoration: none; }
 .insignia { display: inline-block; margin-left: 6px; min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--error); color: #fff; font-size: 12px; font-weight: 700; text-align: center; }
 .medios { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }

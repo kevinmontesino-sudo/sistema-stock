@@ -5,10 +5,10 @@ import { Etiqueta, type DatosEtiqueta, type PrecioEtiqueta } from "@/components/
 import { DEPOSITO, empresa, LOCALES } from "@/lib/empresa.config";
 import { redimensionar } from "@/lib/foto";
 import { imprimir } from "@/lib/imprimir";
-import { useDebounced, useModoEtiquetas, type ModoEtiquetas } from "@/lib/hooks";
+import { useDebounced, useModoEtiquetas, type ModoEtiquetas, useAvanzado } from "@/lib/hooks";
 import { imprimirDirecto } from "@/lib/qz";
 import { trabajosTspl } from "@/lib/tspl";
-import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo } from "@/lib/util";
+import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, preciosDe, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo, textoPrecioEtiqueta } from "@/lib/util";
 
 type FilaLote = { sku: string; nombre: string; precio: number; precios: PrecioEtiqueta[]; ultimoIngreso: string; n: number; reparto: Reparto };
 type Vista = { sku: string; existe: boolean; existente: { stockTotal: number; ultimoIngreso: string | null } | null; otrosPrecios: number[]; tipo: { codigo: string; nombre: string; nuevo: boolean } };
@@ -16,24 +16,18 @@ type Vista = { sku: string; existe: boolean; existente: { stockTotal: number; ul
 const etiquetasDe = (p: { sku: string; nombre: string; precios: PrecioEtiqueta[] }, n: number): DatosEtiqueta[] =>
   Array.from({ length: n }, () => ({ sku: p.sku, nombre: p.nombre, precios: p.precios }));
 
-// Precios que se imprimen: transferencia (= lista) y efectivo, con el porcentaje que figura en la base.
-function preciosDe(precio: number, medios: MedioPago[]): PrecioEtiqueta[] {
-  const p = empresa.etiquetaMedios.flatMap((id) => {
-    const m = medios.find((x) => x.id === id);
-    return m ? [{ nombre: m.nombre, valor: precioMedio(precio, m.ajustePct) }] : [];
-  });
-  return p.length ? p : [{ nombre: "Precio", valor: precio }];
-}
-
 export default function Carga() {
   const [nombre, setNombre] = useState("");
   const [tipos, setTipos] = useState<Tipo[]>([]);
   const [medios, setMedios] = useState<MedioPago[]>([]);
   const [catManual, setCatManual] = useState<string | undefined>();
   const [precio, setPrecio] = useState("");
+  // El precio se puede escribir como lista o como efectivo: el otro se calcula solo (efectivo ÷ 0,8 = lista; el 0,8 sale de la base).
+  const [escribeEfectivo, setEscribeEfectivo] = useState(false);
   const [cantidad, setCantidad] = useState("1");
   const [foto, setFoto] = useState<string | undefined>();
   const [reparto, setReparto] = useState<Record<string, string>>({});
+  const [avanzado] = useAvanzado();
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [lote, setLote] = useState<FilaLote[]>([]);
@@ -50,7 +44,10 @@ export default function Carga() {
 
   const detectado = tipoDesdeNombre(nombre, tipos);
   const categoria = catManual ?? detectado?.nombre ?? "";
-  const precioNum = parseInt(precio) || 0;
+  const ajusteEfectivo = medios.find((m) => m.id === "efectivo")?.ajustePct;
+  const escrito = parseInt(precio) || 0;
+  const precioNum = escribeEfectivo && ajusteEfectivo !== undefined ? Math.round(escrito / (1 + ajusteEfectivo / 100)) : escrito;
+  const efectivoResultante = ajusteEfectivo === undefined ? 0 : precioMedio(precioNum, ajusteEfectivo);
   const dNombre = useDebounced(nombre);
   const dPrecio = useDebounced(precioNum);
   const dCategoria = useDebounced(categoria);
@@ -115,6 +112,7 @@ export default function Carga() {
   function elegir(p: Producto) {
     setNombre(p.nombre);
     setCatManual(nombreTipo(p.tipo, tipos));
+    setEscribeEfectivo(false);
     setPrecio(String(p.precio));
     setVerSug(false);
     setSel(-1);
@@ -126,7 +124,7 @@ export default function Carga() {
     if (guardando) return;
     const cant = parseInt(cantidad);
     if (!nombre.trim()) return setError("Escribí el nombre de la prenda");
-    if (!precioNum || precioNum <= 0) return setError("Ingresá el precio de lista");
+    if (!precioNum || precioNum <= 0) return setError("Ingresá el precio (de lista o de efectivo)");
     if (!cant || cant < 1) return setError("La cantidad tiene que ser 1 o más");
     const rep: Reparto = {};
     for (const l of LOCALES) {
@@ -158,6 +156,7 @@ export default function Carga() {
     setNombre("");
     setCatManual(undefined);
     obtenerTipos().then((t) => t.ok && setTipos(t.tipos));
+    setEscribeEfectivo(false);
     setPrecio("");
     setCantidad("1");
     setFoto(undefined);
@@ -201,7 +200,7 @@ export default function Carga() {
 
   return (
     <>
-      <h1>Carga de mercadería · {nombreSucursal(DEPOSITO)}</h1>
+      <h1>Cargar mercadería · {nombreSucursal(DEPOSITO)}</h1>
       <div className="grilla no-print">
         <div className="tarjeta">
           <div className="campo">
@@ -220,6 +219,7 @@ export default function Carga() {
                 ))}
               </div>
             )}
+            {avanzado && <>
             <label className="fila" style={{ gap: 8, marginTop: 8 }}>
               <span style={{ fontSize: 13 }}>Categoría</span>
               <input type="text" list="categorias" value={catManual ?? ""} autoComplete="off"
@@ -243,21 +243,37 @@ export default function Carga() {
                 <>Categoría: <strong>{vista?.tipo.nombre ?? "…"}</strong>{catManual ? "" : detectado ? " (detectada)" : " (sin categoría: queda como Otro. Escribila arriba si querés una)"}</>
               )}
             </p>
+            </>}
           </div>
 
           <div className="campo">
-            <span>2. Precio de lista</span>
+            <span>2. Precio: escribí el de lista <em>o</em> el de efectivo, el otro se calcula solo</span>
             <div className="fila">
-              <input ref={precioRef} type="number" inputMode="numeric" min={0} step={500} value={precio}
-                onChange={(e) => setPrecio(e.target.value)} onKeyDown={enter} placeholder="17500" style={{ width: 130 }} />
+              <label className="fila" style={{ gap: 6 }}>
+                <span style={{ fontSize: 14 }}>Lista</span>
+                <input ref={precioRef} type="number" inputMode="numeric" min={0} step={500}
+                  value={escribeEfectivo ? (precioNum || "") : precio}
+                  onChange={(e) => { setEscribeEfectivo(false); setPrecio(e.target.value); }} onKeyDown={enter} placeholder="17500" style={{ width: 120 }} />
+              </label>
+              <label className="fila" style={{ gap: 6 }}>
+                <span style={{ fontSize: 14 }}>Efectivo</span>
+                <input type="number" inputMode="numeric" min={0} step={500} disabled={ajusteEfectivo === undefined}
+                  value={escribeEfectivo ? precio : (precioNum ? efectivoResultante : "")}
+                  onChange={(e) => { setEscribeEfectivo(true); setPrecio(e.target.value); }} onKeyDown={enter} placeholder="14000" style={{ width: 120 }} />
+              </label>
+            </div>
+            <div className="fila" style={{ marginTop: 6 }}>
               {empresa.preciosFrecuentes.map((p) => (
-                <button key={p} className="chico" onClick={() => setPrecio(String(p))}>{p.toLocaleString("es-AR")}</button>
+                <button key={p} className="chico" onClick={() => { setEscribeEfectivo(false); setPrecio(String(p)); }}>{p.toLocaleString("es-AR")}</button>
               ))}
             </div>
             {precioNum > 0 && (
               <p className="nota">
-                {preciosDe(precioNum, medios).map((p) => `${p.nombre}: ${pesos(p.valor)}`).join(" · ")}
+                Lista <strong>{pesos(precioNum)}</strong> · {preciosDe(precioNum, medios).map((p) => textoPrecioEtiqueta(p)).join(" · ")}
               </p>
+            )}
+            {escribeEfectivo && precioNum > 0 && efectivoResultante !== escrito && (
+              <p className="nota">El precio de lista va en pesos enteros: el efectivo queda en <strong>{pesos(efectivoResultante)}</strong>, no en {pesos(escrito)}.</p>
             )}
             {vista && vista.otrosPrecios.length > 0 && precioNum > 0 && (
               <p className="nota">
@@ -266,20 +282,21 @@ export default function Carga() {
             )}
           </div>
 
-          <div className="fila" style={{ alignItems: "flex-end" }}>
-            <div className="campo">
-              <span>3. Cantidad</span>
-              <input type="number" inputMode="numeric" min={1} value={cantidad}
-                onChange={(e) => setCantidad(e.target.value)} onKeyDown={enter} style={{ width: 90 }} />
-            </div>
-            <div className="campo" style={{ flex: 1, minWidth: 160 }}>
+          <div className="campo">
+            <span>3. Cantidad</span>
+            <input type="number" inputMode="numeric" min={1} value={cantidad}
+              onChange={(e) => setCantidad(e.target.value)} onKeyDown={enter} style={{ width: 90 }} />
+          </div>
+
+          <details style={{ marginBottom: 12 }} open={Object.values(reparto).some((v) => parseInt(v) > 0) || !!foto || undefined}>
+            <summary style={{ cursor: "pointer" }}>Opcional: foto y enviar a los locales</summary>
+            <div className="campo" style={{ marginTop: 8 }}>
               <span>Foto (opcional)</span>
               <div className="fila">
                 <input type="file" accept="image/*" capture="environment" onChange={elegirFoto} />
                 {foto && <img src={foto} alt="Foto de la prenda" className="miniatura" />}
               </div>
             </div>
-          </div>
 
           <div className="campo">
             <span>Enviar a los locales (opcional). Lo que no envíes queda en el {nombreSucursal(DEPOSITO)}. Lo enviado queda en camino hasta que cada local lo reciba.</span>
@@ -294,9 +311,11 @@ export default function Carga() {
             </div>
             <p className="nota">Queda en depósito: <strong>{queda}</strong></p>
           </div>
+          </details>
           <button className="principal" style={{ width: "100%" }} onClick={guardar} disabled={guardando}>
             {guardando ? "Guardando…" : "Guardar e imprimir (Enter)"}
           </button>
+          {avanzado && <>
           <button style={{ width: "100%", marginTop: 8 }} onClick={() => setAImprimir((cola) => [...cola,
             { sku: "REM000001", nombre: "Remera oversize lisa negra", precios: preciosDe(17500, medios) },
             { sku: "JEA000002", nombre: "Jean wide leg dama", precios: preciosDe(30000, medios) },
@@ -313,6 +332,7 @@ export default function Carga() {
               <option value="ventana">Ventana del navegador</option>
             </select>
           </label>
+          </>}
           <p className="error" role="alert">{error}</p>
         </div>
 
@@ -336,10 +356,12 @@ export default function Carga() {
           <div className="fila" style={{ marginTop: 8 }}>
             <button className="chico" onClick={() => { setAImprimir(falloImpresion.cola); setFalloImpresion(null); }}>Reintentar</button>
           </div>
-          <details style={{ marginTop: 8 }}>
-            <summary>Detalle técnico (comando enviado a la impresora)</summary>
-            <pre style={{ fontSize: 12, overflowX: "auto", margin: "8px 0 0" }}>{falloImpresion.tspl}</pre>
-          </details>
+          {avanzado && (
+            <details style={{ marginTop: 8 }}>
+              <summary>Detalle técnico (comando enviado a la impresora)</summary>
+              <pre style={{ fontSize: 12, overflowX: "auto", margin: "8px 0 0" }}>{falloImpresion.tspl}</pre>
+            </details>
+          )}
         </div>
       )}
 

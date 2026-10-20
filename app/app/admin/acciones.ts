@@ -8,13 +8,16 @@ import { hashClave } from "@/lib/seguridad/clave";
 import { cerrarSesionesDe, ipDelPedido, usuarioActual } from "@/lib/seguridad/sesion";
 import { puede, ROLES, type Rol } from "@/lib/seguridad/permisos";
 import { empresa } from "@/lib/empresa.config";
+import { panelCompleto, validarParams } from "@/lib/informes";
+import { crearToken } from "@/lib/seguridad/token";
 
 // Acciones del panel de administracion: SOLO administradores (se verifica en cada una, no en la pantalla).
 type Resultado<T> = ({ ok: true } & T) | { ok: false; motivo: string };
 const txt = (v: unknown) => (typeof v === "string" ? v : "");
 
 async function admin<T extends object>(fn: (yo: NonNullable<Awaited<ReturnType<typeof usuarioActual>>>) => Promise<T>): Promise<Resultado<T>> {
-  const yo = await usuarioActual();
+  const yo = await usuarioActual().catch(() => undefined); // sin base: mensaje claro en vez de romper la pantalla
+  if (yo === undefined) return { ok: false, motivo: "No hay conexión con el sistema. Revisá internet y probá de nuevo en unos segundos." };
   if (!yo) return { ok: false, motivo: "Tu sesión venció. Volvé a iniciar sesión." };
   if (!puede(yo.rol, "admin")) {
     await auditar("acceso_denegado", { permiso: "admin" }, { usuarioId: yo.id, email: yo.email }).catch(() => {});
@@ -142,5 +145,53 @@ export async function listarAuditoria(f: { accion?: string; q?: string; pagina?:
     );
     const acciones = await pool.query<{ accion: string }>("select distinct accion from auditoria order by 1");
     return { filas: r.rows.map((x) => ({ ...x, fecha: new Date(x.fecha).toISOString() })) as FilaAuditoria[], acciones: acciones.rows.map((a) => a.accion) };
+  });
+}
+
+// ---- Informes ----
+export async function obtenerPanel(f: { desde?: string; hasta?: string; sucursal?: string; agrupar?: string; limite?: number }) {
+  return admin(async () => {
+    const parametros = await validarParams({ desde: txt(f.desde), hasta: txt(f.hasta), sucursal: txt(f.sucursal), agrupar: txt(f.agrupar), limite: f.limite });
+    return { parametros, panel: await panelCompleto(parametros) };
+  });
+}
+
+// ---- Llaves de acceso a la API de informes ----
+export type TokenFila = { id: number; nombre: string; prefijo: string; creado: string; vence: string; ultimoUso: string | null; usos: number; estado: "activa" | "vencida" | "revocada" };
+
+export async function listarTokens() {
+  return admin(async () => {
+    const r = await pool.query<{ id: number; nombre: string; prefijo: string; creado: Date; vence: Date; ultimo: Date | null; usos: number; revocado: Date | null }>(
+      `select id::int as id, nombre, prefijo, creado_en as creado, vence_en as vence, ultimo_uso as ultimo, usos::int as usos, revocado_en as revocado
+       from tokens_api order by id desc`,
+    );
+    const ahora = Date.now();
+    return {
+      tokens: r.rows.map((t): TokenFila => ({
+        id: t.id, nombre: t.nombre, prefijo: t.prefijo, creado: new Date(t.creado).toISOString(), vence: new Date(t.vence).toISOString(),
+        ultimoUso: t.ultimo ? new Date(t.ultimo).toISOString() : null, usos: t.usos,
+        estado: t.revocado ? "revocada" : new Date(t.vence).getTime() < ahora ? "vencida" : "activa",
+      })),
+    };
+  });
+}
+
+export async function crearTokenApi(a: { nombre: string; dias: number }) {
+  return admin(async (yo) => {
+    const nombre = txt(a.nombre).trim();
+    if (nombre.length < 3 || nombre.length > 60) throw new ErrorNegocio("Ponele un nombre a la llave (por ejemplo: Cesar - Claude).");
+    const dias = [30, 90, 180].includes(Number(a.dias)) ? Number(a.dias) : 90;
+    const t = await crearToken(nombre, dias, yo.id);
+    await auditar("llave_api_creada", { id: t.id, nombre, dias });
+    return { token: t.token, vence: t.vence, nombre };
+  });
+}
+
+export async function revocarToken(id: number) {
+  return admin(async () => {
+    const r = await pool.query<{ nombre: string }>("update tokens_api set revocado_en = now() where id = $1 and revocado_en is null returning nombre", [Number(id)]);
+    if (!r.rows[0]) throw new ErrorNegocio("No existe esa llave o ya estaba revocada.");
+    await auditar("llave_api_revocada", { id: Number(id), nombre: r.rows[0].nombre });
+    return {};
   });
 }

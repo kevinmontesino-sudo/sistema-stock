@@ -2,13 +2,15 @@
 import { useEffect, useState } from "react";
 import { buscarProductos, moverStock } from "@/app/actions";
 import { empresa } from "@/lib/empresa.config";
-import { useDebounced, usePorcentajesReparto, useSucursal } from "@/lib/hooks";
+import { useAvanzado, useDebounced, usePorcentajesReparto, useSucursal } from "@/lib/hooks";
 import { fechaCorta, nombreSucursal, pesos, repartoPorPorcentaje, type Producto } from "@/lib/util";
 
 export default function Mover() {
   const [sucursalActual] = useSucursal();
+  // Simple: sale de la sucursal en la que se esta. Elegir otro origen y el reparto por porcentajes son opciones avanzadas.
+  const [avanzado] = useAvanzado();
   const [origen, setOrigen] = useState<string | null>(null);
-  const desde = origen ?? sucursalActual;
+  const desde = (avanzado && origen) || sucursalActual;
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
   const [lista, setLista] = useState<Producto[]>([]);
@@ -33,7 +35,7 @@ export default function Mover() {
   const elegido = lista.find((p) => p.sku === sku);
   const pct = Object.fromEntries(destinos.map((d) => [d.id, Math.max(0, parseInt(pctTxt[d.id] ?? "") || 0)]));
   const sumaPct = Object.values(pct).reduce((s, n) => s + n, 0);
-  const pctOk = sumaPct > 0 && sumaPct <= 100;
+  const pctOk = avanzado && sumaPct > 0 && sumaPct <= 100;
   const lista_marcadas = lista.filter((p) => marcadas.has(p.sku));
   const aMover = destinos.reduce((s, d) => s + (parseInt(reparto[d.id] ?? "") || 0), 0);
 
@@ -49,7 +51,7 @@ export default function Mover() {
     setMoviendo(false);
     if (!res.ok) return setMensaje({ texto: res.motivo, mala: true });
     setMensaje({
-      texto: `${elegido.nombre}: de ${nombreSucursal(desde)} a ${destinos.filter((d) => r[d.id]).map((d) => `${d.nombre} ${r[d.id]}`).join(" · ")}. Quedó en camino: cada local lo ve como pendiente y lo recibe en Ingreso.`,
+      texto: `${elegido.nombre}: de ${nombreSucursal(desde)} a ${destinos.filter((d) => r[d.id]).map((d) => `${d.nombre} ${r[d.id]}`).join(" · ")}. Quedó en camino: a cada local le aparece el aviso para recibirlo.`,
       mala: false,
     });
     setReparto({});
@@ -59,7 +61,7 @@ export default function Mover() {
   async function enviarMarcadas() {
     if (!pctOk || lista_marcadas.length === 0 || enviando) return;
     const total = lista_marcadas.reduce((s, p) => s + Object.values(repartoPorPorcentaje(p.stock[desde] ?? 0, pct)).reduce((a, n) => a + n, 0), 0);
-    if (!window.confirm(`Vas a enviar ${total} prendas (${lista_marcadas.length} modelos) desde ${nombreSucursal(desde)} con este reparto: ${destinos.filter((d) => pct[d.id]).map((d) => `${d.nombre} ${pct[d.id]}%`).join(", ")}. Cada local las recibe en Ingreso. ¿Confirmás?`)) return;
+    if (!window.confirm(`Vas a enviar ${total} prendas (${lista_marcadas.length} modelos) desde ${nombreSucursal(desde)} con este reparto: ${destinos.filter((d) => pct[d.id]).map((d) => `${d.nombre} ${pct[d.id]}%`).join(", ")}. A cada local le aparece el aviso para recibirlas. ¿Confirmás?`)) return;
     setEnviando(true);
     let ok = 0;
     const fallos: string[] = [];
@@ -72,27 +74,29 @@ export default function Mover() {
     setEnviando(false);
     setMarcadas(new Set());
     setSku(null);
-    setMensaje({ texto: `Se enviaron ${ok} modelos.${fallos.length ? ` No se pudieron enviar ${fallos.length}: ${fallos.join(" · ")}` : " Cada local los recibe en Ingreso."}`, mala: fallos.length > 0 });
+    setMensaje({ texto: `Se enviaron ${ok} modelos.${fallos.length ? ` No se pudieron enviar ${fallos.length}: ${fallos.join(" · ")}` : " A cada local le aparece el aviso para recibirlos."}`, mala: fallos.length > 0 });
     cargar();
   }
   const alternar = (k: string) => setMarcadas((m) => { const n = new Set(m); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
   return (
     <>
-      <h1>Mover stock entre sucursales</h1>
+      <h1>Enviar mercadería · sale de {nombreSucursal(desde)}</h1>
       <div className="fila" style={{ margin: "0 0 12px" }}>
-        <label className="fila" style={{ gap: 8 }}>
-          <span>Sale de</span>
-          <select value={desde} onChange={(e) => { setOrigen(e.target.value); setSku(null); setReparto({}); setMensaje(null); }}>
-            {empresa.sucursales.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-          </select>
-        </label>
+        {avanzado && (
+          <label className="fila" style={{ gap: 8 }}>
+            <span>Sale de</span>
+            <select value={desde} onChange={(e) => { setOrigen(e.target.value); setSku(null); setReparto({}); setMensaje(null); }}>
+              {empresa.sucursales.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+            </select>
+          </label>
+        )}
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} autoFocus
           placeholder="Buscar prenda (SKU o nombre)" style={{ flex: 1, minWidth: 200 }} />
       </div>
       {mensaje && <p className={`alerta ${mensaje.mala ? "mala" : ""}`} role="alert">{mensaje.texto}</p>}
 
-      <div className="tarjeta" style={{ marginBottom: 12 }}>
+      {avanzado && <div className="tarjeta" style={{ marginBottom: 12 }}>
         <p style={{ margin: "0 0 8px" }}><strong>Reparto automático</strong> <span className="aviso">· marcá prendas en la lista y se reparten solas según estos porcentajes</span></p>
         <div className="fila" style={{ gap: 12, flexWrap: "wrap" }}>
           {destinos.map((d) => (
@@ -112,7 +116,7 @@ export default function Mover() {
             {enviando ? "Enviando…" : !pctOk ? "Poné los porcentajes (suman hasta 100)" : lista_marcadas.length === 0 ? "Marcá las prendas a enviar" : `Enviar ${lista_marcadas.length} prenda${lista_marcadas.length === 1 ? "" : "s"} con este reparto`}
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="grilla">
         <div className="tarjeta" style={{ overflowX: "auto" }}>
@@ -120,12 +124,12 @@ export default function Mover() {
             <p className="aviso">No hay prendas con stock en {nombreSucursal(desde)}.</p>
           ) : (
             <table>
-              <thead><tr><th></th><th>SKU</th><th>Prenda</th><th>Precio</th><th className="der">Stock</th>{pctOk && <th className="der">Mandaría</th>}</tr></thead>
+              <thead><tr>{avanzado && <th></th>}<th>SKU</th><th>Prenda</th><th>Precio</th><th className="der">Stock</th>{pctOk && <th className="der">Mandaría</th>}</tr></thead>
               <tbody>
                 {lista.map((p) => (
                   <tr key={p.sku} onClick={() => { setSku(p.sku); setReparto({}); setMensaje(null); }}
                     style={{ cursor: "pointer", background: p.sku === sku ? "var(--acento-fondo)" : undefined }}>
-                    <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={marcadas.has(p.sku)} onChange={() => alternar(p.sku)} aria-label={`Marcar ${p.nombre}`} /></td>
+                    {avanzado && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={marcadas.has(p.sku)} onChange={() => alternar(p.sku)} aria-label={`Marcar ${p.nombre}`} /></td>}
                     <td className="mono">{p.sku}</td>
                     <td>{p.nombre} <span className="interno">· ing {fechaCorta(p.ultimoIngreso)}</span></td>
                     <td>{pesos(p.precio)}</td>
@@ -140,7 +144,7 @@ export default function Mover() {
 
         <div className="tarjeta">
           {!elegido ? (
-            <p className="aviso">Elegí una prenda de la lista.</p>
+            <p className="aviso">1. Elegí una prenda de la lista.<br />2. Poné cuántas mandás a cada local.<br />3. Tocá Enviar.</p>
           ) : (
             <>
               <p style={{ margin: "0 0 12px" }}>
@@ -163,7 +167,7 @@ export default function Mover() {
               ))}
               <p className="nota">Quedan en {nombreSucursal(desde)}: <strong>{(elegido.stock[desde] ?? 0) - aMover}</strong></p>
               <button className="principal" style={{ width: "100%", marginTop: 8 }} onClick={moverYa} disabled={moviendo}>
-                {moviendo ? "Moviendo…" : "Mover"}
+                {moviendo ? "Enviando…" : aMover > 0 ? `Enviar ${aMover}` : "Enviar"}
               </button>
             </>
           )}

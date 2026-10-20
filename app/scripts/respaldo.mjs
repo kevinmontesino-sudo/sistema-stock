@@ -10,7 +10,11 @@ if (!url) {
   process.exit(1);
 }
 
-const TABLAS = ["sucursales", "tipos", "usuarios", "productos", "contadores_sku", "stock", "cargas", "movimientos", "traslados", "medios_pago", "ventas", "venta_items"];
+// Todas las tablas de negocio. De "usuarios" NO se copian las contrasenas (hash) ni los secretos de la doble verificacion, y
+// no se copian las sesiones ni los intentos de login: el respaldo no debe servir para entrar al sistema.
+const TABLAS = ["sucursales", "tipos", "usuarios", "productos", "contadores_sku", "stock", "cargas", "movimientos", "traslados", "medios_pago",
+  "ventas", "venta_items", "venta_pagos", "notas_credito", "nota_credito_items", "auditoria"];
+const COLUMNAS_SECRETAS = { usuarios: ["password_hash", "totp_secreto", "totp_ultimo_paso"] };
 const carpeta = join(process.cwd(), "..", "respaldos");
 mkdirSync(carpeta, { recursive: true });
 
@@ -22,6 +26,7 @@ try {
   await c.query("begin transaction isolation level repeatable read read only");
   for (const t of TABLAS) {
     const r = await c.query(`select * from ${t}`);
+    for (const col of COLUMNAS_SECRETAS[t] ?? []) for (const fila of r.rows) delete fila[col];
     datos[t] = r.rows;
     filas += r.rows.length;
   }

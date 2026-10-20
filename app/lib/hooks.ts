@@ -28,6 +28,26 @@ export function useSucursal() {
   return [fija ?? id, set] as const;
 }
 
+// Opciones avanzadas (ajustar envios y demas): apagadas por defecto para que todo sea simple.
+// Es una preferencia de esta computadora; quien quiera mas control la prende desde su nombre, arriba a la derecha.
+const KEY_AVANZADO = "stock:avanzado";
+const listenersAvanzado = new Set<() => void>();
+export function useAvanzado() {
+  const on = useSyncExternalStore(
+    (cb) => {
+      listenersAvanzado.add(cb);
+      return () => listenersAvanzado.delete(cb);
+    },
+    () => { try { return localStorage.getItem(KEY_AVANZADO) === "1"; } catch { return false; } },
+    () => false,
+  );
+  const set = (v: boolean) => {
+    try { localStorage.setItem(KEY_AVANZADO, v ? "1" : "0"); } catch {}
+    listenersAvanzado.forEach((l) => l());
+  };
+  return [on, set] as const;
+}
+
 import { useState } from "react";
 export function useDebounced<T>(valor: T, ms = 220) {
   const [v, setV] = useState(valor);

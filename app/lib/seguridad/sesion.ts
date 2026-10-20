@@ -21,9 +21,12 @@ const politica = (rol: Rol, fase: Fase) => (fase !== "activa" ? POLITICA.pendien
 export const huella = (token: string) => createHash("sha256").update(token).digest("hex");
 
 export async function ipDelPedido() {
-  const h = await headers();
-  // Detras del proxy de Easypanel (Traefik) la IP real viene en x-forwarded-for; se toma la primera.
-  return h.get("x-forwarded-for")?.split(",")[0].trim() || h.get("x-real-ip") || null;
+  // La IP solo se toma de x-forwarded-for si se indica cuantos proxies de confianza hay delante (TRUST_PROXY_HOPS, 1 detras de
+  // Traefik/Easypanel). Un proxy agrega la IP real AL FINAL de la lista: lo que viene antes lo puede inventar el cliente.
+  const saltos = Number(process.env.TRUST_PROXY_HOPS) || 0;
+  if (saltos < 1) return null;
+  const partes = (await headers()).get("x-forwarded-for")?.split(",").map((x) => x.trim()).filter(Boolean) ?? [];
+  return partes[partes.length - saltos] ?? null;
 }
 
 export async function crearSesion(usuarioId: number, rol: Rol, fase: Fase) {

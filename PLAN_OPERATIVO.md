@@ -465,3 +465,115 @@ La eleccion final la define la prueba con la impresora y el scanner reales (secc
 - **Pendiente:** `db/010_usuario_web.sql` (usuario de base con permisos minimos, para correr con un superusuario); cerrar el puerto 5432; HTTPS; backups fuera del servidor con prueba de restauracion; CSP con nonce; `allowedOrigins` de las server actions con el dominio final; politica de contrasenas y rotacion definida por Kevin.
 - **Antes de entrar por primera vez:** la contrasena temporal de Kevin esta en `app/admin-inicial.local` (ignorado por git); al ingresar se pide cambiarla. Crear a Cesar desde Usuarios (o con `npm run usuario -- crear`).
 
+## 37. Etiqueta con cuotas y cuenta principal (19 de octubre)
+
+- **Etiqueta de la prenda (50x30):** ahora imprime tres lineas de precio: **Transferencia** (= lista), **Efectivo** (lista -20%) y **"3 cuotas de $X"**, donde X = (lista + recargo de la tarjeta) / 3, redondeado al peso. Ejemplo: lista $16.000 -> tarjeta $19.200 -> 3 cuotas de $6.400. El recargo sale de la base (hoy 20%), asi que si cambia el porcentaje, cambian las cuotas. Configuracion: `etiquetaMedios` y `etiquetaCuotas` en `app/lib/empresa.config.ts`. Para que entren tres lineas el codigo de barras bajo de 12 a 10 mm de alto (el ancho de cada barra, lo que importa para leer, no cambio).
+- **Cuenta principal:** el administrador principal usa **gerencia@xmenosmasprendas.com**. Recomendacion: cada persona con su propia cuenta (Kevin, Cesar, cada encargado y vendedor), porque la auditoria registra quien hizo cada cosa y la doble verificacion es personal; la cuenta de gerencia queda como cuenta del dueno.
+- **Contrasenas:** se rechazan las que contienen el nombre del negocio o del sistema.
+
+## 38. Auditoria de seguridad a fondo (19 de octubre)
+
+**Corregido hoy (hallazgos propios):**
+1. **CRITICO:** `secretoParaAlta` estaba exportada en un archivo de acciones del servidor: cualquiera en internet, sin sesion, podia pedir el secreto de doble verificacion de una cuenta. Movida a `lib/seguridad/alta2fa.ts`. Regla: en un archivo "use server" todo lo exportado es invocable desde afuera.
+2. **ALTO:** los codigos de nota de credito eran secuenciales (N000001...). Es plata al portador: un empleado podia probar codigos hasta usar vales ajenos. Ahora son N + 10 caracteres al azar (`db/011`).
+3. **ALTO:** un local podia buscar y devolver ventas de otro local, creando stock y vales de la nada. Ahora cada local solo devuelve sus ventas (el administrador, todas).
+4. **MEDIO:** el limite de intentos tomaba la IP del navegador (falsificable) y se podia dejar afuera a un usuario conocido. Ahora la IP solo se toma con `TRUST_PROXY_HOPS` y el bloqueo es por usuario+IP (5), usuario (15) e IP (30).
+5. **MEDIO:** la foto de una prenda no se validaba (solo imagen embebida jpeg/png/webp). Precio con tope. Se borraron los archivos de ejemplo de Next en `public/`.
+6. **MEDIO:** el respaldo estaba desactualizado (faltaban pagos, notas y auditoria) y copiaba los hashes de claves. Ahora incluye las 16 tablas y excluye contrasenas y secretos de 2FA.
+
+**Verificado sin problemas:** las 35 acciones del servidor rechazan pedidos sin sesion (barrido automatico); no hay inyeccion SQL (todo va como parametro); no hay `dangerouslySetInnerHTML`, `eval` ni ejecucion de comandos con datos del usuario; el build de produccion no incluye mapas de codigo ni secretos; `npm audit`: 0 vulnerabilidades; cabeceras de seguridad y CSP activas.
+
+**Riesgos que quedan (ordenados):**
+1. **El puerto 5432 de la base esta abierto a internet y sin cifrado** (el servidor no soporta SSL): usuario y datos viajan en claro desde la Mac. Es el riesgo mas alto hoy. Se resuelve al publicar la app dentro del VPS y cerrando el puerto (o filtrando por IP).
+2. La app se conecta como duena de las tablas (`stock_app`): aplicar `db/010_usuario_web.sql` con un superusuario.
+3. Cuentas compartidas por sucursal: la auditoria registra el local, no la persona; cambiar la clave cuando alguien se va; una nota de credito se puede emitir sin que el sistema compruebe la devolucion fisica: revisar a diario las notas emitidas (pendiente: informe de notas) y evaluar aprobacion del administrador sobre cierto monto.
+4. Numero de ticket secuencial (V000123): quien compra y lee el numero puede estimar cuantas ventas hace el negocio por dia. Opcion: codigo de ticket no secuencial como en las notas.
+5. El servidor de desarrollo escucha en toda la red local (`*:3000`): no dejarlo abierto en una red publica; en produccion solo detras de HTTPS.
+6. Sin HTTPS la cookie de sesion viajaria en claro: HTTPS obligatorio al publicar.
+7. Sin limite general de pedidos (solo en login): poner el servicio detras de Cloudflare o limitar en Traefik. CSP con `unsafe-inline` en scripts (mejorable con nonce).
+8. Respaldos sin cifrar en el disco de la Mac (activar FileVault) y respaldos automaticos fuera del servidor pendientes.
+9. Dependencia `qz-tray` sin uso (modo de impresion descartado): eliminarla reduce superficie.
+10. Auditoria no registra consultas (quien miro que), solo cambios.
+
+## 39. Informes y API para Cesar (19 de octubre)
+
+- **Informes** (`/admin/informes`, solo administradores, con CSV): ventas, prendas, total pagado, cobrado en caja y ticket promedio por sucursal; evolucion por dia/semana/mes; medios de pago; **prendas mas vendidas** (vendidas, devueltas, netas, importe y desglose por local); prendas que menos se venden con stock; dias y horas de mayor venta; notas de credito (emitidas, usadas, saldo pendiente, falladas); stock valorizado; mercaderia cargada y enviada. Filtros: hoy, ayer, 7/30 dias, mes, rango libre y sucursal. Las consultas son solo SELECT y estan en `app/lib/informes.ts` (las usan la pantalla y la API). Probado contra numeros calculados a mano con ventas repartidas en dias, locales y medios.
+- **API de solo lectura** `GET /api/informes` con llave `Bearer xmp_...` (256 bits al azar; en la base solo queda la huella; vence a 30/90/180 dias; se revoca al instante; 30 pedidos por minuto; cada consulta queda en la Auditoria; solo totales, sin datos personales ni contrasenas; parametros validados). Se administran en **Accesos API**. Probado: sin llave, llave falsa, mal formada, vencida y revocada dan 401; parametros invalidos e intentos de inyeccion dan 400; POST no permitido.
+- **Conector para Claude** (`app/scripts/mcp-informes.mjs`, sin dependencias, protocolo MCP por stdio) y guia `INSTRUCCIONES_API_INFORMES.txt` con la configuracion para Claude Desktop y Claude Code.
+- **Llave de Cesar:** creada con vencimiento a 90 dias; esta en `app/token-cesar.local` (ignorado por git). **No se puede usar hasta publicar el sistema** (hoy corre solo en la Mac del deposito).
+- **Pendiente:** cierre diario sellado; informe de productividad por cuenta; alertas (stock bajo, diferencias).
+
+## 40. Decisiones del 20 de octubre
+
+- **Commit y push:** hechos por Kevin/Antigravity (commit `673c7a7`). Verificado: no hay claves, .env, llaves ni archivos privados en el repositorio.
+- **Ticket con codigo al azar (hecho):** el ticket muestra `V` + 8 caracteres al azar (por ejemplo VC3E2AC72) en lugar del numero interno, para que nadie calcule cuantas ventas hace el negocio. La devolucion se busca SOLO por ese codigo (el numero interno ya no se acepta), la nota de credito y los informes muestran el codigo. `db/013`. Probado.
+- **Notas de credito:** NO requieren aprobacion de un administrador; el local las emite. El control es el informe diario de notas (Informes -> Notas de credito).
+- **Promos:** se gestionan SIEMPRE desde la oficina (administradores), desde el sistema o por API, eligiendo en que locales estan disponibles y en que fechas. El cajero no elige ni aplica promos: se aplican solas al escanear. Pendiente: definir tipos, acumulacion y como se valoriza una devolucion de una prenda vendida en promo.
+- **Publicacion:** Antigravity prepara Dockerfile y Easypanel; Claude hace el **agente de impresion** para la Mac del deposito (el servidor en la nube no llega a la impresora USB, y al cerrar el puerto 5432 la copia local de la Mac deja de conectarse a la base). El modo "ventana" de Chrome NO resuelve las etiquetas en la Mac (salian giradas y borrosas).
+
+## 41. TAREA PARA MANANA: definir las promos (Kevin, 20 de octubre)
+
+**Ya definido:**
+- 3x2: no se paga la prenda mas barata.
+- Por defecto la promo se calcula sobre **precio de lista**. Debe ser **configurable por promo** si ademas se permite el descuento del medio de pago (por ejemplo, efectivo -20% encima de la promo) o no: "es maleable". Se gestiona desde la oficina, por local y por fechas.
+
+**Falta que Kevin responda:**
+1. Que otros tipos de promo usan (2x1, porcentaje sobre una categoria, segunda unidad al 50%, monto fijo, otro).
+2. Si una promo puede mezclar categorias (por ejemplo 3x2 entre remeras y buzos).
+3. Cuando se "acumulan": dos promos sobre la misma prenda, o promos distintas en la misma compra.
+4. Si al pagar el cliente tiene que elegir/preguntar algo en la caja, o todo sale solo segun como la oficina configuro la promo.
+5. Cuanto vale la nota de credito si devuelven una prenda comprada en promo (propuesta: repartir el descuento entre las prendas de la promo).
+
+**Mientras tanto (Claude):** agente de impresion para la Mac del deposito, coordinado con la publicacion que prepara Antigravity.
+
+
+## 42. Pantallas más simples (22/10/2026)
+
+Idea: **simple por defecto, sin margen de error; lo avanzado solo para quien lo prende.**
+
+**Paso 1 (hecho y probado):**
+- Menú en 3 momentos + oficina: 📦 Cargar · 🚚 Distribuir · 💵 Vender · 🏢 Oficina. Arriba solo esos botones; adentro, pestañas. Definido en `app/lib/menu.ts`.
+- Inicio según la cuenta: un local ve Vender primero (y "Buscar prenda" va dentro de Vender); el depósito y la oficina ven Cargar primero. Los locales no ven Cargar ni "Stock y envíos" del depósito.
+- Franja de color fija con la sucursal ("Estás en WHITE"); cada sucursal tiene su color en `empresa.config.ts`.
+- Avisos de envíos en todas las pantallas: "Te mandaron N prendas desde X · Recibir ahora"; en naranja si pasan más de `avisoSinRecibirHoras` (24 h). Al que envió le aparece "X todavía no confirmó N prendas" pasadas las 24 h.
+- Nombres claros: Ingreso → Recibir, Mover → Enviar, Devolución → Cambio o devolución.
+- **Opciones avanzadas** (menú del usuario, arriba a la derecha; se guarda por computadora): en Enviar muestra elegir otro origen y el reparto automático por porcentajes; en Cargar, el modo de impresión, las etiquetas de prueba y el detalle técnico. Apagado, Enviar es: elegir prenda → cuántas a cada local → Enviar.
+
+**Paso 2:** Cargar guiado (escaneo/nombre → precio y cantidad → imprimir), "Stock y envíos" por sucursal para los locales.
+**Paso 3:** Venta en modo caja (pantalla completa, letra grande, solo escanear y cobrar).
+
+## 43. TAREA: precio especial por unidad en ventas por teléfono (Kevin, 23/10/2026)
+
+Pedido: en las ventas por teléfono a veces se arregla un precio especial. Al escanear cada prenda, el Depósito tiene que poder **poner el precio que se hizo por unidad**, y ese precio es el que tiene que contar en el balance final y en los informes. **No hacerlo todavía.**
+
+Ideas para cuando se haga (a confirmar con Kevin):
+- Que solo aparezca en ventas del Depósito (las ventas por teléfono) y no en la caja de los locales, o detrás de Opciones avanzadas.
+- Guardar las dos cosas: el precio de lista y el precio hecho, con el motivo (por ejemplo "precio teléfono"). Así los informes muestran cuánto se resignó, y queda en Auditoría quién lo puso.
+- Ver cómo se combina con el ajuste del medio de pago (efectivo −20%, tarjeta +20%): ¿el precio especial es el final o se le aplica además el medio de pago?
+- Ver qué vale la nota de crédito si esa prenda se devuelve (lo lógico es el precio que se pagó).
+- Se relaciona con las promos (sección 41) y con las ventas por teléfono (sección 35).
+
+## 44. Cargar por precio de lista o por precio efectivo (Kevin, 23/10/2026) — HECHO el 23/10
+
+Pedido: en la pantalla de Cargar se puede escribir **el precio de lista o el precio efectivo**, y el otro se calcula solo, junto con el de tarjeta.
+- Si cargan **lista**: efectivo = lista × 0,8 y tarjeta = lista × 1,2 (como hoy).
+- Si cargan **efectivo**: lista = efectivo ÷ 0,8; después tarjeta = lista × 1,2.
+- Ejemplo: efectivo $14.000 → lista $17.500 → tarjeta $21.000.
+
+A resolver al hacerlo:
+- Los porcentajes (−20% efectivo, +20% tarjeta) salen de la base (`medios_pago`), no se escriben fijos en el código; si cambian, el cálculo cambia solo.
+- **Redondeo:** el precio de lista se guarda en pesos enteros. Si el efectivo no da un lista entero (por ejemplo $14.001 ÷ 0,8 = $17.501,25), hay que decidir cómo se redondea y mostrar siempre el efectivo, la lista y la tarjeta resultantes antes de cargar, para que no haya sorpresas. Comprobar que al volver a calcular el efectivo desde la lista dé lo mismo que escribió quien cargó.
+- La etiqueta y el ticket siguen usando el precio de lista como base (no cambia nada de lo ya hecho).
+- Relacionado con la sección 43 (precio especial por teléfono) y con las promos (sección 41).
+
+## 45. Reimprimir una etiqueta sin cargar stock (23/10/2026) — HECHO
+En **Buscar prenda**, cada fila tiene el botón **🏷️ Etiqueta** (solo depósito y administrador): muestra la etiqueta, pide la cantidad (1 a 100) e imprime. **No toca el stock**; sale con el precio actual (leído de la base) y queda en Auditoría como `etiqueta_reimpresa` con quién y cuántas. El cálculo de los precios de la etiqueta (`preciosDe`) pasó a `lib/util.ts` y lo comparten Cargar, Buscar y el servidor.
+
+**Hecho el 23/10 (sección 44 + paso 2 de la 42 + nombre largo):**
+- Cargar tiene dos casilleros, **Lista** y **Efectivo**: se escribe uno y el otro se calcula (efectivo ÷ 0,8 = lista; el porcentaje sale de la base). Debajo se ven lista, transferencia, efectivo y las 3 cuotas. Si el efectivo escrito no da una lista en pesos enteros, avisa con qué efectivo queda.
+- Cargar guiado: nombre → precio → cantidad → guardar. La **categoría** solo aparece con Opciones avanzadas (se sigue detectando sola). **Foto y envío a locales** quedan plegados en "Opcional".
+- **Nombre largo en la etiqueta:** pasa a una segunda línea (las barras bajan a 8,5 mm); solo se corta con "..." si no entra ni así. Probado en PDF. La vista previa hace lo mismo.
+
+## 46. TAREA: precio mayorista y ventas del Depósito con stock de San Lorenzo (Kevin, 23/10/2026)
+Pedido: (a) un **precio mayorista** que se carga en el Depósito (cuánto se cobra) y que **solo las ventas del Depósito** pueden usar; (b) el Depósito puede vender **stock del Depósito y de San Lorenzo**.
+Propuesta a confirmar: ver el mensaje del 23/10. Se junta con la sección 43 (precio especial por teléfono) y la 41 (promos).

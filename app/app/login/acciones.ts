@@ -7,7 +7,7 @@ import { auditar } from "@/lib/seguridad/auditoria";
 import { destinoSeguro } from "@/lib/seguridad/guardia";
 import { demasiadosIntentos, registrarIntento } from "@/lib/seguridad/limite";
 import { activarSesion, cerrarSesion, cerrarSesionesDe, crearSesion, ipDelPedido, sesionActual } from "@/lib/seguridad/sesion";
-import { cifrar, descifrar, nuevoSecreto, verificarTotp } from "@/lib/seguridad/totp";
+import { descifrar, verificarTotp } from "@/lib/seguridad/totp";
 
 export type EstadoForm = { error?: string; valores?: Record<string, string> } | undefined;
 const txt = (v: unknown) => (typeof v === "string" ? v : "");
@@ -90,15 +90,6 @@ export async function confirmarDobleVerificacion(_: EstadoForm, fd: FormData): P
   await auditar("2fa_activado", {}, { usuarioId: s.usuario.id, email: s.usuario.email });
   revalidatePath("/", "layout");
   redirect(s.usuario.debeCambiarClave ? "/cuenta/clave" : "/");
-}
-
-// Prepara el secreto de la doble verificacion (queda sin activar hasta que se confirme con un codigo).
-export async function secretoParaAlta(usuarioId: number) {
-  const r = await pool.query<{ secreto: string | null; activo: boolean }>("select totp_secreto as secreto, totp_activo as activo from usuarios where id = $1", [usuarioId]);
-  if (r.rows[0]?.secreto && !r.rows[0].activo) return descifrar(r.rows[0].secreto);
-  const nuevo = nuevoSecreto();
-  await pool.query("update usuarios set totp_secreto = $2, totp_activo = false where id = $1", [usuarioId, cifrar(nuevo)]);
-  return nuevo;
 }
 
 export async function cambiarClave(_: EstadoForm, fd: FormData): Promise<EstadoForm> {

@@ -4,7 +4,7 @@ import { type Db, pool, tx } from "./db";
 import { usuarioEnCurso } from "./seguridad/contexto";
 import {
   capitalizar, nombreSucursal, normalizar, totalReparto,
-  calcularPagos, DIAS_DEVOLUCION, type MedioPago, type NotaCredito, type VentaDevolvible, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
+  calcularPagos, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
 // Error esperado: se le muestra el mensaje al usuario.
@@ -185,7 +185,7 @@ export async function cargar(a: {
   const nombre = capitalizar(a.nombre);
   if (!nombre) falla("Escribí el nombre de la prenda");
   if (nombre.length > 120) falla("El nombre es demasiado largo");
-  if (!Number.isInteger(a.precio) || a.precio <= 0) falla("Ingresá el precio de lista");
+  if (!Number.isInteger(a.precio) || a.precio <= 0 || a.precio > 10_000_000) falla("Ingresá un precio de lista válido");
   if (!Number.isInteger(a.cantidad) || a.cantidad < 1 || a.cantidad > 5000) falla("La cantidad tiene que estar entre 1 y 5000");
   validarReparto(a.reparto);
   if (Object.keys(a.reparto).some((k) => a.reparto[k] > 0 && !esLocal(k))) falla("El reparto es solo para los locales");
@@ -256,6 +256,23 @@ export async function contarPendientes(sucursal: string) {
     [sucursal],
   );
   return r.rows[0];
+}
+
+// Avisos para la cabecera: lo que le mandaron a esta sucursal (por origen) y lo que ella mando y el destino
+// todavia no confirmo (por destino). "desde" es la hora del envio pendiente mas viejo.
+export type AvisoEnvio = { sucursal: string; unidades: number; desde: string };
+export async function avisosDe(sucursal: string): Promise<{ entrantes: AvisoEnvio[]; salientes: AvisoEnvio[] }> {
+  const r = await pool.query<{ tipo: "entra" | "sale"; sucursal: string; unidades: number; desde: Date }>(
+    `select case when hasta = $1 then 'entra' else 'sale' end as tipo,
+            case when hasta = $1 then desde else hasta end as sucursal,
+            sum(cantidad - cantidad_recibida)::int as unidades, min(creado_en) as desde
+     from traslados where estado = 'en_camino' and (hasta = $1 or desde = $1)
+     group by 1, 2 order by 4`,
+    [sucursal],
+  );
+  const de = (t: "entra" | "sale") =>
+    r.rows.filter((f) => f.tipo === t && f.unidades > 0).map((f) => ({ sucursal: f.sucursal, unidades: f.unidades, desde: new Date(f.desde).toISOString() }));
+  return { entrantes: de("entra"), salientes: de("sale") };
 }
 
 // Recibe unidades en una sucursal contra los traslados pendientes (los mas viejos primero).
@@ -425,9 +442,9 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     }
     const total = calc.total;
     const unico = calc.pagos.length === 1 ? calc.pagos[0] : null;
-    const v = await c.query<{ id: number; creado_en: Date }>(
+    const v = await c.query<{ id: number; codigo: string; creado_en: Date }>(
       `insert into ventas (sucursal_id, subtotal_lista, medio_pago_id, ajuste_medio_pago, ajuste_pct_usado, total, clave, usuario_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id, creado_en`,
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id, codigo, creado_en`,
       [sucursal, subtotal, unico ? (unico.medioId.startsWith("nota:") ? "nota_credito" : unico.medioId) : null, total - subtotal, unico?.pct ?? null, total, clave ?? null, usuarioEnCurso()?.id ?? null],
     );
     const ventaId = Number(v.rows[0].id);
@@ -449,7 +466,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       await mov(c, p.sku, cant, sucursal, null, "venta", { ventaId });
     }
     return {
-      id: ventaId,
+      codigo: v.rows[0].codigo,
       fecha: v.rows[0].creado_en.toISOString(),
       subtotal,
       ajuste: total - subtotal,
@@ -462,7 +479,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
 
 // Arma de nuevo el ticket de una venta ya registrada (para devolverlo si el cobro se reintenta).
 async function ticketDeVenta(c: PoolClient, id: number) {
-  const v = await c.query<{ creado_en: Date; subtotal_lista: number; total: number }>("select creado_en, subtotal_lista, total from ventas where id = $1", [id]);
+  const v = await c.query<{ codigo: string; creado_en: Date; subtotal_lista: number; total: number }>("select codigo, creado_en, subtotal_lista, total from ventas where id = $1", [id]);
   const it = await c.query<{ sku: string; nombre: string; precio: number; cant: number }>(
     "select sku, nombre, precio_lista as precio, cantidad as cant from venta_items where venta_id = $1 order by id", [id]);
   const pg = await c.query<{ medioId: string; nombre: string; pct: number; monto: number; valorLista: number; codigo: string | null }>(
@@ -472,7 +489,7 @@ async function ticketDeVenta(c: PoolClient, id: number) {
      from venta_pagos p join medios_pago m on m.id = p.medio_pago_id left join notas_credito n on n.id = p.nota_credito_id
      where p.venta_id = $1 order by p.id`, [id]);
   return {
-    id, fecha: v.rows[0].creado_en.toISOString(), subtotal: v.rows[0].subtotal_lista, ajuste: v.rows[0].total - v.rows[0].subtotal_lista,
+    codigo: v.rows[0].codigo, fecha: v.rows[0].creado_en.toISOString(), subtotal: v.rows[0].subtotal_lista, ajuste: v.rows[0].total - v.rows[0].subtotal_lista,
     total: v.rows[0].total, pagos: pg.rows.map((p) => ({ medioId: p.medioId, nombre: p.nombre, pct: p.pct, monto: p.monto, valorLista: p.valorLista })), items: it.rows,
   };
 }
@@ -581,14 +598,14 @@ export async function trasladosParaRemito(desde: string, hasta: string, dia?: st
 
 // ---- Notas de credito: devoluciones ----
 const SELECT_NOTA = `
-  select n.id::int as id, n.codigo, n.venta_id::int as "ventaId", n.sucursal_id as sucursal, n.creado_en as creada,
+  select n.id::int as id, n.codigo, (select vv.codigo from ventas vv where vv.id = n.venta_id) as "ventaCodigo", n.sucursal_id as sucursal, n.creado_en as creada,
     n.monto_inicial as "montoInicial", n.saldo, n.ajuste_pct::float8 as "ajustePct",
     coalesce((select jsonb_agg(jsonb_build_object('nombre', vi.nombre, 'cantidad', ni.cantidad, 'monto', ni.monto, 'falladas', ni.falladas) order by ni.id)
               from nota_credito_items ni join venta_items vi on vi.id = ni.venta_item_id where ni.nota_id = n.id), '[]'::jsonb) as items
   from notas_credito n`;
 type FilaNota = Omit<NotaCredito, "creada" | "estado"> & { creada: Date };
 const aNota = (f: FilaNota): NotaCredito => ({
-  codigo: f.codigo, ventaId: f.ventaId, sucursal: f.sucursal, creada: new Date(f.creada).toISOString(),
+  codigo: f.codigo, ventaCodigo: f.ventaCodigo, sucursal: f.sucursal, creada: new Date(f.creada).toISOString(),
   montoInicial: f.montoInicial, saldo: f.saldo, ajustePct: f.ajustePct, items: f.items,
   estado: f.saldo <= 0 ? "usada" : "vigente",
 });
@@ -606,14 +623,18 @@ const factorDeVenta = (v: { total: number; subtotal_lista: number; descuento_pro
 };
 
 // Busca una venta por el codigo de su ticket (V000123, o solo el numero) para devolver prendas.
-export async function ventaParaDevolucion(codigo: string): Promise<VentaDevolvible> {
-  const m = codigo.trim().match(/^v?0*(\d+)$/i);
-  if (!m) return falla("Escaneá el código de barras del ticket de venta (empieza con V)");
-  const v = await pool.query<{ id: number; creado_en: Date; sucursal_id: string; total: number; subtotal_lista: number; descuento_promo: number }>(
-    "select id::int as id, creado_en, sucursal_id, total, subtotal_lista, descuento_promo from ventas where id = $1", [Number(m[1])],
+export async function ventaParaDevolucion(codigo: string, soloSucursal: string | null = null): Promise<VentaDevolvible> {
+  // Solo por el codigo del ticket (no por numero interno): asi nadie puede recorrer las ventas probando numeros.
+  const cod = codigo.trim().toUpperCase();
+  if (!ES_CODIGO_VENTA.test(cod)) return falla("Escaneá el código de barras del ticket de venta (empieza con V).");
+  const v = await pool.query<{ id: number; codigo: string; creado_en: Date; sucursal_id: string; total: number; subtotal_lista: number; descuento_promo: number }>(
+    "select id::int as id, codigo, creado_en, sucursal_id, total, subtotal_lista, descuento_promo from ventas where codigo = $1", [cod],
   );
   const venta = v.rows[0];
-  if (!venta) return falla(`No existe la venta N° ${Number(m[1])}`);
+  if (!venta) return falla(`No existe la venta ${cod}`);
+  if (soloSucursal && venta.sucursal_id !== soloSucursal) {
+    return falla(`Esa compra se hizo en ${nombreSucursal(venta.sucursal_id)}: la devolución se hace en ese local.`);
+  }
   if (Date.now() - venta.creado_en.getTime() > DIAS_DEVOLUCION * 86_400_000) {
     return falla(`Esa compra es del ${venta.creado_en.toLocaleDateString("es-AR")}: pasaron más de ${DIAS_DEVOLUCION} días y ya no se acepta la devolución`);
   }
@@ -624,14 +645,14 @@ export async function ventaParaDevolucion(codigo: string): Promise<VentaDevolvib
      from venta_items vi where vi.venta_id = $1 order by vi.id`, [venta.id],
   );
   return {
-    id: venta.id, fecha: venta.creado_en.toISOString(), sucursal: venta.sucursal_id, total: venta.total,
+    codigo: venta.codigo, fecha: venta.creado_en.toISOString(), sucursal: venta.sucursal_id, total: venta.total,
     items: it.rows.map((x) => ({ ...x, valor: Math.round(x.precio * f) })),
   };
 }
 
 // Emite una nota de credito: devuelve las prendas elegidas al stock de la sucursal y deja un saldo a favor por 15 dias.
 // `falladas` = unidades del renglon que estan falladas: esas dan igual la nota, pero NO vuelven al stock.
-export async function emitirNota(sucursal: string, ventaId: number, items: { itemId: number; cant: number; falladas: number }[]) {
+export async function emitirNota(sucursal: string, ventaCodigo: string, items: { itemId: number; cant: number; falladas: number }[], soloSucursal: string | null = null) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const pedidos = items.filter((i) => i.cant > 0).sort((a, b) => a.itemId - b.itemId);
   if (pedidos.length === 0) falla("Elegí al menos una prenda para devolver");
@@ -639,10 +660,14 @@ export async function emitirNota(sucursal: string, ventaId: number, items: { ite
     if (!Number.isInteger(i.cant) || !Number.isInteger(i.itemId) || !Number.isInteger(i.falladas) || i.falladas < 0 || i.falladas > i.cant) falla("Cantidad inválida");
   }
   return tx(async (c) => {
-    const v = await c.query<{ total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean }>(
-      `select total, subtotal_lista, descuento_promo, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera from ventas where id = $1 for update`, [ventaId],
+    const v = await c.query<{ id: number; total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean; sucursal_id: string }>(
+      `select id::int as id, total, subtotal_lista, descuento_promo, sucursal_id, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera
+       from ventas where codigo = $1 for update`, [String(ventaCodigo).trim().toUpperCase()],
     );
     if (!v.rows[0]) return falla("No existe esa venta");
+    const ventaId = v.rows[0].id;
+    // Un local solo devuelve compras de su propio local: si no, se podria "crear" stock y vales con ventas ajenas.
+    if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}: la devolución se hace en ese local.`);
     if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra: ya no se acepta la devolución`);
     const f = factorDeVenta(v.rows[0]);
     const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number }>(

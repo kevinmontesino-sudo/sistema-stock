@@ -3,9 +3,9 @@ import { useEffect, useRef } from "react";
 import JsBarcode from "jsbarcode";
 import { QRCodeSVG } from "qrcode.react";
 import { empresa } from "@/lib/empresa.config";
-import { pesos } from "@/lib/util";
+import { textoPrecioEtiqueta } from "@/lib/util";
 
-export type PrecioEtiqueta = { nombre: string; valor: number };
+export type PrecioEtiqueta = { nombre: string; valor: number; cuotas?: number };
 export type DatosEtiqueta = { sku: string; nombre: string; precios: PrecioEtiqueta[]; marco?: boolean };
 
 function Barras({ valor }: { valor: string }) {
@@ -33,15 +33,16 @@ function Barras({ valor }: { valor: string }) {
 export function Etiqueta({ sku, nombre, precios, marco }: DatosEtiqueta) {
   const barras = empresa.codigoEtiqueta === "code128";
   return (
-    <div className={`${barras ? "etiqueta con-barras" : "etiqueta"}${marco ? " con-marco" : ""}`}>
+    // Vista previa: con nombre largo (dos lineas) las barras bajan un poco, igual que en la etiqueta impresa.
+    <div className={`${barras ? "etiqueta con-barras" : "etiqueta"}${marco ? " con-marco" : ""}${sku.length + nombre.length > 26 ? " nombre-largo" : ""}`}>
       {barras ? <Barras valor={sku} /> : <QRCodeSVG value={sku || "SKU"} size={84} marginSize={0} />}
       <div className="etiqueta-texto">
         <div className="etiqueta-cab">
           <span className="etiqueta-sku">{sku}</span>
           <span className="etiqueta-nombre">{nombre}</span>
         </div>
-        {precios.map((p) => (
-          <div key={p.nombre} className="etiqueta-precio">{p.nombre}: {pesos(p.valor)}</div>
+        {precios.map((p, i) => (
+          <div key={i} className="etiqueta-precio">{textoPrecioEtiqueta(p)}</div>
         ))}
       </div>
     </div>

@@ -8,7 +8,7 @@ import type { NotaCredito } from "@/lib/util";
 // Fecha fija: si fuera "la hora de ahora", el servidor y el navegador mostrarian horas distintas.
 const ahora = "2026-10-13T12:00:00-03:00";
 const ventaEjemplo: DatosTicket = {
-  id: 999999, fecha: ahora, sucursal: "zelarrayan", subtotal: 47500, ajuste: -5500, total: 42000,
+  codigo: "V9F3A2C7B", fecha: ahora, sucursal: "zelarrayan", subtotal: 47500, ajuste: -5500, total: 42000,
   items: [
     { sku: "REM000001", nombre: "Remera buenos tiempos", precio: 16000, cant: 2 },
     { sku: "JEA000001", nombre: "Jean wide leg dama", precio: 15500, cant: 1 },
@@ -20,7 +20,7 @@ const ventaEjemplo: DatosTicket = {
   recibido: 25000,
 };
 const notaEjemplo: NotaCredito = {
-  codigo: "N999999", ventaId: 999999, sucursal: "zelarrayan", creada: ahora, montoInicial: 12800, saldo: 12800, ajustePct: -20, estado: "vigente",
+  codigo: "N9A8B7C6D5E", ventaCodigo: "V9F3A2C7B", sucursal: "zelarrayan", creada: ahora, montoInicial: 12800, saldo: 12800, ajustePct: -20, estado: "vigente",
   items: [{ nombre: "Remera buenos tiempos", cantidad: 1, monto: 12800, falladas: 0 }],
 };
 
@@ -30,7 +30,7 @@ export default function TicketsPrueba() {
       <h1>Vista previa de tickets</h1>
       <p className="aviso" style={{ marginTop: -8 }}>
         Datos de ejemplo, no se guarda nada. Probá escanear los códigos de barras desde la pantalla: en Venta o en Devolución tendrían que leerse.
-        El ticket de venta lleva el código <strong>V999999</strong> y la nota de crédito <strong>N999999</strong> (no existen en el sistema).
+        El ticket de venta lleva el código <strong>V9F3A2C7B</strong> y la nota de crédito <strong>N9A8B7C6D5E</strong> (no existen en el sistema).
       </p>
       <div className="fila" style={{ alignItems: "flex-start", gap: 24, flexWrap: "wrap" }}>
         <div><p className="rotulo">Ticket de venta</p><div style={{ boxShadow: "0 0 0 1px var(--borde)" }}><Ticket venta={ventaEjemplo} /></div></div>

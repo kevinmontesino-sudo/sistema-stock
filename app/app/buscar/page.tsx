@@ -1,18 +1,21 @@
 "use client";
 import { useEffect, useState } from "react";
 import { usePuede } from "@/components/SesionContext";
-import { ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto, ingresosProducto, obtenerMediosPago } from "@/app/actions";
+import { ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto, ingresosProducto, obtenerMediosPago, reimprimirEtiqueta } from "@/app/actions";
+import { Etiqueta } from "@/components/Etiqueta";
 import { empresa } from "@/lib/empresa.config";
 import { useDebounced } from "@/lib/hooks";
-import { fechaCorta, nombreSucursal, pesos, precioMedio, type MedioPago, type Producto } from "@/lib/util";
+import { fechaCorta, nombreSucursal, pesos, precioMedio, preciosDe, type MedioPago, type Producto } from "@/lib/util";
 
-type Panel = "editar" | "ajustar" | "ingresos" | null;
+type Panel = "editar" | "ajustar" | "ingresos" | "etiqueta" | null;
 
 export default function Buscar() {
   // Solo comodidad de la pantalla: el servidor vuelve a verificar el permiso en cada accion.
   const puedeEditar = usePuede("editar_producto");
   const puedeAjustar = usePuede("ajustar_stock");
   const puedeEliminar = usePuede("eliminar_producto");
+  const puedeEtiquetar = usePuede("imprimir_etiquetas");
+  const [cantEtiq, setCantEtiq] = useState("1");
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
   const [lista, setLista] = useState<Producto[]>([]);
@@ -54,9 +57,21 @@ export default function Buscar() {
     if (r.ok) setIngresos(r.ingresos);
   }
 
+  async function imprimirEtiqueta() {
+    if (!elegido || ocupado) return;
+    setOcupado(true);
+    setMensaje(null);
+    const r = await reimprimirEtiqueta(elegido.sku, parseInt(cantEtiq) || 0);
+    setOcupado(false);
+    if (!r.ok) return setMensaje({ texto: r.motivo, mala: true });
+    setMensaje({ texto: `${r.enviadas} etiqueta${r.enviadas === 1 ? "" : "s"} de ${elegido.nombre} enviada${r.enviadas === 1 ? "" : "s"} a la impresora. El stock no cambió.`, mala: false });
+    setPanel(null);
+  }
+
   function abrir(p: Producto, que: Panel) {
     setSku(p.sku);
     setPanel(que);
+    setCantEtiq("1");
     setNombre(p.nombre);
     setPrecio(String(p.precio));
     setCant(Object.fromEntries(empresa.sucursales.map((s) => [s.id, String(p.stock[s.id] ?? 0)])));
@@ -112,7 +127,7 @@ export default function Buscar() {
 
   return (
     <>
-      <h1>Buscar producto</h1>
+      <h1>Buscar prenda</h1>
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} autoFocus
         placeholder="SKU o nombre (ej: remera oversize)" style={{ width: "100%", marginBottom: 12 }} />
       {mensaje && <p className={`alerta ${mensaje.mala ? "mala" : ""}`} role="alert">{mensaje.texto}</p>}
@@ -145,7 +160,8 @@ export default function Buscar() {
                       {p.enCamino[s.id] ? <div className="interno">+{p.enCamino[s.id]} en camino</div> : null}
                     </td>
                   ))}
-                  <td className="der" style={{ whiteSpace: "nowrap" }}>
+                  <td className="der" style={{ minWidth: 150 }}>
+                    {puedeEtiquetar && <button className="chico" onClick={() => abrir(p, "etiqueta")}>🏷️ Etiqueta</button>}{" "}
                     <button className="chico" onClick={() => verIngresos(p)}>Ingresos</button>{" "}
                     {puedeEditar && <button className="chico" onClick={() => abrir(p, "editar")}>Editar</button>}{" "}
                     {puedeAjustar && <button className="chico" onClick={() => abrir(p, "ajustar")}>Ajustar stock</button>}{" "}
@@ -157,6 +173,23 @@ export default function Buscar() {
           </table>
         )}
       </div>
+
+      {elegido && panel === "etiqueta" && (
+        <div className="tarjeta" style={{ marginTop: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Imprimir etiqueta de {elegido.nombre} ({elegido.sku})</h2>
+          <p className="aviso">Para una etiqueta perdida o que salió mal. <strong>No suma ni resta stock.</strong> Sale con el precio actual.</p>
+          <Etiqueta sku={elegido.sku} nombre={elegido.nombre} precios={preciosDe(elegido.precio, medios)} />
+          <label className="fila" style={{ gap: 8, margin: "12px 0" }}>
+            <span>Cantidad de etiquetas</span>
+            <input type="number" inputMode="numeric" min={1} max={100} value={cantEtiq} style={{ width: 90 }}
+              onChange={(e) => setCantEtiq(e.target.value)} onKeyDown={(e) => e.key === "Enter" && imprimirEtiqueta()} autoFocus />
+          </label>
+          <div className="fila">
+            <button className="principal" onClick={imprimirEtiqueta} disabled={ocupado}>{ocupado ? "Imprimiendo…" : "Imprimir"}</button>
+            <button onClick={() => setPanel(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
 
       {elegido && panel === "ingresos" && (
         <div className="tarjeta" style={{ marginTop: 16 }}>

@@ -75,7 +75,7 @@ export default function IngresoLocal() {
 
   return (
     <>
-      <h1>Ingreso · {nombreSucursal(sucursal)}</h1>
+      <h1>Recibir · {nombreSucursal(sucursal)}</h1>
       <p className="aviso" style={{ marginTop: -8 }}>Acá se reciben los envíos. Escaneá cada prenda que llega o tocá «Recibir todo».</p>
 
       <h2>Te enviaron (pendiente de recibir)</h2>

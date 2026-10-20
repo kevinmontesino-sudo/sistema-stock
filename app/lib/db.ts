@@ -12,19 +12,25 @@ export const pool =
     lock_timeout: 8000, // ni esperar un bloqueo de otra venta por mas de 8 s
   }));
 
+// Si se corta una conexion que estaba quieta (se cayo la red o el tunel), pg avisa con un evento "error".
+// Sin este manejador Node lo toma como error no atendido y se cae todo el servidor; asi solo se descarta esa conexion.
+if (!pool.listenerCount("error")) pool.on("error", (e) => console.error("[db] conexion perdida:", e.message));
+
 export type Db = Pool | PoolClient;
 
 export async function tx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
   const c = await pool.connect();
+  let r: T;
   try {
     await c.query("begin");
-    const r = await fn(c);
+    r = await fn(c);
     await c.query("commit");
-    return r;
   } catch (e) {
-    await c.query("rollback");
+    // Si la conexion se murio, el rollback tambien falla: se informa el error original y la conexion se descarta.
+    const rota = await c.query("rollback").then(() => false, () => true);
+    c.release(rota);
     throw e;
-  } finally {
-    c.release();
   }
+  c.release();
+  return r;
 }
