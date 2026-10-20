@@ -19,6 +19,8 @@ export const empresa = {
   skuDigitos: 6,
   // Medios de pago cuyo precio se imprime en la etiqueta (los porcentajes se leen de la tabla medios_pago).
   etiquetaMedios: ["transferencia", "efectivo"],
+  // Ultima linea de la etiqueta: "3 cuotas de $X" = precio con el recargo de este medio, dividido en N cuotas.
+  etiquetaCuotas: { medio: "tarjeta", cantidad: 3 },
   codigoEtiqueta: "code128" as "code128" | "qr",
   // Medida del rollo de etiquetas, en milímetros. Ajustar a la impresora y rollo reales.
   etiquetaMm: { ancho: 50, alto: 30 },

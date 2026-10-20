@@ -37,6 +37,8 @@ export function validarClaveNueva(clave: string, email: string): string | null {
   const tipos = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((re) => re.test(clave)).length;
   if (tipos < 3) return "Usá al menos 3 tipos de caracteres: minúsculas, mayúsculas, números y símbolos.";
   const baja = clave.toLowerCase();
+  // Nada que se pueda adivinar sabiendo el nombre del negocio o del sistema.
+  if (/masprendas|menosmas|xmenos|prendas|stock/.test(baja.replace(/[^a-z]/g, ""))) return "No uses el nombre del negocio ni del sistema en la contraseña: es lo primero que se prueba.";
   if (COMUNES.has(baja) || baja === email.toLowerCase() || baja.includes(email.split("@")[0].toLowerCase())) return "Esa contraseña es muy fácil de adivinar. Elegí otra.";
   return null;
 }

@@ -21,7 +21,7 @@ export function TicketNota({ nota }: { nota: NotaCredito }) {
       <div className="linea"><span className="total-t">VALOR</span><span className="total-t">{pesos(nota.montoInicial)}</span></div>
       {nota.saldo !== nota.montoInicial && <div className="linea"><span>Saldo disponible</span><span>{pesos(nota.saldo)}</span></div>}
       <div className="centro" style={{ marginTop: 6 }}><strong>Sin vencimiento</strong></div>
-      <CodigoBarras valor={nota.codigo} />
+      <CodigoBarras valor={nota.codigo} ancho="62mm" />
       <div className="centro">Presentala en la caja: se descuenta del total de tu compra.</div>
       <hr />
       <div className="centro">Documento interno</div>

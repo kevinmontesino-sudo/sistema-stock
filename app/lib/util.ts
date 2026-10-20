@@ -22,6 +22,10 @@ export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; motivo: st
 export const normalizar = (s: string) =>
   s.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
 
+// Texto de una linea de precio de la etiqueta: "Efectivo: $ 14.000" o "3 cuotas de $ 6.400".
+export const textoPrecioEtiqueta = (p: { nombre: string; valor: number; cuotas?: number }) =>
+  p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`;
+
 export const pesos = (n: number) => "$ " + n.toLocaleString("es-AR");
 
 export function fechaCorta(iso: string) {
@@ -96,7 +100,8 @@ export function calcularPagos(
 // ---- Notas de credito (devoluciones) ----
 export const codigoVenta = (id: number) => "V" + String(id).padStart(6, "0");
 export const ES_CODIGO_VENTA = /^v\d{6}$/i;
-export const ES_CODIGO_NOTA = /^n\d{6}$/i;
+// Codigo de nota: N + 10 caracteres al azar (no adivinable: la nota es plata al portador).
+export const ES_CODIGO_NOTA = /^n[0-9a-f]{10}$/i;
 export const ES_ESCANEO_NOTA = ES_CODIGO_NOTA;
 // La nota de credito no vence; lo que tiene limite es devolver una compra: hasta 15 dias despues.
 export const DIAS_DEVOLUCION = 15;

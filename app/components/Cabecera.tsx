@@ -20,7 +20,9 @@ const links: { href: string; texto: string; permiso: Permiso }[] = [
   { href: "/devolucion", texto: "Devolución", permiso: "devolver" },
   { href: "/buscar", texto: "Buscar", permiso: "catalogo" },
   { href: "/admin/usuarios", texto: "Usuarios", permiso: "admin" },
+  { href: "/admin/informes", texto: "Informes", permiso: "admin" },
   { href: "/admin/auditoria", texto: "Auditoría", permiso: "admin" },
+  { href: "/admin/accesos", texto: "Accesos API", permiso: "admin" },
 ];
 
 export function Cabecera() {

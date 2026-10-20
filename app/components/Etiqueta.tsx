@@ -3,9 +3,9 @@ import { useEffect, useRef } from "react";
 import JsBarcode from "jsbarcode";
 import { QRCodeSVG } from "qrcode.react";
 import { empresa } from "@/lib/empresa.config";
-import { pesos } from "@/lib/util";
+import { textoPrecioEtiqueta } from "@/lib/util";
 
-export type PrecioEtiqueta = { nombre: string; valor: number };
+export type PrecioEtiqueta = { nombre: string; valor: number; cuotas?: number };
 export type DatosEtiqueta = { sku: string; nombre: string; precios: PrecioEtiqueta[]; marco?: boolean };
 
 function Barras({ valor }: { valor: string }) {
@@ -40,8 +40,8 @@ export function Etiqueta({ sku, nombre, precios, marco }: DatosEtiqueta) {
           <span className="etiqueta-sku">{sku}</span>
           <span className="etiqueta-nombre">{nombre}</span>
         </div>
-        {precios.map((p) => (
-          <div key={p.nombre} className="etiqueta-precio">{p.nombre}: {pesos(p.valor)}</div>
+        {precios.map((p, i) => (
+          <div key={i} className="etiqueta-precio">{textoPrecioEtiqueta(p)}</div>
         ))}
       </div>
     </div>

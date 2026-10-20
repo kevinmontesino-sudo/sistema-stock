@@ -8,7 +8,7 @@ import { imprimir } from "@/lib/imprimir";
 import { useDebounced, useModoEtiquetas, type ModoEtiquetas } from "@/lib/hooks";
 import { imprimirDirecto } from "@/lib/qz";
 import { trabajosTspl } from "@/lib/tspl";
-import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo } from "@/lib/util";
+import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo, textoPrecioEtiqueta } from "@/lib/util";
 
 type FilaLote = { sku: string; nombre: string; precio: number; precios: PrecioEtiqueta[]; ultimoIngreso: string; n: number; reparto: Reparto };
 type Vista = { sku: string; existe: boolean; existente: { stockTotal: number; ultimoIngreso: string | null } | null; otrosPrecios: number[]; tipo: { codigo: string; nombre: string; nuevo: boolean } };
@@ -22,6 +22,10 @@ function preciosDe(precio: number, medios: MedioPago[]): PrecioEtiqueta[] {
     const m = medios.find((x) => x.id === id);
     return m ? [{ nombre: m.nombre, valor: precioMedio(precio, m.ajustePct) }] : [];
   });
+  // Cuotas: precio con el recargo de la tarjeta dividido en la cantidad de cuotas (redondeado al peso).
+  const { medio, cantidad } = empresa.etiquetaCuotas;
+  const mc = medios.find((x) => x.id === medio);
+  if (mc && cantidad > 0) p.push({ nombre: `${cantidad} cuotas`, valor: Math.round(precioMedio(precio, mc.ajustePct) / cantidad), cuotas: cantidad } as PrecioEtiqueta);
   return p.length ? p : [{ nombre: "Precio", valor: precio }];
 }
 
@@ -256,7 +260,7 @@ export default function Carga() {
             </div>
             {precioNum > 0 && (
               <p className="nota">
-                {preciosDe(precioNum, medios).map((p) => `${p.nombre}: ${pesos(p.valor)}`).join(" · ")}
+                {preciosDe(precioNum, medios).map((p) => textoPrecioEtiqueta(p)).join(" · ")}
               </p>
             )}
             {vista && vista.otrosPrecios.length > 0 && precioNum > 0 && (

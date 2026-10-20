@@ -86,6 +86,8 @@ export async function cargarProducto(a: {
   categoria: string; nombre: string; precio: number; cantidad: number; foto?: string | null; reparto: Reparto;
 }) {
   return seguro("cargar", async () => {
+    // La foto solo puede ser una imagen embebida (data:image): nada de direcciones externas ni otros tipos de dato.
+    if (a.foto && !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]{20,}$/.test(txt(a.foto))) throw new repo.ErrorNegocio("La foto no es una imagen válida.");
     const producto = await repo.cargar({
       categoria: txt(a.categoria), nombre: txt(a.nombre), precio: ent(a.precio), cantidad: ent(a.cantidad),
       foto: a.foto ? txt(a.foto).slice(0, 60000) : null, reparto: reparto(a.reparto),
@@ -170,7 +172,7 @@ export async function cajaDeHoy(sucursal: string) {
 }
 
 export async function ventaParaDevolver(codigo: string) {
-  return seguro("devolver", async () => ({ venta: await repo.ventaParaDevolucion(txt(codigo)) }));
+  return seguro("devolver", async (u) => ({ venta: await repo.ventaParaDevolucion(txt(codigo), sucursalFija(u.rol, u.sucursalId)) }));
 }
 
 export async function emitirNotaCredito(sucursal: string, ventaId: number, items: { itemId: number; cant: number; falladas: number }[]) {
@@ -178,6 +180,7 @@ export async function emitirNotaCredito(sucursal: string, ventaId: number, items
     const nota = await repo.emitirNota(
       suc(u, txt(sucursal)), ent(ventaId),
       (Array.isArray(items) ? items : []).map((i) => ({ itemId: ent(i.itemId), cant: ent(i.cant), falladas: ent(i.falladas) || 0 })),
+      sucursalFija(u.rol, u.sucursalId),
     );
     await auditar("nota_emitida", { nota: nota.codigo, venta: nota.ventaId, monto: nota.montoInicial, sucursal: nota.sucursal, items: nota.items });
     return { nota };
@@ -223,7 +226,7 @@ export async function imprimirEtiquetasServidor(cola: DatosEtiqueta[]) {
       sku: txt(e?.sku).slice(0, 40),
       nombre: txt(e?.nombre).slice(0, 120),
       marco: !!e?.marco,
-      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 3).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0 })),
+      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 4).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0, ...(ent(p?.cuotas) > 0 ? { cuotas: Math.min(ent(p.cuotas), 24) } : {}) })),
     }));
     await imprimirEtiquetasEnServidor(limpia);
     return { enviadas: limpia.length };

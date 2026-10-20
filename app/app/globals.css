@@ -44,7 +44,7 @@ a { color: var(--acento); }
 .sucursal { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--suave); }
 
 input, select, button { font: inherit; color: inherit; }
-input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="password"], select {
+input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="password"], input[type="date"], select {
   height: 44px; padding: 0 12px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta);
 }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
@@ -128,7 +128,7 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 .etiqueta-cab { display: flex; align-items: baseline; gap: 2mm; white-space: nowrap; overflow: hidden; }
 .etiqueta-sku { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 11px; }
 .etiqueta-nombre { font-size: 9px; overflow: hidden; text-overflow: ellipsis; }
-.etiqueta-precio { font-size: 12px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.etiqueta-precio { font-size: 10.5px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 .boton-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta); color: var(--texto); text-decoration: none; }
 .insignia { display: inline-block; margin-left: 6px; min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--error); color: #fff; font-size: 12px; font-weight: 700; text-align: center; }
 .medios { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }

@@ -465,3 +465,41 @@ La eleccion final la define la prueba con la impresora y el scanner reales (secc
 - **Pendiente:** `db/010_usuario_web.sql` (usuario de base con permisos minimos, para correr con un superusuario); cerrar el puerto 5432; HTTPS; backups fuera del servidor con prueba de restauracion; CSP con nonce; `allowedOrigins` de las server actions con el dominio final; politica de contrasenas y rotacion definida por Kevin.
 - **Antes de entrar por primera vez:** la contrasena temporal de Kevin esta en `app/admin-inicial.local` (ignorado por git); al ingresar se pide cambiarla. Crear a Cesar desde Usuarios (o con `npm run usuario -- crear`).
 
+## 37. Etiqueta con cuotas y cuenta principal (19 de octubre)
+
+- **Etiqueta de la prenda (50x30):** ahora imprime tres lineas de precio: **Transferencia** (= lista), **Efectivo** (lista -20%) y **"3 cuotas de $X"**, donde X = (lista + recargo de la tarjeta) / 3, redondeado al peso. Ejemplo: lista $16.000 -> tarjeta $19.200 -> 3 cuotas de $6.400. El recargo sale de la base (hoy 20%), asi que si cambia el porcentaje, cambian las cuotas. Configuracion: `etiquetaMedios` y `etiquetaCuotas` en `app/lib/empresa.config.ts`. Para que entren tres lineas el codigo de barras bajo de 12 a 10 mm de alto (el ancho de cada barra, lo que importa para leer, no cambio).
+- **Cuenta principal:** el administrador principal usa **gerencia@xmenosmasprendas.com**. Recomendacion: cada persona con su propia cuenta (Kevin, Cesar, cada encargado y vendedor), porque la auditoria registra quien hizo cada cosa y la doble verificacion es personal; la cuenta de gerencia queda como cuenta del dueno.
+- **Contrasenas:** se rechazan las que contienen el nombre del negocio o del sistema.
+
+## 38. Auditoria de seguridad a fondo (19 de octubre)
+
+**Corregido hoy (hallazgos propios):**
+1. **CRITICO:** `secretoParaAlta` estaba exportada en un archivo de acciones del servidor: cualquiera en internet, sin sesion, podia pedir el secreto de doble verificacion de una cuenta. Movida a `lib/seguridad/alta2fa.ts`. Regla: en un archivo "use server" todo lo exportado es invocable desde afuera.
+2. **ALTO:** los codigos de nota de credito eran secuenciales (N000001...). Es plata al portador: un empleado podia probar codigos hasta usar vales ajenos. Ahora son N + 10 caracteres al azar (`db/011`).
+3. **ALTO:** un local podia buscar y devolver ventas de otro local, creando stock y vales de la nada. Ahora cada local solo devuelve sus ventas (el administrador, todas).
+4. **MEDIO:** el limite de intentos tomaba la IP del navegador (falsificable) y se podia dejar afuera a un usuario conocido. Ahora la IP solo se toma con `TRUST_PROXY_HOPS` y el bloqueo es por usuario+IP (5), usuario (15) e IP (30).
+5. **MEDIO:** la foto de una prenda no se validaba (solo imagen embebida jpeg/png/webp). Precio con tope. Se borraron los archivos de ejemplo de Next en `public/`.
+6. **MEDIO:** el respaldo estaba desactualizado (faltaban pagos, notas y auditoria) y copiaba los hashes de claves. Ahora incluye las 16 tablas y excluye contrasenas y secretos de 2FA.
+
+**Verificado sin problemas:** las 35 acciones del servidor rechazan pedidos sin sesion (barrido automatico); no hay inyeccion SQL (todo va como parametro); no hay `dangerouslySetInnerHTML`, `eval` ni ejecucion de comandos con datos del usuario; el build de produccion no incluye mapas de codigo ni secretos; `npm audit`: 0 vulnerabilidades; cabeceras de seguridad y CSP activas.
+
+**Riesgos que quedan (ordenados):**
+1. **El puerto 5432 de la base esta abierto a internet y sin cifrado** (el servidor no soporta SSL): usuario y datos viajan en claro desde la Mac. Es el riesgo mas alto hoy. Se resuelve al publicar la app dentro del VPS y cerrando el puerto (o filtrando por IP).
+2. La app se conecta como duena de las tablas (`stock_app`): aplicar `db/010_usuario_web.sql` con un superusuario.
+3. Cuentas compartidas por sucursal: la auditoria registra el local, no la persona; cambiar la clave cuando alguien se va; una nota de credito se puede emitir sin que el sistema compruebe la devolucion fisica: revisar a diario las notas emitidas (pendiente: informe de notas) y evaluar aprobacion del administrador sobre cierto monto.
+4. Numero de ticket secuencial (V000123): quien compra y lee el numero puede estimar cuantas ventas hace el negocio por dia. Opcion: codigo de ticket no secuencial como en las notas.
+5. El servidor de desarrollo escucha en toda la red local (`*:3000`): no dejarlo abierto en una red publica; en produccion solo detras de HTTPS.
+6. Sin HTTPS la cookie de sesion viajaria en claro: HTTPS obligatorio al publicar.
+7. Sin limite general de pedidos (solo en login): poner el servicio detras de Cloudflare o limitar en Traefik. CSP con `unsafe-inline` en scripts (mejorable con nonce).
+8. Respaldos sin cifrar en el disco de la Mac (activar FileVault) y respaldos automaticos fuera del servidor pendientes.
+9. Dependencia `qz-tray` sin uso (modo de impresion descartado): eliminarla reduce superficie.
+10. Auditoria no registra consultas (quien miro que), solo cambios.
+
+## 39. Informes y API para Cesar (19 de octubre)
+
+- **Informes** (`/admin/informes`, solo administradores, con CSV): ventas, prendas, total pagado, cobrado en caja y ticket promedio por sucursal; evolucion por dia/semana/mes; medios de pago; **prendas mas vendidas** (vendidas, devueltas, netas, importe y desglose por local); prendas que menos se venden con stock; dias y horas de mayor venta; notas de credito (emitidas, usadas, saldo pendiente, falladas); stock valorizado; mercaderia cargada y enviada. Filtros: hoy, ayer, 7/30 dias, mes, rango libre y sucursal. Las consultas son solo SELECT y estan en `app/lib/informes.ts` (las usan la pantalla y la API). Probado contra numeros calculados a mano con ventas repartidas en dias, locales y medios.
+- **API de solo lectura** `GET /api/informes` con llave `Bearer xmp_...` (256 bits al azar; en la base solo queda la huella; vence a 30/90/180 dias; se revoca al instante; 30 pedidos por minuto; cada consulta queda en la Auditoria; solo totales, sin datos personales ni contrasenas; parametros validados). Se administran en **Accesos API**. Probado: sin llave, llave falsa, mal formada, vencida y revocada dan 401; parametros invalidos e intentos de inyeccion dan 400; POST no permitido.
+- **Conector para Claude** (`app/scripts/mcp-informes.mjs`, sin dependencias, protocolo MCP por stdio) y guia `INSTRUCCIONES_API_INFORMES.txt` con la configuracion para Claude Desktop y Claude Code.
+- **Llave de Cesar:** creada con vencimiento a 90 dias; esta en `app/token-cesar.local` (ignorado por git). **No se puede usar hasta publicar el sistema** (hoy corre solo en la Mac del deposito).
+- **Pendiente:** cierre diario sellado; informe de productividad por cuenta; alertas (stock bajo, diferencias).
+

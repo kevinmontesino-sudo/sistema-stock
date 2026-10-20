@@ -17,6 +17,7 @@ Ruta del proyecto: carpeta raiz con dos partes: app/ (la aplicacion) y db/ (scri
 - Desde la carpeta raiz: npm --prefix app run dev  -> http://localhost:3000
 - Comprobaciones antes de entregar: (en app/) npx tsc --noEmit   y   npx eslint app lib components proxy.ts   (deben dar 0 errores; hay 3 avisos conocidos de <img>)
 - Variables de entorno en app/.env.local (NUNCA subir a git, NUNCA pegar su contenido en ningun chat): DATABASE_URL, APP_KEY (cifra los secretos de la doble verificacion; no cambiarla una vez en uso). Ejemplo en app/.env.example.
+- Variables de entorno de produccion: DATABASE_URL, APP_KEY, NODE_ENV=production, TRUST_PROXY_HOPS=1.
 - Base de datos: sistema_stock en el VPS. Usuario stock_app (dueno de las tablas). Se aplican migraciones directo con node + pg leyendo DATABASE_URL (ver db/*.sql, numeradas 001 a 010; la 010 es para correr con un superusuario y todavia NO esta aplicada).
 - Scripts utiles (en app/): npm run respaldo (JSON con todas las tablas, carpeta respaldos/ ignorada por git); npm run usuario -- <listar|crear|clave|desbloquear|reset-2fa>.
 
@@ -39,6 +40,7 @@ Ruta del proyecto: carpeta raiz con dos partes: app/ (la aplicacion) y db/ (scri
 - Solo se vende lo que hay en el stock del local elegido. El stock que va "en camino" no se puede vender hasta que el local lo recibe.
 - La nota de credito vale lo que el cliente pago por esas prendas (con el ajuste del medio). Al usarla cubre monto / (1 + ajuste) del valor de lista. No vence. Se devuelve hasta 15 dias despues de la compra. Solo vale (no efectivo). Falladas no vuelven al stock.
 - Ticket interno, no fiscal (ARCA mas adelante). Etiquetas 50x30 mm, ticket 80 mm.
+- La etiqueta de cada prenda muestra: Transferencia (= lista), Efectivo (lista -20%) y "3 cuotas de $X" (lista con el recargo de la tarjeta, dividido en 3, redondeado al peso). Config: etiquetaMedios y etiquetaCuotas en app/lib/empresa.config.ts.
 - Promos (3x2 siempre sobre precio de lista, a veces acumulables; 2x1; descuentos por promo): PENDIENTES. Las crea y activa solo un administrador desde un panel. La venta ya tiene el campo descuento_promo.
 - Ventas por telefono en el Deposito: PENDIENTE de definir con Kevin (cobro, entrega, reserva de stock, estados del pedido).
 
@@ -53,6 +55,7 @@ Ruta del proyecto: carpeta raiz con dos partes: app/ (la aplicacion) y db/ (scri
 - Auditoria: tabla auditoria (solo se agrega). Se registra: login, fallos, bloqueos, 2FA, cambios de clave, usuarios, cargas, envios, notas emitidas, cambios de precio, ajustes de stock, bajas, accesos denegados.
 - Contrasenas: minimo 10 caracteres y 3 tipos de caracteres. Las que crea un administrador son temporales (se muestran una sola vez y obligan a cambiarlas).
 - Cabeceras de seguridad y CSP en app/next.config.ts. npm audit: 0 vulnerabilidades.
+- Auditoria de seguridad (19/10): se encontro y corrigio una accion publica que exponia secretos de 2FA (secretoParaAlta estaba exportada en un archivo "use server"; REGLA: en un archivo "use server" TODO lo que se exporta es invocable desde internet sin sesion; helpers van en lib/ sin esa directiva), codigos de nota de credito adivinables (ahora N + 10 caracteres al azar, db/011), devoluciones de ventas de otro local (ahora cada local solo devuelve sus ventas), IP falsificable en el limite de intentos (ahora solo se confia en TRUST_PROXY_HOPS; poner 1 detras de Easypanel), foto sin validar, respaldo incompleto y con hashes de claves. Barrido automatico: las 35 acciones rechazan pedidos sin sesion.
 - Pendiente de seguridad: aplicar db/010_usuario_web.sql con un superusuario y usar el usuario stock_web en produccion; cerrar el puerto 5432 al publicar; HTTPS; copias de seguridad automaticas fuera del servidor con prueba de restauracion; CSP con nonce (mejora); allowedOrigins de las server actions con el dominio final.
 
 
@@ -71,19 +74,19 @@ Ruta del proyecto: carpeta raiz con dos partes: app/ (la aplicacion) y db/ (scri
 - Los commits y el push los hace Antigravity (esta vinculado al GitHub de Kevin). Claude NO hace commits ni push.
 - Dos herramientas NO editan el mismo archivo a la vez. Cada una tiene su zona:
   * CLAUDE (nucleo): app/app/actions.ts, app/lib/repo.ts, app/lib/util.ts, app/lib/seguridad/**, app/app/login, cuenta, admin/usuarios, admin/auditoria, pantallas de venta/carga/devolucion, base de datos (migraciones), promos y cierre diario.
-  * ANTIGRAVITY (informes y publicacion): app/app/admin/informes/** , app/lib/informes.ts, app/app/admin/informes-acciones.ts (informes de solo lectura: ver REQUISITOS_SEGURIDAD_E_INFORMES.txt); y todo lo de publicacion: Dockerfile, .dockerignore, guia de despliegue en Easypanel (docs/DEPLOY.txt), programa de impresion local para el Deposito.
+  * ANTIGRAVITY (publicacion): Dockerfile, .dockerignore, guia de despliegue en Easypanel (docs/DEPLOY.txt), programa de impresion local para el Deposito. Los INFORMES (app/lib/informes.ts, app/app/admin/informes, API app/app/api/informes, llaves en app/app/admin/accesos) YA ESTAN HECHOS por Claude el 19/10 (Kevin se los encargo a Claude): no rehacerlos; ampliarlos solo coordinando con Kevin.
   * Si una herramienta necesita tocar un archivo de la otra zona, se lo pide a Kevin y espera.
 - Todo informe nuevo debe: ser solo lectura (SELECT), pasar por una accion que verifique el permiso admin (copiar el patron de app/app/admin/acciones.ts con la funcion admin()), estar bajo app/app/admin/ (el layout ya exige rol administrador) y NUNCA exponer datos sin sesion.
 - Antes de entregar cualquier cambio: tsc y eslint sin errores. Si se toca el cobro, las devoluciones o las notas: correr las pruebas de cuentas (probar transferencia, efectivo, tarjeta y pagos mixtos; subtotal + ajuste = total; lo cobrado = total).
 - Pruebas con datos propios con prefijo ZZ (SKU ZZZ00000N, emails zz-...@prueba.test) y borrarlos al terminar. Como las ventas y el historial son inmutables, la limpieza de pruebas se hace con SET LOCAL app.mantenimiento = 'on' dentro de una transaccion y SOLO sobre los datos ZZ. Antes de cualquier cambio destructivo en la base: npm run respaldo.
 - Para correr un script TypeScript suelto: node "$(npx --yes -p tsx which tsx)" archivo.ts (con node --env-file=.env.local si necesita la base). No agregar tsx como dependencia.
-- No pegar claves, tokens ni el contenido de .env.local en ningun lado. Kevin tiene su contrasena temporal en app/admin-inicial.local (ignorado por git): se borra despues del primer ingreso.
+- No pegar claves, tokens ni el contenido de .env.local en ningun lado. La cuenta principal (administrador) usa el email gerencia@xmenosmasprendas.com. La contrasena temporal inicial ya se cambio y el archivo app/admin-inicial.local se elimino.
 - No tocar las otras bases del mismo Postgres (cheques_xmenos, system-ventas, sistema de ventas x menos, receptor, postgres).
 
 
 8) PENDIENTES, EN ORDEN
 1. Cierre diario por local, sellado e inalterable (Kevin dijo que le encanta la idea).
-2. Informes para Cesar (ver REQUISITOS_SEGURIDAD_E_INFORMES.txt): ventas por dia/semana/mes por sucursal, por medio de pago, prendas mas vendidas de la semana y del mes, notas, stock, exportar a CSV/Excel.
+2. (HECHO 19/10) Informes: pantalla /admin/informes (ventas por sucursal y periodo, medios de pago, prendas mas y menos vendidas, horarios, notas, stock, ingresos, CSV) y API de solo lectura /api/informes con llaves (tabla tokens_api, db/012, pantalla Accesos API, conector MCP app/scripts/mcp-informes.mjs, guia INSTRUCCIONES_API_INFORMES.txt). La API de informes se autentica con llave Bearer (no cookie): proxy.ts la deja pasar solo en /api/informes.
 3. Panel de promos (solo admin) y motor de promos en la venta (3x2, 2x1, descuentos; definir con Kevin como se activan y si se acumulan).
 4. Ventas por telefono en el Deposito (definir con Kevin).
 5. Publicar en el VPS (Easypanel, subdominio sistema-stock.xmenosmasprendas.com): Dockerfile, variables de entorno (DATABASE_URL del usuario stock_web con host interno, APP_KEY, NODE_ENV=production), HTTPS, cerrar el puerto 5432, backups automaticos, programa de impresion local en la PC del deposito (la impresion de etiquetas hoy solo funciona en la PC conectada a la impresora).

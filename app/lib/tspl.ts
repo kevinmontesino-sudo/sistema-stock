@@ -34,10 +34,10 @@ export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
   L.push(`BARCODE ${barraX},14,"128",88,0,0,2,2,"${sku}"`);
   const maxNombre = Math.floor((ancho - 2 * margen) / ANCHO_FUENTE["2"]);
   L.push(`TEXT ${margen},110,"2",0,1,1,"${`${sku}  ${soloAscii(e.nombre)}`.slice(0, maxNombre)}"`);
-  e.precios.slice(0, 2).forEach((p, i) => {
-    const t = soloAscii(`${p.nombre}: ${pesos(p.valor)}`);
+  e.precios.slice(0, 3).forEach((p, i) => {
+    const t = soloAscii(p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`);
     const fuente = t.length * ANCHO_FUENTE["3"] <= ancho - 2 * margen ? "3" : "2";
-    L.push(`TEXT ${margen},${138 + i * 30},"${fuente}",0,1,1,"${t}"`);
+    L.push(`TEXT ${margen},${134 + i * 26},"${fuente}",0,1,1,"${t}"`);
   });
   L.push(`PRINT ${Math.max(1, copias)},1`);
   return L.join("\r\n") + "\r\n";

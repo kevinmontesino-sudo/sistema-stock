@@ -1,13 +1,13 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import JsBarcode from "jsbarcode";
 import { empresa } from "./empresa.config";
+import { textoPrecioEtiqueta } from "./util";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
 
 const MM = 72 / 25.4;
 // 203 dpi: un punto de la impresora = 0.125 mm. Cada barra fina mide 2 puntos para que no salga borrosa.
 const PUNTO = MM / 8;
 
-const pesos = (n: number) => "$ " + n.toLocaleString("es-AR");
 
 function barras(texto: string) {
   const o: { encodings?: { data: string }[] } = {};
@@ -37,7 +37,7 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
     // Barras gruesas (3 puntos por modulo) si entran en la etiqueta; si no, 2. Cuanto mas anchas, mas facil las lee el lector.
     const modulo = (bits.length * 3 * PUNTO <= W - 2 * margen ? 3 : 2) * PUNTO;
     const x0 = Math.max(margen, (W - bits.length * modulo) / 2);
-    const altoBarras = 12 * MM;
+    const altoBarras = 10 * MM; // 3 lineas de precio: barras de 10 mm (lo que importa para leer es el ancho de cada barra, no el alto)
     const yBarras = H - 2.2 * MM - altoBarras;
     for (let i = 0; i < bits.length; ) {
       if (bits[i] !== "1") { i++; continue; }
@@ -47,13 +47,13 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
       i = j;
     }
     const maxAncho = W - 2 * margen;
-    let y = yBarras - 3.4 * MM;
+    let y = yBarras - 3.2 * MM;
     p.drawText(e.sku, { x: margen, y, size: 8.5, font: negrita });
     const xNombre = margen + negrita.widthOfTextAtSize(e.sku, 8.5) + 2 * MM;
     p.drawText(recortar(e.nombre, normal, 7, W - margen - xNombre), { x: xNombre, y, size: 7, font: normal });
-    for (const pr of e.precios.slice(0, 2)) {
-      y -= 3.9 * MM;
-      p.drawText(recortar(`${pr.nombre}: ${pesos(pr.valor)}`, negrita, 9.5, maxAncho), { x: margen, y, size: 9.5, font: negrita });
+    for (const pr of e.precios.slice(0, 3)) {
+      y -= 3.7 * MM;
+      p.drawText(recortar(textoPrecioEtiqueta(pr), negrita, 9.5, maxAncho), { x: margen, y, size: 9.5, font: negrita });
     }
   }
   return doc.save();

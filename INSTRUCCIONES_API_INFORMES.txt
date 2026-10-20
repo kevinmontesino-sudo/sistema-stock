@@ -1,0 +1,87 @@
+API DE INFORMES DE X MENOS MAS PRENDAS: COMO USARLA (para Cesar y su Claude)
+
+Esta API permite consultar los informes del sistema (ventas, prendas mas vendidas, medios de pago, notas de credito, stock, horarios, ingresos de mercaderia). Es SOLO LECTURA: no puede modificar nada, y solo devuelve totales (nunca datos personales, contrasenas ni claves).
+
+IMPORTANTE: la API funciona recien cuando el sistema este publicado en internet (hoy corre solo en la computadora del deposito). La direccion va a ser:
+   https://sistema-stock.xmenosmasprendas.com
+Hasta que se publique, la llave y esta guia quedan listas pero no se pueden usar desde otra computadora.
+
+
+1) LA LLAVE
+- Es un texto que empieza con "xmp_". La genera un administrador en el sistema (menu "Accesos API"), vence a los 30, 90 o 180 dias y se puede revocar en cualquier momento.
+- Se pasa por un canal privado. No se pega en chats, mails comunes ni grupos. Quien tenga la llave puede leer los informes.
+- Cada consulta queda registrada en la Auditoria del sistema.
+- Si se filtra o ya no se usa: un administrador la revoca en "Accesos API" y deja de funcionar al instante.
+
+
+2) CONECTARLA CON CLAUDE (recomendado): conector MCP
+Hace falta el archivo mcp-informes.mjs (esta en la carpeta app/scripts del proyecto; es un solo archivo, sin instalar nada) y tener Node 18 o superior.
+
+Claude Desktop: abrir el archivo de configuracion
+   Mac:      ~/Library/Application Support/Claude/claude_desktop_config.json
+   Windows:  %APPDATA%\Claude\claude_desktop_config.json
+y agregar:
+
+{
+  "mcpServers": {
+    "xmenosmasprendas-informes": {
+      "command": "node",
+      "args": ["/RUTA/COMPLETA/AL/ARCHIVO/mcp-informes.mjs"],
+      "env": {
+        "SISTEMA_URL": "https://sistema-stock.xmenosmasprendas.com",
+        "SISTEMA_TOKEN": "xmp_LA_LLAVE_QUE_TE_PASARON"
+      }
+    }
+  }
+}
+
+Reiniciar Claude Desktop. Va a aparecer la herramienta "consultar_informe".
+
+Claude Code (terminal):
+   claude mcp add xmenosmasprendas-informes -e SISTEMA_URL=https://sistema-stock.xmenosmasprendas.com -e SISTEMA_TOKEN=xmp_LA_LLAVE -- node /RUTA/COMPLETA/AL/ARCHIVO/mcp-informes.mjs
+
+Despues se le pregunta a Claude en lenguaje normal, por ejemplo:
+- "Cual fue la prenda mas vendida esta semana?"
+- "Comparame las ventas de White y Zelarrayan en lo que va del mes."
+- "Cuanto se cobro en efectivo, transferencia y tarjeta el mes pasado?"
+- "Que prendas tienen stock y casi no se venden?"
+- "En que dias y horarios se vende mas?"
+- "Cuantas notas de credito se emitieron esta semana y cuanto saldo queda sin usar?"
+
+
+3) USARLA DIRECTAMENTE (otras herramientas, scripts)
+GET /api/informes con el encabezado   Authorization: Bearer xmp_LA_LLAVE
+
+Ejemplos (curl):
+   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://sistema-stock.xmenosmasprendas.com/api/informes"
+   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://sistema-stock.xmenosmasprendas.com/api/informes?tipo=resumen&desde=2026-10-01&hasta=2026-10-31"
+   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://sistema-stock.xmenosmasprendas.com/api/informes?tipo=prendas_mas_vendidas&sucursal=white&limite=10"
+
+Sin "tipo" devuelve el catalogo con todo lo disponible y las definiciones.
+
+Parametros
+- tipo: resumen, periodo, prendas_mas_vendidas, prendas_menos_vendidas, notas_credito, stock, horarios, ingresos, panel (todos juntos).
+- desde y hasta: AAAA-MM-DD, ambos dias incluidos. Sin fechas: los ultimos 30 dias. Maximo 400 dias.
+- sucursal: deposito, zelarrayan, white o sanlorenzo. Sin sucursal: todas.
+- agrupar (solo periodo): dia, semana o mes.
+- limite (rankings): 1 a 200, por defecto 20.
+
+Limites: 30 pedidos por minuto por llave. Respuestas de error: 401 (llave invalida, vencida o revocada), 400 (parametro incorrecto, con el motivo), 429 (demasiados pedidos).
+
+
+4) COMO LEER LOS NUMEROS (definiciones)
+- lista: valor de las prendas a precio de lista (= precio con transferencia).
+- totalPagado: lo que efectivamente pagaron los clientes: lista con el descuento o recargo de cada medio (efectivo -20%, tarjeta +20%). Incluye lo pagado con notas de credito.
+- cobradoEnCaja: plata que entro (transferencia, efectivo y tarjeta). No incluye notas de credito.
+- pagadoConNotas: parte de las compras pagada con notas de credito (no es plata nueva).
+- ajusteMediosDePago: totalPagado menos lista.
+- netas (prendas): unidades vendidas menos las devueltas con nota de credito.
+- Las fechas son dias calendario de Argentina.
+- El informe "stock" es el de hoy, no depende de las fechas.
+
+
+5) NOTAS PARA EL CLAUDE QUE USE ESTA API
+- Es solo lectura. Si piden algo que no esta en los informes (por ejemplo datos de clientes), decir que no esta disponible.
+- Antes de afirmar cifras, consultar la API; no inventar numeros. Indicar siempre el rango de fechas y la sucursal consultada.
+- Para "esta semana" usar de lunes a hoy; para "este mes" desde el dia 1 hasta hoy. La fecha de hoy es la de Argentina.
+- La llave es secreta: no mostrarla ni repetirla en las respuestas.

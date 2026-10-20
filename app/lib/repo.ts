@@ -185,7 +185,7 @@ export async function cargar(a: {
   const nombre = capitalizar(a.nombre);
   if (!nombre) falla("Escribí el nombre de la prenda");
   if (nombre.length > 120) falla("El nombre es demasiado largo");
-  if (!Number.isInteger(a.precio) || a.precio <= 0) falla("Ingresá el precio de lista");
+  if (!Number.isInteger(a.precio) || a.precio <= 0 || a.precio > 10_000_000) falla("Ingresá un precio de lista válido");
   if (!Number.isInteger(a.cantidad) || a.cantidad < 1 || a.cantidad > 5000) falla("La cantidad tiene que estar entre 1 y 5000");
   validarReparto(a.reparto);
   if (Object.keys(a.reparto).some((k) => a.reparto[k] > 0 && !esLocal(k))) falla("El reparto es solo para los locales");
@@ -606,7 +606,7 @@ const factorDeVenta = (v: { total: number; subtotal_lista: number; descuento_pro
 };
 
 // Busca una venta por el codigo de su ticket (V000123, o solo el numero) para devolver prendas.
-export async function ventaParaDevolucion(codigo: string): Promise<VentaDevolvible> {
+export async function ventaParaDevolucion(codigo: string, soloSucursal: string | null = null): Promise<VentaDevolvible> {
   const m = codigo.trim().match(/^v?0*(\d+)$/i);
   if (!m) return falla("Escaneá el código de barras del ticket de venta (empieza con V)");
   const v = await pool.query<{ id: number; creado_en: Date; sucursal_id: string; total: number; subtotal_lista: number; descuento_promo: number }>(
@@ -614,6 +614,9 @@ export async function ventaParaDevolucion(codigo: string): Promise<VentaDevolvib
   );
   const venta = v.rows[0];
   if (!venta) return falla(`No existe la venta N° ${Number(m[1])}`);
+  if (soloSucursal && venta.sucursal_id !== soloSucursal) {
+    return falla(`Esa compra se hizo en ${nombreSucursal(venta.sucursal_id)}: la devolución se hace en ese local.`);
+  }
   if (Date.now() - venta.creado_en.getTime() > DIAS_DEVOLUCION * 86_400_000) {
     return falla(`Esa compra es del ${venta.creado_en.toLocaleDateString("es-AR")}: pasaron más de ${DIAS_DEVOLUCION} días y ya no se acepta la devolución`);
   }
@@ -631,7 +634,7 @@ export async function ventaParaDevolucion(codigo: string): Promise<VentaDevolvib
 
 // Emite una nota de credito: devuelve las prendas elegidas al stock de la sucursal y deja un saldo a favor por 15 dias.
 // `falladas` = unidades del renglon que estan falladas: esas dan igual la nota, pero NO vuelven al stock.
-export async function emitirNota(sucursal: string, ventaId: number, items: { itemId: number; cant: number; falladas: number }[]) {
+export async function emitirNota(sucursal: string, ventaId: number, items: { itemId: number; cant: number; falladas: number }[], soloSucursal: string | null = null) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const pedidos = items.filter((i) => i.cant > 0).sort((a, b) => a.itemId - b.itemId);
   if (pedidos.length === 0) falla("Elegí al menos una prenda para devolver");
@@ -639,10 +642,12 @@ export async function emitirNota(sucursal: string, ventaId: number, items: { ite
     if (!Number.isInteger(i.cant) || !Number.isInteger(i.itemId) || !Number.isInteger(i.falladas) || i.falladas < 0 || i.falladas > i.cant) falla("Cantidad inválida");
   }
   return tx(async (c) => {
-    const v = await c.query<{ total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean }>(
-      `select total, subtotal_lista, descuento_promo, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera from ventas where id = $1 for update`, [ventaId],
+    const v = await c.query<{ total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean; sucursal_id: string }>(
+      `select total, subtotal_lista, descuento_promo, sucursal_id, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera from ventas where id = $1 for update`, [ventaId],
     );
     if (!v.rows[0]) return falla("No existe esa venta");
+    // Un local solo devuelve compras de su propio local: si no, se podria "crear" stock y vales con ventas ajenas.
+    if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}: la devolución se hace en ese local.`);
     if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra: ya no se acepta la devolución`);
     const f = factorDeVenta(v.rows[0]);
     const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number }>(

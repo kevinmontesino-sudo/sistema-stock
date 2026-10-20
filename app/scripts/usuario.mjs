@@ -26,6 +26,7 @@ function validar(clave, email) {
   if (clave.length < 10) return "Minimo 10 caracteres.";
   if ([/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((re) => re.test(clave)).length < 3) return "Usa al menos 3 tipos: minusculas, mayusculas, numeros y simbolos.";
   if (clave.toLowerCase().includes(email.split("@")[0].toLowerCase())) return "No uses tu email en la contrasena.";
+  if (/masprendas|menosmas|xmenos|prendas|stock/.test(clave.toLowerCase().replace(/[^a-z]/g, ""))) return "No uses el nombre del negocio ni del sistema.";
   return null;
 }
 async function claveNueva(email) {
