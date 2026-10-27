@@ -1,0 +1,82 @@
+GUIA DE DESPLIEGUE EN EASYPANEL (VPS)
+=====================================
+Sistema de Stock y Ventas - X Menos Mas Prendas
+Repositorio: kevinmontesino-sudo/sistema-stock (rama main)
+
+Esta guia detalla el paso a paso para desplegar la aplicacion en el VPS utilizando Easypanel con Docker y HTTPS automatico.
+
+--------------------------------------------------------------------------------
+1. BASE DE DATOS POSTGRESQL EN EASYPANEL
+--------------------------------------------------------------------------------
+El sistema se conecta a la base `sistema_stock`.
+
+A. Conexión de red interna:
+   - Dentro de la red interna de Easypanel, los contenedores se comunican por el nombre del servicio (por ejemplo: `evolution_postgres:5432` o el Postgres dedicado que crees).
+   - No es necesario abrir el puerto 5432 al exterior para que la aplicación web funcione.
+
+B. Migraciones:
+   - Asegurate de que los scripts de la carpeta `db/` estén aplicados en orden:
+     001 al 010 (estructura y seguridad inicial)
+     011_codigos_notas_seguros.sql (códigos de notas al azar)
+     012_tokens_api.sql (tokens para API de informes)
+     013_codigo_ticket_al_azar.sql (códigos de venta no secuenciales)
+
+--------------------------------------------------------------------------------
+2. CREAR EL SERVICIO DE LA APLICACION EN EASYPANEL
+--------------------------------------------------------------------------------
+1. Entrá a tu panel de Easypanel (http://TU_IP:3000 o el dominio de tu panel).
+2. Entrá al proyecto correspondiente (o creá uno nuevo, ej: `sistema-stock`).
+3. Hacé clic en "+ Service" -> Seleccioná "App".
+4. Nombre del servicio: `app` (o `stock-web`).
+
+--------------------------------------------------------------------------------
+3. CONFIGURAR ORIGEN (SOURCE)
+--------------------------------------------------------------------------------
+1. En la pestaña "Source", elegí: **Github**.
+2. Repositorio: `kevinmontesino-sudo/sistema-stock`
+3. Branch: `main`
+4. Build Type: **Dockerfile**
+5. Dockerfile Path: `/Dockerfile` (el que está en la raíz).
+
+--------------------------------------------------------------------------------
+4. PUERTOS Y DOMINIO
+--------------------------------------------------------------------------------
+1. En la pestaña "Domains" / "Network":
+   - Puerto de la aplicación (Container Port): `3000`.
+   - Agregá tu dominio/subdominio: ej. `sistema-stock.xmenosmasprendas.com`
+   - Asegurate de que HTTPS / SSL esté activado (Easypanel lo emite automáticamente vía Let's Encrypt).
+   * IMPORTANTE: HTTPS es obligatorio para que los celulares de las sucursales puedan usar la cámara como lector de códigos de barras.
+
+--------------------------------------------------------------------------------
+5. VARIABLES DE ENTORNO (ENVIRONMENT VARIABLES)
+--------------------------------------------------------------------------------
+En la pestaña "Environment", cargá las siguientes 4 variables:
+
+- `DATABASE_URL`:
+  postgres://usuario:contraseña@nombre_servicio_postgres:5432/sistema_stock
+  (Reemplazar con usuario, contraseña y host interno de tu Postgres en Easypanel).
+
+- `APP_KEY`:
+  Copiá exactamente el valor de `APP_KEY` que tenés en tu archivo local `app/.env.local`.
+  (Es la clave secreta AES-256 para descifrar sesiones y tokens de doble verificación 2FA).
+
+- `NODE_ENV`:
+  production
+
+- `TRUST_PROXY_HOPS`:
+  1
+  (Permite registrar las IPs reales de los clientes y hacer funcionar el límite contra ataques de fuerza bruta detrás del proxy de Easypanel).
+
+--------------------------------------------------------------------------------
+6. DESPLEGAR (DEPLOY)
+--------------------------------------------------------------------------------
+1. Hacé clic en el botón **"Deploy"**.
+2. En la pestaña "Deployments" podés ver el log en vivo de la compilación de Next.js.
+3. Una vez terminado, el estado pasará a "Running" en verde.
+4. Entrá a la URL configurada con HTTPS y probá el inicio de sesión con tu usuario de administración.
+
+--------------------------------------------------------------------------------
+7. IMPRESION DE ETIQUETAS Y TICKETS
+--------------------------------------------------------------------------------
+- Los tickets (80 mm) se imprimen desde el navegador en cada puesto de venta.
+- Las etiquetas (50x30 mm) del Depósito requieren la impresora térmica conectada a la Mac/PC local del depósito (se gestiona vía el agente local o QZ Tray).

@@ -1,0 +1,12 @@
+.git
+.claude
+.next
+node_modules
+respaldos
+*.local
+app/.next
+app/node_modules
+app/.env*.local
+app/cuentas-sucursales.local
+app/token-cesar.local
+*.pdf
