@@ -6,6 +6,7 @@ import { DEPOSITO, empresa, LOCALES } from "@/lib/empresa.config";
 import { redimensionar } from "@/lib/foto";
 import { imprimir } from "@/lib/imprimir";
 import { useDebounced, useModoEtiquetas, type ModoEtiquetas, useAvanzado } from "@/lib/hooks";
+import { imprimirConAgente } from "@/lib/agenteImpresion";
 import { imprimirDirecto } from "@/lib/qz";
 import { trabajosTspl } from "@/lib/tspl";
 import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, preciosDe, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo, textoPrecioEtiqueta } from "@/lib/util";
@@ -66,6 +67,18 @@ export default function Carga() {
       if (modoEtiq === "ventana") {
         imprimir(`${empresa.etiquetaMm.ancho}mm ${empresa.etiquetaMm.alto}mm`);
         setAImprimir([]);
+        return;
+      }
+      if (modoEtiq === "agente") {
+        setAImprimir([]);
+        try {
+          const impresora = await imprimirConAgente(cola);
+          setFalloImpresion(null);
+          setOkImpresion(`${cola.length} etiqueta${cola.length === 1 ? "" : "s"} enviada${cola.length === 1 ? "" : "s"} a «${impresora}»`);
+        } catch (e) {
+          setOkImpresion("");
+          setFalloImpresion({ mensaje: e instanceof Error ? e.message : "No se pudo imprimir.", cola, tspl: "" });
+        }
         return;
       }
       if (modoEtiq === "servidor") {
@@ -327,7 +340,8 @@ export default function Carga() {
           <label className="fila" style={{ gap: 8, marginTop: 8, fontSize: 14 }}>
             <span>Impresión de etiquetas en esta PC</span>
             <select value={modoEtiq} onChange={(e) => setModoEtiq(e.target.value as ModoEtiquetas)}>
-              <option value="servidor">Directa, sin ventana (recomendada)</option>
+              <option value="agente">Directa con el agente de impresión (recomendada)</option>
+              <option value="servidor">Desde el servidor (solo desarrollo local)</option>
               <option value="directa">Directa a la impresora (QZ Tray)</option>
               <option value="ventana">Ventana del navegador</option>
             </select>

@@ -1,0 +1,29 @@
+AGENTE DE IMPRESION DE ETIQUETAS (X Menos Mas Prendas)
+
+Que es: un programita que queda abierto en la PC donde esta la impresora de etiquetas. La pagina del sistema le pasa
+las etiquetas y el las manda a la impresora, sin ventanas. Solo escucha dentro de la propia PC (127.0.0.1).
+
+INSTALAR EN WINDOWS (10 u 11) - 3 minutos por PC
+1. Tener la impresora de etiquetas (Xprinter XP-410B) instalada y encendida. Tiene que aparecer en
+   Configuracion > Impresoras y escaneres. NO hace falta dejarla como predeterminada.
+2. Descomprimir agente-impresion-windows.zip (click derecho > Extraer todo) y abrir la carpeta.
+3. Doble click en instalar.bat. Si Windows avisa "Windows protegio su PC": Mas informacion > Ejecutar de todas formas.
+4. Al final tiene que listar las impresoras de esa PC y decir "funcionando". Se abre solo cada vez que se prende la PC.
+
+PRIMERA VEZ EN CHROME
+Al imprimir etiquetas por primera vez, Chrome pregunta si el sitio puede "buscar y conectarse a dispositivos de la red
+local". Hay que tocar PERMITIR (una sola vez por PC). Si se toco Bloquear: candado de la barra de direcciones >
+Configuracion del sitio > Dispositivos de la red local > Permitir.
+
+INSTALAR EN MAC
+En la carpeta del agente: bash instalar-mac.sh   (necesita Node instalado)
+
+VER SI FUNCIONA
+Abrir en el navegador de esa PC:  http://127.0.0.1:9101   -> dice "funcionando" y lista las impresoras.
+El registro esta en: Windows  %LOCALAPPDATA%\AgenteImpresion\agente.log   Mac  ~/.config/xmenosmas/agente-impresion/agente.log
+
+SI NO IMPRIME
+- "No hay ninguna impresora con 410 en el nombre": la impresora no se llama como el sistema espera. Mirar la lista que
+  muestra http://127.0.0.1:9101 y avisar el nombre exacto.
+- La pagina dice que no encuentra el agente: abrir http://127.0.0.1:9101; si no responde, volver a correr instalar.bat.
+- Desinstalar: desinstalar.bat.

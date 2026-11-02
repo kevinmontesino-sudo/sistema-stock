@@ -7,10 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "dev:limpiar": "node --env-file=.env.local scripts/dev-limpiar.mjs",
     "respaldo": "node --env-file=.env.local scripts/respaldo.mjs",
     "demo:cargar": "node --env-file=.env.local scripts/demo-cargar.mjs",
     "demo:borrar": "node --env-file=.env.local scripts/demo-borrar.mjs",
-    "usuario": "node --env-file=.env.local scripts/usuario.mjs"
+    "usuario": "node --env-file=.env.local scripts/usuario.mjs",
+    "usuario:prod": "node --env-file=.env.prod.local scripts/usuario.mjs",
+    "respaldo:prod": "node --env-file=.env.prod.local scripts/respaldo.mjs"
   },
   "dependencies": {
     "@emnapi/core": "^1.11.3",

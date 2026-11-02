@@ -660,9 +660,13 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     if (!Number.isInteger(i.cant) || !Number.isInteger(i.itemId) || !Number.isInteger(i.falladas) || i.falladas < 0 || i.falladas > i.cant) falla("Cantidad inválida");
   }
   return tx(async (c) => {
+    const codigoVenta = String(ventaCodigo).trim().toUpperCase();
+    // Dos devoluciones de la misma compra a la vez se hacen una despues de la otra. Se usa un candado por codigo y no
+    // "for update" sobre ventas, porque la aplicacion no tiene (ni debe tener) permiso de modificar la tabla de ventas.
+    await c.query("select pg_advisory_xact_lock(hashtext($1))", [`devolucion:${codigoVenta}`]);
     const v = await c.query<{ id: number; total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean; sucursal_id: string }>(
       `select id::int as id, total, subtotal_lista, descuento_promo, sucursal_id, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera
-       from ventas where codigo = $1 for update`, [String(ventaCodigo).trim().toUpperCase()],
+       from ventas where codigo = $1`, [codigoVenta],
     );
     if (!v.rows[0]) return falla("No existe esa venta");
     const ventaId = v.rows[0].id;

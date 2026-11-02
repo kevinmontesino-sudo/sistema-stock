@@ -46,3 +46,6 @@ app/next-env.d.ts
 # Informacion comercial privada (proveedores, precios, contactos): no va al repositorio
 LISTA_COMPRAS_HARDWARE.txt
 PEDIDO_COTIZACION_IMPRESORA.txt
+
+# Paquete del agente de impresion (se regenera con agente-impresion/empaquetar.sh)
+agente-impresion/dist/

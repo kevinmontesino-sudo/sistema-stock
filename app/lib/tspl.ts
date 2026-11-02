@@ -16,6 +16,20 @@ function modulos(texto: string) {
   return (o.encodings ?? []).reduce((s, e) => s + e.data.length, 0);
 }
 
+// Parte el nombre en dos lineas por palabras: la primera con hasta `max1` letras (despues del SKU), la segunda recortada a `max2`.
+function partir(nombre: string, max1: number, max2: number) {
+  const palabras = nombre.split(/\s+/).filter(Boolean);
+  let primera = "";
+  let i = 0;
+  for (; i < palabras.length; i++) {
+    const prueba = primera ? `${primera} ${palabras[i]}` : palabras[i];
+    if (prueba.length > max1) break;
+    primera = prueba;
+  }
+  const resto = palabras.slice(i).join(" ").slice(0, max2);
+  return primera ? [primera, resto] : [nombre.slice(0, max2)];
+}
+
 // Arma el trabajo de impresion de una etiqueta en TSPL. El codigo de barras lo dibuja la propia impresora.
 export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
   const ancho = Math.round(empresa.etiquetaMm.ancho * PUNTOS_MM);
@@ -31,13 +45,22 @@ export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
     "CLS",
   ];
   if (e.marco) L.push(`BOX 0,0,${ancho - 1},${alto - 1},2`);
-  L.push(`BARCODE ${barraX},14,"128",88,0,0,2,2,"${sku}"`);
-  const maxNombre = Math.floor((ancho - 2 * margen) / ANCHO_FUENTE["2"]);
-  L.push(`TEXT ${margen},110,"2",0,1,1,"${`${sku}  ${soloAscii(e.nombre)}`.slice(0, maxNombre)}"`);
+  // Nombre largo: se parte en dos lineas (como en la etiqueta en PDF) y las barras bajan un poco para que entre todo.
+  const nombre = soloAscii(e.nombre);
+  const maxLinea = Math.floor((ancho - 2 * margen) / ANCHO_FUENTE["2"]);
+  const primera = `${sku}  ${nombre}`;
+  const lineas = primera.length <= maxLinea ? [primera] : partir(nombre, maxLinea - sku.length - 2, maxLinea);
+  const doble = lineas.length > 1;
+  const altoBarras = doble ? 64 : 88;
+  L.push(`BARCODE ${barraX},${doble ? 10 : 14},"128",${altoBarras},0,0,2,2,"${sku}"`);
+  const y = doble ? 82 : 110;
+  if (doble) L.push(`TEXT ${margen},${y},"2",0,1,1,"${sku}  ${lineas[0]}"`, `TEXT ${margen},${y + 22},"2",0,1,1,"${lineas[1]}"`);
+  else L.push(`TEXT ${margen},${y},"2",0,1,1,"${lineas[0]}"`);
+  const yPrecios = doble ? 130 : 134;
   e.precios.slice(0, 3).forEach((p, i) => {
     const t = soloAscii(p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`);
     const fuente = t.length * ANCHO_FUENTE["3"] <= ancho - 2 * margen ? "3" : "2";
-    L.push(`TEXT ${margen},${134 + i * 26},"${fuente}",0,1,1,"${t}"`);
+    L.push(`TEXT ${margen},${yPrecios + i * 26},"${fuente}",0,1,1,"${t}"`);
   });
   L.push(`PRINT ${Math.max(1, copias)},1`);
   return L.join("\r\n") + "\r\n";

@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { usePuede } from "@/components/SesionContext";
-import { ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto, ingresosProducto, obtenerMediosPago, reimprimirEtiqueta } from "@/app/actions";
+import { ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto, ingresosProducto, obtenerMediosPago, reimprimirEtiqueta, imprimirEtiquetasServidor } from "@/app/actions";
 import { Etiqueta } from "@/components/Etiqueta";
 import { empresa } from "@/lib/empresa.config";
-import { useDebounced } from "@/lib/hooks";
+import { imprimirConAgente } from "@/lib/agenteImpresion";
+import { useDebounced, useModoEtiquetas } from "@/lib/hooks";
 import { fechaCorta, nombreSucursal, pesos, precioMedio, preciosDe, type MedioPago, type Producto } from "@/lib/util";
 
 type Panel = "editar" | "ajustar" | "ingresos" | "etiqueta" | null;
@@ -16,6 +17,7 @@ export default function Buscar() {
   const puedeEliminar = usePuede("eliminar_producto");
   const puedeEtiquetar = usePuede("imprimir_etiquetas");
   const [cantEtiq, setCantEtiq] = useState("1");
+  const [modoEtiq] = useModoEtiquetas(empresa.impresionEtiquetas);
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
   const [lista, setLista] = useState<Producto[]>([]);
@@ -62,9 +64,21 @@ export default function Buscar() {
     setOcupado(true);
     setMensaje(null);
     const r = await reimprimirEtiqueta(elegido.sku, parseInt(cantEtiq) || 0);
+    if (!r.ok) { setOcupado(false); return setMensaje({ texto: r.motivo, mala: true }); }
+    try {
+      if (modoEtiq === "servidor") {
+        const s = await imprimirEtiquetasServidor(r.etiquetas);
+        if (!s.ok) throw new Error(s.motivo);
+      } else {
+        await imprimirConAgente(r.etiquetas);
+      }
+    } catch (e) {
+      setOcupado(false);
+      return setMensaje({ texto: e instanceof Error ? e.message : "No se pudo imprimir.", mala: true });
+    }
     setOcupado(false);
-    if (!r.ok) return setMensaje({ texto: r.motivo, mala: true });
-    setMensaje({ texto: `${r.enviadas} etiqueta${r.enviadas === 1 ? "" : "s"} de ${elegido.nombre} enviada${r.enviadas === 1 ? "" : "s"} a la impresora. El stock no cambió.`, mala: false });
+    const n = r.etiquetas.length;
+    setMensaje({ texto: `${n} etiqueta${n === 1 ? "" : "s"} de ${elegido.nombre} enviada${n === 1 ? "" : "s"} a la impresora. El stock no cambió.`, mala: false });
     setPanel(null);
   }
 

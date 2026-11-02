@@ -1,6 +1,9 @@
 "use client";
+import { useEffect, useState } from "react";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { TicketNota } from "@/components/TicketNota";
+import { empresa } from "@/lib/empresa.config";
+import { imprimir } from "@/lib/imprimir";
 import type { NotaCredito } from "@/lib/util";
 
 // Vista previa con datos de ejemplo (no toca la base): sirve para ver como salen y probar si el lector los escanea.
@@ -25,6 +28,16 @@ const notaEjemplo: NotaCredito = {
 };
 
 export default function TicketsPrueba() {
+  // Para probar una impresora de tickets sin registrar ninguna venta: imprime el ejemplo con el mismo tamano de papel de la caja.
+  const [prueba, setPrueba] = useState<"venta" | "nota" | null>(null);
+  useEffect(() => {
+    if (!prueba) return;
+    const t = setTimeout(() => {
+      imprimir(`${empresa.ticketMm.ancho}mm auto`);
+      setPrueba(null);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [prueba]);
   return (
     <>
       <h1>Vista previa de tickets</h1>
@@ -32,10 +45,20 @@ export default function TicketsPrueba() {
         Datos de ejemplo, no se guarda nada. Probá escanear los códigos de barras desde la pantalla: en Venta o en Devolución tendrían que leerse.
         El ticket de venta lleva el código <strong>V9F3A2C7B</strong> y la nota de crédito <strong>N9A8B7C6D5E</strong> (no existen en el sistema).
       </p>
-      <div className="fila" style={{ alignItems: "flex-start", gap: 24, flexWrap: "wrap" }}>
+      <div className="fila no-print" style={{ margin: "8px 0 16px" }}>
+        <button className="principal" onClick={() => setPrueba("venta")}>Imprimir ticket de prueba</button>
+        <button onClick={() => setPrueba("nota")}>Imprimir nota de prueba</button>
+        <span className="aviso">Sale por la impresora predeterminada de esta PC. No guarda nada.</span>
+      </div>
+      <div className="fila no-print" style={{ alignItems: "flex-start", gap: 24, flexWrap: "wrap" }}>
         <div><p className="rotulo">Ticket de venta</p><div style={{ boxShadow: "0 0 0 1px var(--borde)" }}><Ticket venta={ventaEjemplo} /></div></div>
         <div><p className="rotulo">Nota de crédito</p><div style={{ boxShadow: "0 0 0 1px var(--borde)" }}><TicketNota nota={notaEjemplo} /></div></div>
       </div>
+      {prueba && (
+        <div className="solo-ticket" aria-hidden="true">
+          {prueba === "venta" ? <Ticket venta={ventaEjemplo} /> : <TicketNota nota={notaEjemplo} />}
+        </div>
+      )}
     </>
   );
 }

@@ -6,7 +6,7 @@ import { empresa } from "@/lib/empresa.config";
 import { imprimir } from "@/lib/imprimir";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
-  calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, fechaCorta, montoNotaAplicable, nombreSucursal, pesos, precioMedio,
+  calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pesos, precioMedio,
   type MedioPago, type NotaCredito, type PagoEntrada, type Producto,
 } from "@/lib/util";
 
@@ -39,6 +39,7 @@ export default function VentaPage() {
   );
   const [manual, setManual] = useState("");
   const [aviso, setAviso] = useState("");
+  const [ultimoSku, setUltimoSku] = useState<string | null>(null); // la ultima prenda escaneada se resalta en la lista
   const [nota, setNota] = useState<NotaCredito | null>(null);
   const [saldoNota, setSaldoNota] = useState<{ codigo: string; saldo: number } | null>(null);
   const [ultima, setUltima] = useState<DatosTicket | null>(null);
@@ -83,11 +84,23 @@ export default function VentaPage() {
     if (actual + 1 > hay) return setAviso(`De ${p.nombre} solo hay ${hay} en ${nombreSucursal(sucursal)}`);
     setAviso("");
     setUltima(null);
+    setUltimoSku(p.sku);
     setLineas((l) => {
       const i = l.findIndex((x) => x.producto.sku === p.sku);
       if (i >= 0) return l.map((x, j) => (j === i ? { ...x, cant: x.cant + 1 } : x));
       return [...l, { producto: p, cant: 1 }];
     });
+  }, [sucursal, setLineas]);
+
+  // Botones + y − de cada renglon: no se puede pasar del stock de este local ni bajar de 1 (para sacarla esta "Quitar").
+  const cambiarCantidad = useCallback((sku: string, delta: number) => {
+    const f = lineasRef.current.find((x) => x.producto.sku === sku);
+    if (!f) return;
+    const hay = f.producto.stock[sucursal] ?? 0;
+    if (delta > 0 && f.cant + 1 > hay) return setAviso(`De ${f.producto.nombre} solo hay ${hay} en ${nombreSucursal(sucursal)}`);
+    setAviso("");
+    setUltimoSku(sku);
+    setLineas((l) => l.map((x) => (x.producto.sku === sku ? { ...x, cant: Math.max(1, x.cant + delta) } : x)));
   }, [sucursal, setLineas]);
 
   const agregar = useCallback(async (codigo: string) => {
@@ -243,24 +256,28 @@ export default function VentaPage() {
           </div>
         )}
       </div>
-      <p className="error no-print" role="alert" style={{ margin: "0 0 8px" }}>{aviso}</p>
+      {aviso && <p className="alerta mala no-print" role="alert" style={{ margin: "0 0 12px", fontSize: 16 }}>{aviso}</p>}
 
       <div className="tarjeta no-print">
         {lineas.length === 0 ? (
           <p className="aviso">Escaneá una prenda para empezar. Solo se pueden vender prendas que están en {nombreSucursal(sucursal)}.</p>
         ) : (
-          <table>
-            <thead><tr><th></th><th>SKU</th><th>Prenda</th><th className="der">Cant.</th><th className="der">Precio de lista</th><th></th></tr></thead>
+          <table className="carrito">
+            <thead><tr><th></th><th>Prenda</th><th className="der">Cantidad</th><th className="der">Precio de lista</th><th></th></tr></thead>
             <tbody>
               {lineas.map((f) => (
-                <tr key={f.producto.sku}>
+                <tr key={f.producto.sku} className={f.producto.sku === ultimoSku ? "ultima" : ""}>
                   <td>{f.producto.foto && <img src={f.producto.foto} alt="" className="miniatura" />}</td>
-                  <td className="mono">{f.producto.sku}</td>
                   <td>
-                    {f.producto.nombre} <span className="interno">· ing {fechaCorta(f.producto.ultimoIngreso)} · hay {f.producto.stock[sucursal] ?? 0} acá</span>
+                    <strong>{f.producto.nombre}</strong><br />
+                    <span className="interno"><span className="mono">{f.producto.sku}</span> · {pesos(f.producto.precio)} c/u · hay {f.producto.stock[sucursal] ?? 0} acá</span>
                   </td>
-                  <td className="der">{f.cant}</td>
-                  <td className="der">{pesos(f.producto.precio * f.cant)}</td>
+                  <td className="der" style={{ whiteSpace: "nowrap" }}>
+                    <button className="chico" onClick={() => cambiarCantidad(f.producto.sku, -1)} disabled={f.cant <= 1} aria-label={`Una menos de ${f.producto.nombre}`}>−</button>
+                    <span className="cantidad">{f.cant}</span>
+                    <button className="chico" onClick={() => cambiarCantidad(f.producto.sku, 1)} aria-label={`Una más de ${f.producto.nombre}`}>+</button>
+                  </td>
+                  <td className="der"><strong>{pesos(f.producto.precio * f.cant)}</strong></td>
                   <td className="der"><button className="chico" onClick={() => setLineas((l) => l.filter((x) => x.producto.sku !== f.producto.sku))}>Quitar</button></td>
                 </tr>
               ))}
@@ -268,8 +285,8 @@ export default function VentaPage() {
           </table>
         )}
         <div className="fila" style={{ justifyContent: "space-between", marginTop: 16 }}>
-          <span className="aviso">{cantidadTotal} prendas · subtotal a precio de lista</span>
-          <span style={{ fontSize: 18, fontWeight: 600 }}>{pesos(subtotal)}</span>
+          <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"} · total a precio de lista</span>
+          <span className="total-venta">{pesos(subtotal)}</span>
         </div>
 
         {nota && (
@@ -381,7 +398,7 @@ export default function VentaPage() {
           </div>
         )}
 
-        <button className="principal" style={{ width: "100%", marginTop: 12 }} onClick={cobrar}
+        <button className="principal boton-cobrar" onClick={cobrar}
           disabled={lineas.length === 0 || !calc || !calc.ok || cobrando}>
           {cobrando ? "Registrando…" : textoCobrar}
         </button>
@@ -429,8 +446,9 @@ export default function VentaPage() {
         </div>
       )}
 
-      <h2 className="no-print">Caja de hoy · {nombreSucursal(sucursal)}</h2>
-      <div className="tarjeta no-print">
+      <details className="no-print caja-hoy">
+      <summary><strong>Caja de hoy · {nombreSucursal(sucursal)}</strong> <span className="aviso">· {caja.ventas} {caja.ventas === 1 ? "venta" : "ventas"} · {pesos(totalCaja)}</span></summary>
+      <div className="tarjeta" style={{ marginTop: 8 }}>
         {caja.filas.length === 0 ? (
           <p className="aviso">Todavía no hay ventas hoy en este local.</p>
         ) : (
@@ -446,6 +464,7 @@ export default function VentaPage() {
           </table>
         )}
       </div>
+      </details>
     </>
   );
 }

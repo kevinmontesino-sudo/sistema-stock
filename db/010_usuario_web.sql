@@ -27,6 +27,8 @@ grant select on sucursales, medios_pago to stock_web;
 grant select, insert on ventas, venta_items, venta_pagos, nota_credito_items, movimientos, cargas, auditoria, intentos_login to stock_web;
 -- Lectura, alta y cambio (sin borrar)
 grant select, insert, update on productos, stock, traslados, contadores_sku, tipos, notas_credito, usuarios to stock_web;
+-- Llaves de la API de informes (se crean, se usan y se revocan; nunca se borran)
+grant select, insert, update on tokens_api to stock_web;
 -- Sesiones: se crean, se actualizan y se borran al cerrar o vencer
 grant select, insert, update, delete on sesiones to stock_web;
 

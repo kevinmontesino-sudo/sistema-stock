@@ -577,3 +577,33 @@ En **Buscar prenda**, cada fila tiene el botón **🏷️ Etiqueta** (solo depó
 ## 46. TAREA: precio mayorista y ventas del Depósito con stock de San Lorenzo (Kevin, 23/10/2026)
 Pedido: (a) un **precio mayorista** que se carga en el Depósito (cuánto se cobra) y que **solo las ventas del Depósito** pueden usar; (b) el Depósito puede vender **stock del Depósito y de San Lorenzo**.
 Propuesta a confirmar: ver el mensaje del 23/10. Se junta con la sección 43 (precio especial por teléfono) y la 41 (promos).
+
+## 47. Base de pruebas separada y respaldos (30/10/2026)
+
+**Base de pruebas (HECHO):** Postgres 17 instalado en la Mac (`brew services`, solo escucha en 127.0.0.1). Base `sistema_stock_dev` con las mismas migraciones que producción (se comprobó con `pg_dump --schema-only`: esquemas idénticos). `app/.env.local` apunta ahí: **localhost:3000 ya no toca los datos reales.** La conexión a la base real quedó en `app/.env.prod.local` (para scripts: `npm run usuario:prod`, `npm run respaldo:prod`). Cuentas de prueba (admin, depósito y 3 locales) en `app/cuentas-dev.local`. `npm run dev:limpiar` deja la base de pruebas sin prendas ni ventas y **se niega a correr contra la base real**.
+
+**Hallazgos al armarla (corregidos):**
+- Faltaba una migración: los valores de enum `encargado` y `devolucion` existían en producción pero no en ningún archivo, así que una base nueva no podía crear encargados ni devoluciones → `db/014_valores_enum.sql` (segura de correr en producción, "if not exists").
+- `010_usuario_web.sql` no daba permisos sobre `tokens_api` (se creó después, en la 012): con el usuario `stock_web` las llaves de la API habrían fallado → corregido en el 010.
+- Con `stock_web`, emitir una nota de crédito fallaba (`for update` sobre `ventas`, y la app no puede modificar esa tabla) → ahora usa un candado por código de venta (`pg_advisory_xact_lock`). Se probó que dos devoluciones simultáneas de lo mismo dejan pasar solo una.
+- Se probó el circuito completo (cargar, enviar, recibir, vender, devolver, editar, ajustar, baja, API, informes, sesiones) conectado como `stock_web`: todo anda, y NO puede borrar ni modificar ventas, movimientos ni auditoría, ni subir el saldo de una nota, ni crear roles. **El 010 está listo para aplicarse en producción** (lo ejecuta alguien con usuario administrador de Postgres; después, DATABASE_URL de la app en Easypanel con `stock_web`).
+
+**Respaldos:**
+- **Copia de afuera (HECHO):** `app/scripts/respaldo-completo.sh` baja un `pg_dump` completo de la base real todos los días a las 22:30 (si la Mac duerme, corre al despertar) a `~/respaldos-stock-completos` (carpeta privada, se guardan 30 días / mínimo 10 archivos; avisa por notificación si falla). Instalador: `bash scripts/respaldo-instalar.sh` (macOS no deja que las tareas automáticas lean "Documentos", por eso vive en `~/.config/xmenosmas`). **Restauración probada:** se restauró en una base temporal y las 19 tablas y los 16 triggers de protección coincidían con la base real. Si cambia la contraseña de la base real, volver a correr el instalador.
+- **Copia de adentro (PENDIENTE, la instala Kevin):** `app/scripts/vps-respaldo.sh` en el servidor, diario a las 02:30, guarda 14 días en `/root/backups/stock`. No pude hacerlo yo (el sistema no me deja correr comandos en el servidor).
+- Falta: copia en otro lugar fuera de la Mac y del VPS (nube) y FileVault en la Mac.
+
+## 48. Pantalla de Venta más ágil (30/10/2026) — HECHO (paso 3 de la sección 42, primera parte)
+- Total grande (36 px) y botón de cobrar alto (60 px) con el monto y el medio.
+- Cada renglón con **+ / −** (no pasa del stock del local), precio unitario y total del renglón; la **última prenda escaneada se resalta**; ya no se muestra la fecha de ingreso en la caja.
+- Los avisos (sin stock, código inválido) salen en un cuadro rojo visible, no en letra chica.
+- "Caja de hoy" quedó plegada, con la cantidad de ventas y el total en la misma línea.
+- Probado en la base de pruebas: 3 prendas, pago en efectivo, venta registrada con el monto correcto ($72.500 de lista → $58.000 en efectivo).
+- Falta de este paso: encajar promos (sección 41) y precio mayorista/especial (secciones 43 y 46) cuando estén definidos.
+
+## 49. Agente de impresión de etiquetas (2/11)
+- Causa: con el sistema publicado el modo "servidor" (`lp`) corre en el VPS, que no tiene impresora. Solución: `agente-impresion/` (Node sin dependencias, 127.0.0.1:9101) que recibe TSPL desde la página y lo manda en crudo (Windows: winspool RAW vía PowerShell; Mac: `lp -o raw`).
+- Seguridad: solo atiende Host localhost, solo los orígenes permitidos (sitio publicado y localhost:3000), solo trabajos que empiezan con `SIZE `, máx. 500 por pedido.
+- Páginas: Cargar y Buscar usan `lib/agenteImpresion.ts` (modo por defecto "agente"; "servidor" queda para desarrollo local). La etiqueta TSPL ahora parte los nombres largos en 2 líneas.
+- Paquete Windows: `agente-impresion/empaquetar.sh` → `dist/agente-impresion-windows.zip` (node.exe oficial + agente + instalar.bat). Mac: `bash instalar-mac.sh`.
+- Pendiente: probar en una PC con Windows real; desplegar el cambio de la app; Chrome pide permiso de "red local" la primera vez.

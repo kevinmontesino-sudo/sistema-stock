@@ -78,9 +78,9 @@ export function useAutoTicket() {
 }
 
 // Como imprime etiquetas esta PC: directo a la impresora (QZ Tray) o con la ventana del navegador.
-const KEY_ETIQ = "stock:modoetiquetas";
+const KEY_ETIQ = "stock:modoetiquetas2";
 const oyentesEtiq = new Set<() => void>();
-export type ModoEtiquetas = "directa" | "ventana" | "servidor";
+export type ModoEtiquetas = "agente" | "directa" | "ventana" | "servidor";
 export function useModoEtiquetas(porDefecto: ModoEtiquetas) {
   const modo = useSyncExternalStore(
     (cb) => {

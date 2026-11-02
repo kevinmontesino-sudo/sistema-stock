@@ -230,6 +230,7 @@ export async function eliminarProducto(sku: string) {
 
 // ---- Impresion ----
 // Reimprime etiquetas de una prenda que ya existe (se perdio o salio mal): NO toca el stock. El precio sale de la base, no de la pantalla.
+// Devuelve las etiquetas y las imprime la PC (agente de impresion), porque el servidor no tiene impresora.
 export async function reimprimirEtiqueta(sku: string, cantidad: number) {
   return seguro("imprimir_etiquetas", async () => {
     const n = ent(cantidad);
@@ -238,9 +239,8 @@ export async function reimprimirEtiqueta(sku: string, cantidad: number) {
     if (!p) throw new repo.ErrorNegocio("No existe esa prenda.");
     const medios = await repo.listarMediosPago();
     const etiqueta = { sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios) };
-    await imprimirEtiquetasEnServidor(Array.from({ length: n }, () => etiqueta));
     await auditar("etiqueta_reimpresa", { sku: p.sku, nombre: p.nombre, precio: p.precio, cantidad: n });
-    return { enviadas: n };
+    return { etiquetas: Array.from({ length: n }, () => etiqueta) };
   });
 }
 
