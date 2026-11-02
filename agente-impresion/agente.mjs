@@ -81,7 +81,7 @@ function responder(res, codigo, cuerpo, extra = {}) {
   res.end(JSON.stringify(cuerpo));
 }
 
-function leerCuerpo(req, max = 1_000_000) {
+function leerCuerpo(req, max = 8_000_000) {
   return new Promise((ok, mal) => {
     let tam = 0;
     const partes = [];
@@ -132,7 +132,7 @@ const servidor = http.createServer(async (req, res) => {
       const datos = JSON.parse(await leerCuerpo(req) || "{}");
       const trabajos = datos.trabajos;
       const valido = Array.isArray(trabajos) && trabajos.length >= 1 && trabajos.length <= 500
-        && trabajos.every((t) => typeof t === "string" && t.length < 20000 && t.startsWith("SIZE "));
+        && trabajos.every((t) => typeof t === "string" && t.length < 40000 && t.startsWith("SIZE "));
       if (!valido) return responder(res, 400, { ok: false, error: "Trabajos de impresion invalidos" }, cors);
       if (typeof datos.impresora !== "string" || datos.impresora.length > 60) return responder(res, 400, { ok: false, error: "Impresora invalida" }, cors);
       const r = await enCola(async () => {

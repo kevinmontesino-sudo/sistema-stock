@@ -42,7 +42,15 @@ export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
     `GAP ${empresa.tspl.separacionMm} mm,0 mm`,
     `DIRECTION ${empresa.tspl.direccion},0`,
     "REFERENCE 0,0",
+    "OFFSET 0 mm",
+    `DENSITY ${empresa.servidor.oscuridad}`,
+    "SET TEAR ON",
+    "SET PEEL OFF",
+    "SET CUTTER OFF",
     "CLS",
+    // La XP-410B no siempre vacia la memoria con CLS: lo que quedaba de la etiqueta anterior salia encimado. Igual que su
+    // driver, se pisa toda la etiqueta con una imagen en blanco (modo 0 = reemplaza; bit 1 = blanco) antes de dibujar.
+    `BITMAP 0,0,${ancho / 8},${alto},0,${"\xFF".repeat((ancho / 8) * alto)}`,
   ];
   if (e.marco) L.push(`BOX 0,0,${ancho - 1},${alto - 1},2`);
   // Nombre largo: se parte en dos lineas (como en la etiqueta en PDF) y las barras bajan un poco para que entre todo.

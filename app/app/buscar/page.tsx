@@ -17,6 +17,7 @@ export default function Buscar() {
   const puedeEliminar = usePuede("eliminar_producto");
   const puedeEtiquetar = usePuede("imprimir_etiquetas");
   const [cantEtiq, setCantEtiq] = useState("1");
+  const cantidadEtiq = parseInt(cantEtiq) || 0;
   const [modoEtiq] = useModoEtiquetas(empresa.impresionEtiquetas);
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
@@ -61,6 +62,7 @@ export default function Buscar() {
 
   async function imprimirEtiqueta() {
     if (!elegido || ocupado) return;
+    if (cantidadEtiq > 10 && !window.confirm(`¿Imprimir ${cantidadEtiq} etiquetas de ${elegido.nombre}?`)) return;
     setOcupado(true);
     setMensaje(null);
     const r = await reimprimirEtiqueta(elegido.sku, parseInt(cantEtiq) || 0);
@@ -196,10 +198,11 @@ export default function Buscar() {
           <label className="fila" style={{ gap: 8, margin: "12px 0" }}>
             <span>Cantidad de etiquetas</span>
             <input type="number" inputMode="numeric" min={1} max={100} value={cantEtiq} style={{ width: 90 }}
-              onChange={(e) => setCantEtiq(e.target.value)} onKeyDown={(e) => e.key === "Enter" && imprimirEtiqueta()} autoFocus />
+              onChange={(e) => setCantEtiq(e.target.value)} onKeyDown={(e) => e.key === "Enter" && imprimirEtiqueta()}
+              onFocus={(e) => e.currentTarget.select()} onWheel={(e) => e.currentTarget.blur()} autoFocus />
           </label>
           <div className="fila">
-            <button className="principal" onClick={imprimirEtiqueta} disabled={ocupado}>{ocupado ? "Imprimiendo…" : "Imprimir"}</button>
+            <button className="principal" onClick={imprimirEtiqueta} disabled={ocupado}>{ocupado ? "Imprimiendo…" : `Imprimir ${cantidadEtiq} etiqueta${cantidadEtiq === 1 ? "" : "s"}`}</button>
             <button onClick={() => setPanel(null)}>Cancelar</button>
           </div>
         </div>
