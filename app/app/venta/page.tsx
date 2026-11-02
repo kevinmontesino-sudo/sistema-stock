@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto } from "@/app/actions";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { empresa } from "@/lib/empresa.config";
-import { imprimir } from "@/lib/imprimir";
+import { ticketVentaEscpos } from "@/lib/escpos";
+import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
   calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pesos, precioMedio,
@@ -218,11 +219,11 @@ export default function VentaPage() {
   useEffect(() => {
     if (!aImprimir) return;
     const t = setTimeout(() => {
-      imprimir(`${empresa.ticketMm.ancho}mm auto`);
       setAImprimir(false);
-    }, 300);
+      if (ultima) imprimirTicketPreferido(() => ticketVentaEscpos(ultima)).then((m) => m && setAviso(m));
+    }, 100);
     return () => clearTimeout(t);
-  }, [aImprimir]);
+  }, [aImprimir, ultima]);
 
   // Las notas de credito no son plata que entra a la caja: se muestran aparte y no suman al total cobrado.
   const filasCaja = caja.filas.filter((c) => c.id !== "nota_credito");

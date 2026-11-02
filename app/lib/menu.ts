@@ -26,6 +26,7 @@ export const MOMENTOS: Momento[] = [
     id: "vender", titulo: "Vender", icono: "💵",
     items: [
       { href: "/venta", texto: "Venta", ayuda: "Escanear y cobrar", permiso: "vender" },
+      { href: "/ventas", texto: "Ventas", ayuda: "Buscar una venta por día o mes", permiso: "devolver" },
       { href: "/devolucion", texto: "Cambio o devolución", ayuda: "Nota de crédito con el ticket", permiso: "devolver" },
     ],
   },

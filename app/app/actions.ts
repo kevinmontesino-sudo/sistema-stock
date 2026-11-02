@@ -184,6 +184,19 @@ export async function ventaParaDevolver(codigo: string) {
   return seguro("devolver", async (u) => ({ venta: await repo.ventaParaDevolucion(txt(codigo), sucursalFija(u.rol, u.sucursalId)) }));
 }
 
+// Ventas por dia o mes para encontrar la compra de un cliente que perdio el ticket.
+export async function listarVentas(sucursal: string, desde: string, hasta: string) {
+  return seguro("devolver", async (u) => ({ ventas: await repo.ventasListado(suc(u, txt(sucursal)), txt(desde), txt(hasta)) }));
+}
+
+export async function reimprimirTicketVenta(codigo: string) {
+  return seguro("devolver", async (u) => {
+    const venta = await repo.ticketPorCodigo(txt(codigo), sucursalFija(u.rol, u.sucursalId));
+    await auditar("ticket_reimpreso", { venta: venta.codigo, sucursal: venta.sucursal });
+    return { venta };
+  });
+}
+
 export async function emitirNotaCredito(sucursal: string, ventaCodigo: string, items: { itemId: number; cant: number; falladas: number }[]) {
   return seguro("devolver", async (u) => {
     const nota = await repo.emitirNota(

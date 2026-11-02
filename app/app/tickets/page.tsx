@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { TicketNota } from "@/components/TicketNota";
 import { empresa } from "@/lib/empresa.config";
-import { imprimir } from "@/lib/imprimir";
+import { ticketNotaEscpos, ticketVentaEscpos } from "@/lib/escpos";
+import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import type { NotaCredito } from "@/lib/util";
 
 // Vista previa con datos de ejemplo (no toca la base): sirve para ver como salen y probar si el lector los escanea.
@@ -30,13 +31,14 @@ const notaEjemplo: NotaCredito = {
 export default function TicketsPrueba() {
   // Para probar una impresora de tickets sin registrar ninguna venta: imprime el ejemplo con el mismo tamano de papel de la caja.
   const [prueba, setPrueba] = useState<"venta" | "nota" | null>(null);
+  const [avisoPrueba, setAvisoPrueba] = useState("");
   useEffect(() => {
     if (!prueba) return;
-    const t = setTimeout(() => {
-      imprimir(`${empresa.ticketMm.ancho}mm auto`);
-      setPrueba(null);
-    }, 300);
-    return () => clearTimeout(t);
+    // El ticket se queda en pantalla un rato por si hubo que caer a la ventana del navegador.
+    imprimirTicketPreferido(() => (prueba === "venta" ? ticketVentaEscpos(ventaEjemplo) : ticketNotaEscpos(notaEjemplo))).then((m) => {
+      setAvisoPrueba(m);
+      setTimeout(() => setPrueba(null), 1500);
+    });
   }, [prueba]);
   return (
     <>
@@ -48,7 +50,8 @@ export default function TicketsPrueba() {
       <div className="fila no-print" style={{ margin: "8px 0 16px" }}>
         <button className="principal" onClick={() => setPrueba("venta")}>Imprimir ticket de prueba</button>
         <button onClick={() => setPrueba("nota")}>Imprimir nota de prueba</button>
-        <span className="aviso">Sale por la impresora predeterminada de esta PC. No guarda nada.</span>
+        <span className="aviso">Sale directo por la impresora de tickets (agente de impresión). No guarda nada.</span>
+        {avisoPrueba && <span className="error" role="alert">{avisoPrueba}</span>}
       </div>
       <div className="fila no-print" style={{ alignItems: "flex-start", gap: 24, flexWrap: "wrap" }}>
         <div><p className="rotulo">Ticket de venta</p><div style={{ boxShadow: "0 0 0 1px var(--borde)" }}><Ticket venta={ventaEjemplo} /></div></div>

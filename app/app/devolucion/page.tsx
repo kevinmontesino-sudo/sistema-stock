@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { emitirNotaCredito, ventaParaDevolver } from "@/app/actions";
 import { TicketNota } from "@/components/TicketNota";
-import { empresa } from "@/lib/empresa.config";
 import { useEscaner, useSucursal } from "@/lib/hooks";
-import { imprimir } from "@/lib/imprimir";
+import { ticketNotaEscpos } from "@/lib/escpos";
+import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { DIAS_DEVOLUCION, ES_CODIGO_NOTA, nombreSucursal, pesos, type NotaCredito, type VentaDevolvible } from "@/lib/util";
 
 export default function DevolucionPage() {
@@ -32,6 +32,12 @@ export default function DevolucionPage() {
     setVenta(r.venta);
   }, []);
   useEscaner(buscar);
+  // Desde la lista de ventas se llega con el codigo ya cargado (/devolucion?codigo=V...).
+  useEffect(() => {
+    const c = new URLSearchParams(window.location.search).get("codigo");
+    const t = setTimeout(() => c && buscar(c), 0);
+    return () => clearTimeout(t);
+  }, [buscar]);
 
   const valor = venta ? venta.items.reduce((s, i) => s + (cant[i.id] ?? 0) * i.valor, 0) : 0;
   const unidades = Object.values(cant).reduce((s, n) => s + n, 0);
@@ -53,11 +59,11 @@ export default function DevolucionPage() {
   useEffect(() => {
     if (!aImprimir) return;
     const t = setTimeout(() => {
-      imprimir(`${empresa.ticketMm.ancho}mm auto`);
       setAImprimir(false);
-    }, 400);
+      if (nota) imprimirTicketPreferido(() => ticketNotaEscpos(nota)).then((m) => m && setAviso(m));
+    }, 100);
     return () => clearTimeout(t);
-  }, [aImprimir]);
+  }, [aImprimir, nota]);
 
   return (
     <>

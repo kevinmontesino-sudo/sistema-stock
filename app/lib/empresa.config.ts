@@ -32,6 +32,8 @@ export const empresa = {
   impresionEtiquetas: "agente" as "agente" | "directa" | "ventana" | "servidor",
   // Parte del nombre de la impresora de etiquetas tal como la ve el sistema (ej. "Xprinter XP-410B" o "Xprinter_XP_410B").
   impresoraEtiquetas: "410",
+  // Impresora de tickets (rollo de 80 mm) tal como la ve cada PC: varias opciones separadas por "|" (Windows: "EPSON TM-T20IV Receipt"; Mac: la cola que se haya creado, ej. "ticket").
+  impresoraTickets: "TM-T20|ticket",
   // Ajustes TSPL (si las etiquetas salen del reves o la separacion no coincide, se cambian aca).
   // Modo "servidor": el sistema manda un PDF 50x30 con `lp` a esta cola, sin ventana (cola = nombre en CUPS, papel = codigo del PPD).
   servidor: { cola: "Xprinter_XP_410B", papel: "LB07", oscuridad: 11 },

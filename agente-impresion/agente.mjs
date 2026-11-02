@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const PUERTO = Number(process.env.AGENTE_PUERTO) || 9101;
 const ORIGENES = (process.env.AGENTE_ORIGENES || "https://stock-caja-ventas.xmenosmasprendas.com,http://localhost:3000,http://127.0.0.1:3000")
   .split(",").map((s) => s.trim()).filter(Boolean);
@@ -46,21 +46,26 @@ async function impresoras() {
 
 const normal = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+// `consulta` puede traer varias opciones separadas por "|" (ej. "TM-T20|ticket": en Windows la impresora se llama de una forma y en Mac de otra).
 async function buscarImpresora(consulta) {
   const lista = await impresoras();
-  const q = normal(consulta);
-  const nombre = q ? lista.find((n) => normal(n).includes(q)) : undefined;
+  let nombre;
+  for (const opcion of consulta.split("|")) {
+    const q = normal(opcion);
+    nombre = q ? lista.find((n) => normal(n).includes(q)) : undefined;
+    if (nombre) break;
+  }
   if (!nombre) throw new Error(`No hay ninguna impresora con "${consulta}" en el nombre. Impresoras de esta PC: ${lista.join(", ") || "ninguna"}.`);
   return nombre;
 }
 
-async function enviarCrudo(impresora, trabajos) {
+async function enviarCrudo(impresora, trabajos /* Buffer[] */) {
   const dir = await mkdtemp(join(tmpdir(), "etiquetas-"));
   try {
     let n = 0;
     for (const t of trabajos) {
       const archivo = join(dir, `trabajo${n++}.tspl`);
-      await writeFile(archivo, Buffer.from(t, "latin1"));
+      await writeFile(archivo, t);
       if (WINDOWS) {
         await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", join(AQUI, "imprimir-raw.ps1"), "-Impresora", impresora, "-Archivo", archivo], { timeout: 30000, windowsHide: true });
       } else {
@@ -137,11 +142,26 @@ const servidor = http.createServer(async (req, res) => {
       if (typeof datos.impresora !== "string" || datos.impresora.length > 60) return responder(res, 400, { ok: false, error: "Impresora invalida" }, cors);
       const r = await enCola(async () => {
         const nombre = await buscarImpresora(datos.impresora);
-        await enviarCrudo(nombre, trabajos);
+        await enviarCrudo(nombre, trabajos.map((t) => Buffer.from(t, "latin1")));
         return nombre;
       });
       await log(`imprimio ${trabajos.length} trabajo(s) en "${r}" (desde ${origen})`);
       return responder(res, 200, { ok: true, impresora: r, trabajos: trabajos.length }, cors);
+    }
+
+    // Ticket en ESC/POS (impresora de rollo): llega en base64 y tiene que empezar con el reinicio de la impresora (ESC @).
+    if (req.method === "POST" && ruta === "/imprimir-ticket") {
+      const datos = JSON.parse(await leerCuerpo(req) || "{}");
+      const bytes = typeof datos.datos === "string" ? Buffer.from(datos.datos, "base64") : Buffer.alloc(0);
+      if (bytes.length < 4 || bytes.length > 3_000_000 || bytes[0] !== 0x1b || bytes[1] !== 0x40) return responder(res, 400, { ok: false, error: "Ticket invalido" }, cors);
+      if (typeof datos.impresora !== "string" || datos.impresora.length > 60) return responder(res, 400, { ok: false, error: "Impresora invalida" }, cors);
+      const r = await enCola(async () => {
+        const nombre = await buscarImpresora(datos.impresora);
+        await enviarCrudo(nombre, [bytes]);
+        return nombre;
+      });
+      await log(`imprimio un ticket (${bytes.length} bytes) en "${r}" (desde ${origen})`);
+      return responder(res, 200, { ok: true, impresora: r }, cors);
     }
 
     responder(res, 404, { ok: false, error: "No existe" }, cors);

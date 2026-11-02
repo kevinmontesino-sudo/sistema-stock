@@ -113,6 +113,10 @@ export type NotaCredito = {
   estado: "vigente" | "usada";
   items: { nombre: string; cantidad: number; monto: number; falladas: number }[];
 };
+export type VentaListada = {
+  codigo: string; fecha: string; total: number; unidades: number; medios: string; devuelta: boolean;
+  items: { nombre: string; cantidad: number }[];
+};
 export type VentaDevolvible = {
   codigo: string; fecha: string; sucursal: string; total: number;
   items: { id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; valor: number }[];

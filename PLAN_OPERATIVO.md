@@ -607,3 +607,10 @@ Propuesta a confirmar: ver el mensaje del 23/10. Se junta con la sección 43 (pr
 - Páginas: Cargar y Buscar usan `lib/agenteImpresion.ts` (modo por defecto "agente"; "servidor" queda para desarrollo local). La etiqueta TSPL ahora parte los nombres largos en 2 líneas.
 - Paquete Windows: `agente-impresion/empaquetar.sh` → `dist/agente-impresion-windows.zip` (node.exe oficial + agente + instalar.bat). Mac: `bash instalar-mac.sh`.
 - Pendiente: probar en una PC con Windows real; desplegar el cambio de la app; Chrome pide permiso de "red local" la primera vez.
+
+## 50. Tickets directos por el agente y pantalla de Ventas (2/11)
+- Los tickets (venta y nota de crédito) ya no usan la ventana de impresión: `lib/escpos.ts` arma ESC/POS (logo en blanco y negro, código de barras CODE128 nativo, corte) y el agente (v1.1.0, `POST /imprimir-ticket`) lo manda en crudo a la Epson TM-T20IV-L. Sin ventana, sin tamaño de hoja, corte exacto. Si el agente no está, cae a la ventana del navegador y avisa.
+- Nombre de la impresora de tickets: `empresa.impresoraTickets` ("TM-T20|ticket": en Windows se llama "EPSON TM-T20IV Receipt"; en la Mac de Kevin la cola se llama "ticket").
+- Nueva pantalla `/ventas` (Vender > Ventas, permiso `devolver`): ventas por día o mes, de la más vieja a la más nueva, filtro por prenda/ticket, botones Devolver (abre /devolucion?codigo=…) y Reimprimir (auditado como `ticket_reimpreso`). Un local ve solo las suyas.
+- Había un bug de sesión: la cookie del admin con 2FA vencía a los 10 minutos (arreglado, 15e02af).
+- Pendiente: probar el logo y el corte en la Epson real desde la página; reimprimir notas de crédito; instalar el agente v1.1.0 en cada PC (en la Mac, volver a correr instalar-mac.sh).

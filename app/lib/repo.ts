@@ -4,7 +4,7 @@ import { type Db, pool, tx } from "./db";
 import { usuarioEnCurso } from "./seguridad/contexto";
 import {
   capitalizar, nombreSucursal, normalizar, totalReparto,
-  calcularPagos, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
+  calcularPagos, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
 // Error esperado: se le muestra el mensaje al usuario.
@@ -492,6 +492,47 @@ async function ticketDeVenta(c: PoolClient, id: number) {
     codigo: v.rows[0].codigo, fecha: v.rows[0].creado_en.toISOString(), subtotal: v.rows[0].subtotal_lista, ajuste: v.rows[0].total - v.rows[0].subtotal_lista,
     total: v.rows[0].total, pagos: pg.rows.map((p) => ({ medioId: p.medioId, nombre: p.nombre, pct: p.pct, monto: p.monto, valorLista: p.valorLista })), items: it.rows,
   };
+}
+
+// Ventas de una sucursal entre dos dias (hora de Argentina, ambos incluidos), de la mas vieja a la mas nueva: para encontrar la compra
+// de un cliente que perdio el ticket. Solo la consulta quien puede devolver, y un local ve solo las suyas.
+export async function ventasListado(sucursal: string, desde: string, hasta: string): Promise<VentaListada[]> {
+  if (!esSucursal(sucursal)) falla("Sucursal inexistente");
+  const fecha = /^\d{4}-\d{2}-\d{2}$/;
+  if (!fecha.test(desde) || !fecha.test(hasta) || desde > hasta) falla("Fechas inválidas");
+  const dias = (Date.parse(hasta) - Date.parse(desde)) / 86_400_000;
+  if (!(dias >= 0 && dias <= 62)) falla("Elegí un período de hasta 2 meses");
+  const r = await pool.query<{ codigo: string; fecha: Date; total: number; unidades: number; medios: string | null; devuelta: boolean; items: { nombre: string; cantidad: number }[] }>(
+    `select v.codigo, v.creado_en as fecha, v.total, v.id,
+       (select coalesce(sum(vi.cantidad), 0)::int from venta_items vi where vi.venta_id = v.id) as unidades,
+       (select string_agg(distinct case when p.nota_credito_id is null then m.nombre else 'Nota de crédito' end, ' + ')
+          from venta_pagos p join medios_pago m on m.id = p.medio_pago_id where p.venta_id = v.id) as medios,
+       exists (select 1 from notas_credito n where n.venta_id = v.id) as devuelta,
+       (select coalesce(json_agg(json_build_object('nombre', vi.nombre, 'cantidad', vi.cantidad) order by vi.id), '[]'::json)
+          from venta_items vi where vi.venta_id = v.id) as items
+     from ventas v
+     where v.sucursal_id = $1
+       and v.creado_en >= ($2::date::timestamp at time zone 'America/Argentina/Buenos_Aires')
+       and v.creado_en <  (($3::date + 1)::timestamp at time zone 'America/Argentina/Buenos_Aires')
+     order by v.creado_en, v.id limit 2000`,
+    [sucursal, desde, hasta],
+  );
+  return r.rows.map((x) => ({ codigo: x.codigo, fecha: x.fecha.toISOString(), total: x.total, unidades: x.unidades, medios: x.medios ?? "", devuelta: x.devuelta, items: x.items }));
+}
+
+// Ticket de una venta ya cobrada, para reimprimirlo (el cliente lo perdio o salio mal). Un local solo reimprime los suyos.
+export async function ticketPorCodigo(codigo: string, soloSucursal: string | null = null) {
+  const cod = codigo.trim().toUpperCase();
+  if (!ES_CODIGO_VENTA.test(cod)) return falla("Código de ticket inválido");
+  const v = await pool.query<{ id: number; sucursal_id: string }>("select id::int as id, sucursal_id from ventas where codigo = $1", [cod]);
+  if (!v.rows[0]) return falla(`No existe la venta ${cod}`);
+  if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}.`);
+  const c = await pool.connect();
+  try {
+    return { ...(await ticketDeVenta(c, v.rows[0].id)), sucursal: v.rows[0].sucursal_id };
+  } finally {
+    c.release();
+  }
 }
 
 // Caja del dia de una sucursal: plata cobrada en cada medio (un pago mixto cuenta en cada medio que uso).
