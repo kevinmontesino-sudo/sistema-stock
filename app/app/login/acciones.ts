@@ -72,7 +72,7 @@ export async function verificarCodigo(_: EstadoForm, fd: FormData): Promise<Esta
   }
   await registrarIntento(clave2fa, ip, true);
   await pool.query("update usuarios set totp_ultimo_paso = $2, ultimo_login = now() where id = $1", [s.usuario.id, paso]);
-  await activarSesion(s.id);
+  await activarSesion(s.id, s.usuario.rol);
   await auditar("login_ok", { fase: "2fa" }, { usuarioId: s.usuario.id, email: s.usuario.email, ip });
   revalidatePath("/", "layout"); // el menu se calcula de nuevo con la sesion ya completa
   redirect(s.usuario.debeCambiarClave ? "/cuenta/clave" : "/");
@@ -86,7 +86,7 @@ export async function confirmarDobleVerificacion(_: EstadoForm, fd: FormData): P
   const paso = secreto ? verificarTotp(secreto, txt(fd.get("codigo"))) : null;
   if (paso === null) return { error: "Código incorrecto. Revisá que la hora de tu celular sea la correcta e intentá de nuevo." };
   await pool.query("update usuarios set totp_activo = true, totp_ultimo_paso = $2, ultimo_login = now() where id = $1", [s.usuario.id, paso]);
-  if (s.fase === "2fa_alta") await activarSesion(s.id);
+  if (s.fase === "2fa_alta") await activarSesion(s.id, s.usuario.rol);
   await auditar("2fa_activado", {}, { usuarioId: s.usuario.id, email: s.usuario.email });
   revalidatePath("/", "layout");
   redirect(s.usuario.debeCambiarClave ? "/cuenta/clave" : "/");

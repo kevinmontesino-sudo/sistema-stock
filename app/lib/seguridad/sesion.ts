@@ -79,8 +79,14 @@ export async function usuarioActual() {
   return s && s.fase === "activa" ? s.usuario : null;
 }
 
-export async function activarSesion(sesionId: number) {
-  await pool.query("update sesiones set fase = 'activa', ultima_actividad = now(), expira_en = now() + interval '14 hours' where id = $1", [sesionId]);
+// Pasa la sesion provisoria (clave ok, falta el codigo) a activa. Hay que renovar tambien la cookie: nacio con la duracion de la
+// fase provisoria (10 minutos) y, si no, el navegador la borraba a los 10 minutos y se cerraba la sesion de los admin.
+export async function activarSesion(sesionId: number, rol: Rol) {
+  const { absoluta } = politica(rol, "activa");
+  await pool.query("update sesiones set fase = 'activa', ultima_actividad = now(), expira_en = now() + ($2 || ' seconds')::interval where id = $1", [sesionId, String(absoluta)]);
+  const jar = await cookies();
+  const token = jar.get(COOKIE)?.value;
+  if (token) jar.set(COOKIE, token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: absoluta });
 }
 
 export async function cerrarSesion() {
