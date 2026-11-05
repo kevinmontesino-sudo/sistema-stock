@@ -1,0 +1,25 @@
+GUIA: IMPRESORA DE ETIQUETAS (Xprinter XP-410B, etiquetas de 50 x 30 mm)
+========================================================================
+Las etiquetas salen DIRECTO por el agente de impresion, sin ventana. Solo la necesitan las PCs que imprimen etiquetas
+(Deposito y, si quieren reimprimir una etiqueta perdida, los locales).
+
+PASO 1: CARGAR EL ROLLO Y CALIBRAR
+  - Etiquetas de 50 x 30 mm con separacion de 3 mm. Cargar el rollo y, con la impresora encendida, mantener apretado el
+    boton FEED unos segundos hasta que avance varias etiquetas (asi mide el tamano del rollo).
+
+PASO 2: DRIVER
+  - Instalar el driver de la XP-410B (el del CD o el de la pagina del fabricante de Xprinter). En Windows tiene que
+    aparecer en Impresoras y escaneres con "410" en el nombre (ej. "Xprinter XP-410B"). En Mac, la cola de la Mac
+    de Kevin se llama "Xprinter_XP_410B".
+  - NO hace falta dejarla como predeterminada.
+
+PASO 3: AGENTE DE IMPRESION
+  - Instalarlo como dice 00_LEEME_PRIMERO.txt. Una sola instalacion sirve para etiquetas y tickets.
+
+PASO 4: PRUEBA
+  - Cargar > Buscar prenda > elegir una prenda > "Etiqueta" > cantidad 1 > Imprimir.
+  - La etiqueta sale limpia, con el codigo de barras, el nombre y los precios. La pistola lee el codigo.
+  - Cuidado con la cantidad: se confirma si pedis mas de 10 etiquetas.
+
+NOTAS
+  - Si alguna vez las etiquetas salen encimadas, es memoria de la impresora: apagarla y prenderla.

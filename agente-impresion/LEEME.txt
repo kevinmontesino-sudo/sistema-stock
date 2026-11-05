@@ -1,11 +1,11 @@
-AGENTE DE IMPRESION DE ETIQUETAS (X Menos Mas Prendas)
+AGENTE DE IMPRESION (etiquetas y tickets) - X Menos Mas Prendas
 
-Que es: un programita que queda abierto en la PC donde esta la impresora de etiquetas. La pagina del sistema le pasa
-las etiquetas y el las manda a la impresora, sin ventanas. Solo escucha dentro de la propia PC (127.0.0.1).
+Que es: un programita que queda abierto en la PC donde estan las impresoras (etiquetas Xprinter XP-410B y tickets Epson
+TM-T20IV-L). La pagina del sistema le pasa lo que hay que imprimir y el lo manda a la impresora, sin ventanas. Solo escucha dentro de la propia PC (127.0.0.1).
 
 INSTALAR EN WINDOWS (10 u 11) - 3 minutos por PC
-1. Tener la impresora de etiquetas (Xprinter XP-410B) instalada y encendida. Tiene que aparecer en
-   Configuracion > Impresoras y escaneres. NO hace falta dejarla como predeterminada.
+1. Tener las impresoras instaladas y encendidas (Xprinter XP-410B con "410" en el nombre; Epson con "TM-T20" en el
+   nombre). Tienen que aparecer en Configuracion > Impresoras y escaneres. NO hace falta dejarlas como predeterminadas.
 2. Descomprimir agente-impresion-windows.zip (click derecho > Extraer todo) y abrir la carpeta.
 3. Doble click en instalar.bat. Si Windows avisa "Windows protegio su PC": Mas informacion > Ejecutar de todas formas.
 4. Al final tiene que listar las impresoras de esa PC y decir "funcionando". Se abre solo cada vez que se prende la PC.

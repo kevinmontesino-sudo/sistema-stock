@@ -10,6 +10,8 @@ import { puede, ROLES, type Rol } from "@/lib/seguridad/permisos";
 import { empresa } from "@/lib/empresa.config";
 import { panelCompleto, validarParams } from "@/lib/informes";
 import { crearToken } from "@/lib/seguridad/token";
+import { crearPromo, desactivarPromo, descuentosEspeciales, listarPromos, type PromoNueva } from "@/lib/promosAdmin";
+import { listarTipos } from "@/lib/repo";
 
 // Acciones del panel de administracion: SOLO administradores (se verifica en cada una, no en la pantalla).
 type Resultado<T> = ({ ok: true } & T) | { ok: false; motivo: string };
@@ -157,18 +159,18 @@ export async function obtenerPanel(f: { desde?: string; hasta?: string; sucursal
 }
 
 // ---- Llaves de acceso a la API de informes ----
-export type TokenFila = { id: number; nombre: string; prefijo: string; creado: string; vence: string; ultimoUso: string | null; usos: number; estado: "activa" | "vencida" | "revocada" };
+export type TokenFila = { id: number; nombre: string; alcance: string; prefijo: string; creado: string; vence: string; ultimoUso: string | null; usos: number; estado: "activa" | "vencida" | "revocada" };
 
 export async function listarTokens() {
   return admin(async () => {
-    const r = await pool.query<{ id: number; nombre: string; prefijo: string; creado: Date; vence: Date; ultimo: Date | null; usos: number; revocado: Date | null }>(
-      `select id::int as id, nombre, prefijo, creado_en as creado, vence_en as vence, ultimo_uso as ultimo, usos::int as usos, revocado_en as revocado
+    const r = await pool.query<{ id: number; nombre: string; alcance: string; prefijo: string; creado: Date; vence: Date; ultimo: Date | null; usos: number; revocado: Date | null }>(
+      `select id::int as id, nombre, alcance, prefijo, creado_en as creado, vence_en as vence, ultimo_uso as ultimo, usos::int as usos, revocado_en as revocado
        from tokens_api order by id desc`,
     );
     const ahora = Date.now();
     return {
       tokens: r.rows.map((t): TokenFila => ({
-        id: t.id, nombre: t.nombre, prefijo: t.prefijo, creado: new Date(t.creado).toISOString(), vence: new Date(t.vence).toISOString(),
+        id: t.id, nombre: t.nombre, alcance: t.alcance, prefijo: t.prefijo, creado: new Date(t.creado).toISOString(), vence: new Date(t.vence).toISOString(),
         ultimoUso: t.ultimo ? new Date(t.ultimo).toISOString() : null, usos: t.usos,
         estado: t.revocado ? "revocada" : new Date(t.vence).getTime() < ahora ? "vencida" : "activa",
       })),
@@ -176,14 +178,27 @@ export async function listarTokens() {
   });
 }
 
-export async function crearTokenApi(a: { nombre: string; dias: number }) {
+export async function crearTokenApi(a: { nombre: string; dias: number; alcance?: string }) {
   return admin(async (yo) => {
     const nombre = txt(a.nombre).trim();
     if (nombre.length < 3 || nombre.length > 60) throw new ErrorNegocio("Ponele un nombre a la llave (por ejemplo: Cesar - Claude).");
     const dias = [30, 90, 180].includes(Number(a.dias)) ? Number(a.dias) : 90;
-    const t = await crearToken(nombre, dias, yo.id);
-    await auditar("llave_api_creada", { id: t.id, nombre, dias });
+    const alcance = a.alcance === "promos" ? "promos" : "informes";
+    const t = await crearToken(nombre, dias, yo.id, alcance);
+    await auditar("llave_api_creada", { id: t.id, nombre, dias, alcance });
     return { token: t.token, vence: t.vence, nombre };
+  });
+}
+
+// Sube o baja el permiso de una llave sin cambiarla: quien ya la tiene configurada no tiene que tocar nada.
+export async function cambiarAlcanceToken(id: number, alcance: string) {
+  return admin(async () => {
+    const nuevo = alcance === "promos" ? "promos" : "informes";
+    const r = await pool.query<{ nombre: string }>(
+      "update tokens_api set alcance = $2 where id = $1 and revocado_en is null and vence_en > now() returning nombre", [Number(id), nuevo]);
+    if (!r.rows[0]) throw new ErrorNegocio("No existe esa llave, o está vencida o revocada.");
+    await auditar("llave_api_alcance", { id: Number(id), nombre: r.rows[0].nombre, alcance: nuevo });
+    return {};
   });
 }
 
@@ -192,6 +207,31 @@ export async function revocarToken(id: number) {
     const r = await pool.query<{ nombre: string }>("update tokens_api set revocado_en = now() where id = $1 and revocado_en is null returning nombre", [Number(id)]);
     if (!r.rows[0]) throw new ErrorNegocio("No existe esa llave o ya estaba revocada.");
     await auditar("llave_api_revocada", { id: Number(id), nombre: r.rows[0].nombre });
+    return {};
+  });
+}
+
+// ---- Promos ----
+export async function promosAdmin() {
+  return admin(async () => ({
+    promos: await listarPromos(),
+    especiales: await descuentosEspeciales(50),
+    tipos: (await listarTipos()).map((t) => ({ codigo: t.codigo, nombre: t.nombre })),
+  }));
+}
+
+export async function crearPromoAdmin(a: PromoNueva) {
+  return admin(async (yo) => {
+    const promo = await crearPromo(a, { usuarioId: yo.id, origen: "sistema" });
+    await auditar("promo_creada", { promo });
+    return { promo };
+  });
+}
+
+export async function desactivarPromoAdmin(id: number) {
+  return admin(async () => {
+    const r = await desactivarPromo(Number(id));
+    await auditar("promo_desactivada", r);
     return {};
   });
 }

@@ -1,0 +1,36 @@
+LISTA DE TAREAS - PONER A ANDAR LAS PCs (actualizada 3/11/2026)
+===============================================================
+
+A) MAC YA INSTALADA (la que ya tiene el agente) - falta:
+  [ ] 1. Enchufar por USB la Epson TM-T20IV-L y la Xprinter XP-410B, con papel, y prenderlas.
+  [ ] 2. Agregarlas en Ajustes del Sistema > Impresoras y escaneres (+). Nombres: Epson = ticket / Xprinter = Xprinter XP-410B.
+  [ ] 3. Volver a correr el instalador del kit NUEVO (agente 1.1.1, elige la impresora por nombre exacto):
+         Terminal > bash (espacio) > arrastrar programa/instalar-mac.sh > Enter.
+  [ ] 4. Verificar:  curl -s http://127.0.0.1:9101   -> tienen que figurar ticket y Xprinter_XP_410B (sin sufijo "_MacBook_Air_...").
+  [ ] 5. Abrir el sistema en Chrome, entrar con la cuenta del local y tocar PERMITIR en "dispositivos de la red local".
+  [ ] 6. Probar en /tickets: ticket de prueba y nota de prueba (logo, ancho completo, corte justo).
+  [ ] 7. Probar una etiqueta: Cargar > Buscar prenda > Etiqueta > cantidad 1.
+  [ ] 8. Probar la pistola lectora: lee el codigo del ticket de prueba (escribe y termina con Enter).
+  [ ] 9. Venta de prueba en EFECTIVO (ticket con descuento) y con TARJETA (sin recargo explicito). Despues Ventas > Reimprimir y Devolver.
+  [ ] 10. Dejar un acceso directo al sistema (Chrome: menu de 3 puntos > Guardar y compartir > Crear acceso directo > "Abrir como ventana").
+  [ ] 11. Borrar/devolver la venta y la prenda de prueba.
+
+B) MAC DE KEVIN:
+  [ ] 1. Reinstalar el agente 1.1.1 (bash "/Users/usuario/Documents/sistema stock/agente-impresion/instalar-mac.sh").
+  [ ] 2. (Opcional) Apagar "Compartir impresoras" en Ajustes > General > Compartir, para que otras Macs no vean la Epson.
+
+C) OTRA MAC (repetir A con el kit de Drive; ~15 min por Mac)
+  [ ] 1. Bajar Kit_Mac_XMenosMas.zip, descomprimir.
+  [ ] 2. Instalar los dos drivers (carpeta drivers) y enchufar/agregar las impresoras.
+  [ ] 3. Correr el instalador (Forma A de Terminal). 4. Seguir los puntos 4 al 11 de A.
+
+D) KIT DE WINDOWS (en una semana) - falta:
+  [ ] 1. Bajar de epson.com.ar el driver TM-T20IV para Windows y ponerlo en kit-pc-nueva/win/drivers/.
+  [ ] 2. (Ya esta) Driver Xprinter Windows: win/drivers/Xprinter_driver_Windows_ExpressDelivery_11.5.0.exe.
+  [ ] 3. Armar el kit de Windows (zip con instalar.bat + drivers + guias) y subirlo a Drive.
+  [ ] 4. PROBARLO en UNA PC con Windows antes de repetirlo: el agente de Windows (PowerShell + winspool) nunca se probo en una PC real.
+  [ ] 5. Con esa prueba ajustar y recien ahi instalar en el resto.
+
+E) FUTURO: PROGRAMA INSTALABLE (reemplaza el kit)
+  [ ] 1. Decidir: app de escritorio "XMM Caja" (Electron) que abre el sistema y lleva el agente adentro. Ver PLAN_OPERATIVO.md §51.
+  [ ] 2. Si se hace: comprar firma (Apple Developer USD 99/anio; Windows firma de codigo o Azure Trusted Signing) para que no salgan avisos.

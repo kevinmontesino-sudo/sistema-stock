@@ -165,15 +165,28 @@ export async function cobrarVenta(
   items: { sku: string; cant: number }[],
   pagos: { medioId: string; monto: number | null }[],
   clave?: string,
+  especial?: { pct: number; motivo: string; autorizo: string } | null,
+  totalEsperado?: number,
 ) {
-  return seguro("vender", async (u) => ({
-    venta: await repo.registrarVenta(
+  return seguro("vender", async (u) => {
+    if (especial && !puede(u.rol, "descuento_especial")) throw new repo.ErrorNegocio("Tu usuario no puede hacer descuentos especiales.");
+    const venta = await repo.registrarVenta(
       suc(u, txt(sucursal)),
       (Array.isArray(items) ? items : []).map((i) => ({ sku: txt(i.sku), cant: ent(i.cant) })),
       (Array.isArray(pagos) ? pagos : []).map((p) => ({ medioId: txt(p.medioId), monto: p.monto === null ? null : ent(p.monto) })),
       txt(clave).slice(0, 80) || undefined,
-    ),
-  }));
+      especial ? { pct: ent(especial.pct), motivo: txt(especial.motivo), autorizo: txt(especial.autorizo) } : undefined,
+      typeof totalEsperado === "number" && Number.isInteger(totalEsperado) ? totalEsperado : undefined,
+    );
+    const { nueva: _nueva, ...datos } = venta;
+    void _nueva;
+    return { venta: datos };
+  });
+}
+
+// Promos que valen hoy en el local (la caja las usa para mostrar el total antes de cobrar; al cobrar, el servidor recalcula).
+export async function promosDeHoy(sucursal: string) {
+  return seguro("vender", async (u) => ({ promos: await repo.promosVigentes(suc(u, txt(sucursal))), especial: puede(u.rol, "descuento_especial") }));
 }
 
 export async function cajaDeHoy(sucursal: string) {

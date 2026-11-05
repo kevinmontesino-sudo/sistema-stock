@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Conector (MCP) para que Claude consulte los INFORMES de X Menos Mas Prendas. Es solo lectura: llama a la API de informes
-// con la llave que se le da por variable de entorno. No tiene dependencias: solo necesita Node 18 o mas.
+// Conector (MCP) para que Claude consulte los INFORMES de X Menos Mas Prendas y, con una llave de alcance "promos", cree y
+// desactive PROMOS (3x2, porcentajes) por local y fecha. Llama a la API del sistema con la llave que se le da por variable
+// de entorno. No tiene dependencias: solo necesita Node 18 o mas.
 //
-// Variables:  SISTEMA_URL   (por ejemplo https://sistema-stock.xmenosmasprendas.com)
+// Variables:  SISTEMA_URL   (por ejemplo https://stock-caja-ventas.xmenosmasprendas.com)
 //             SISTEMA_TOKEN (la llave "xmp_..." que genera un administrador en Accesos API)
 // Ver INSTRUCCIONES_API_INFORMES.txt para configurarlo en Claude Desktop.
 import { createInterface } from "node:readline";
@@ -32,7 +33,59 @@ const herramientas = [
     },
   },
   { name: "ver_catalogo", description: "Lista los informes disponibles, sus parametros y las definiciones de cada numero.", inputSchema: { type: "object", properties: {} } },
+  {
+    name: "ver_promos",
+    description: "Lista las promos de los locales (vigentes, programadas y pasadas, con cuantas ventas las usaron), la fecha de hoy, las sucursales y los codigos de categoria. " +
+      "Usala antes de crear una promo para no repetirla y para saber que fecha es hoy.",
+    inputSchema: { type: "object", properties: { solo_vigentes: { type: "boolean", description: "true = solo las que siguen activas (hoy o mas adelante)." } } },
+  },
+  {
+    name: "crear_promo",
+    description: "Crea una promo que se aplica SOLA en las cajas al escanear (requiere llave de alcance promos). Tipos: nxm (lleva n, paga m; ej. 3x2 = n 3, m 2: " +
+      "no se pagan las prendas mas baratas), porcentaje (descuento sobre precio de lista, hasta 50) o precio (cada prenda a $precio: 'feria todo a $1.000' = precio 1000; " +
+      "'buzos a $4.500 en San Lorenzo' = precio 4500, tipos con el codigo de buzos, sucursales [sanlorenzo]; 'mallas a $9.690 llevando la docena' = precio 9690, n 12). " +
+      "Las promos no se acumulan: si hay varias va la que mas descuenta. Preguntale al usuario si es SIN CAMBIO (ferias de saldos) y si corre el descuento de efectivo " +
+      "(por defecto si en nxm/porcentaje y no en precio). " +
+      "Fechas AAAA-MM-DD de Argentina, ambas incluidas (\"mañana y pasado\" = desde mañana hasta pasado mañana). Sin sucursales = todos los locales. " +
+      "Antes de crearla, confirmale al usuario el resumen (tipo, locales, prendas y fechas).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tipo: { type: "string", enum: ["nxm", "porcentaje", "precio"] },
+        n: { type: "integer", minimum: 2, maximum: 100, description: "nxm: cuantas lleva (2 a 10). precio: minimo de prendas para que valga (ej. 12 = docena)." },
+        m: { type: "integer", minimum: 1, maximum: 9, description: "nxm: cuantas paga (menor que n)." },
+        pct: { type: "number", minimum: 0.5, maximum: 50, description: "porcentaje: descuento." },
+        precio: { type: "integer", minimum: 1, description: "precio: pesos por prenda." },
+        descuento_efectivo: { type: "boolean", description: "Si ademas corre el -20% de efectivo. Por defecto true en nxm/porcentaje, false en precio." },
+        sin_cambio: { type: "boolean", description: "true = las prendas de la promo quedan SIN CAMBIO (feria de saldos)." },
+        sucursales: { type: "array", items: { type: "string", enum: ["deposito", "zelarrayan", "white", "sanlorenzo"] }, description: "Locales donde vale. Vacio = todos." },
+        tipos: { type: "array", items: { type: "string" }, description: "Codigos de categoria (ver ver_promos). Vacio = todas las prendas." },
+        desde: { type: "string", description: "AAAA-MM-DD" },
+        hasta: { type: "string", description: "AAAA-MM-DD (maximo 3 meses despues de desde)" },
+        nombre: { type: "string", description: "Opcional, ej. \"3x2 fin de semana\"." },
+      },
+      required: ["tipo", "desde", "hasta"],
+    },
+  },
+  {
+    name: "desactivar_promo",
+    description: "Desactiva una promo por su id (deja de aplicarse en las cajas en el momento). Requiere llave de alcance promos.",
+    inputSchema: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] },
+  },
 ];
+
+async function llamarPromos(metodo, { query, cuerpo } = {}) {
+  if (!URL_BASE || !TOKEN) throw new Error("Falta configurar SISTEMA_URL y SISTEMA_TOKEN.");
+  const q = query ? "?" + new URLSearchParams(query) : "";
+  const r = await fetch(`${URL_BASE}/api/promos${q}`, {
+    method: metodo,
+    headers: { Authorization: `Bearer ${TOKEN}`, ...(cuerpo ? { "Content-Type": "application/json" } : {}) },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+  });
+  const texto = await r.text();
+  if (!r.ok) throw new Error(`La API respondio ${r.status}: ${texto.slice(0, 500)}`);
+  return texto;
+}
 
 async function llamarApi(params) {
   if (!URL_BASE || !TOKEN) throw new Error("Falta configurar SISTEMA_URL y SISTEMA_TOKEN.");
@@ -53,7 +106,7 @@ createInterface({ input: process.stdin }).on("line", async (linea) => {
   if (m.id === undefined) return; // notificaciones (por ejemplo "initialized"): no se responde
   try {
     if (m.method === "initialize") {
-      return responder(m.id, { protocolVersion: m.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "xmenosmasprendas-informes", version: "1.0.0" } });
+      return responder(m.id, { protocolVersion: m.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "xmenosmasprendas-informes", version: "1.1.0" } });
     }
     if (m.method === "ping") return responder(m.id, {});
     if (m.method === "tools/list") return responder(m.id, { tools: herramientas });
@@ -61,6 +114,9 @@ createInterface({ input: process.stdin }).on("line", async (linea) => {
       const { name, arguments: a = {} } = m.params || {};
       try {
         if (name === "ver_catalogo") return responder(m.id, { content: [{ type: "text", text: await llamarApi({}) }] });
+        if (name === "ver_promos") return responder(m.id, { content: [{ type: "text", text: await llamarPromos("GET", { query: a.solo_vigentes ? { vigentes: "1" } : undefined }) }] });
+        if (name === "crear_promo") return responder(m.id, { content: [{ type: "text", text: await llamarPromos("POST", { cuerpo: a }) }] });
+        if (name === "desactivar_promo") return responder(m.id, { content: [{ type: "text", text: await llamarPromos("DELETE", { query: { id: String(a.id) } }) }] });
         if (name === "consultar_informe") {
           if (!TIPOS.includes(a.tipo)) throw new Error(`tipo invalido. Opciones: ${TIPOS.join(", ")}`);
           return responder(m.id, { content: [{ type: "text", text: await llamarApi(a) }] });

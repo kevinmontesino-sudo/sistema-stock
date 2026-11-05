@@ -119,24 +119,30 @@ export async function ticketVentaEscpos(venta: DatosTicket) {
   const cantidad = venta.items.reduce((s, i) => s + i.cant, 0);
   const unico = venta.pagos.length === 1 ? venta.pagos[0] : null;
   const efectivo = venta.pagos.find((p) => p.medioId === "efectivo");
-  const { items, recargo, textoPct } = lineasTicket(venta);
+  const { items, recargo, textoPct, promo, ahorro, sinCambio, todoSinCambio } = lineasTicket(venta);
   r.centro(nombreSucursal(venta.sucursal)).centro(`Ticket ${venta.codigo} · ${fecha}`).regla();
-  for (const i of items) r.izqDer(`${i.cant} x ${i.nombre}`, pesos(i.monto));
+  for (const i of items) r.izqDer(`${i.cant} x ${i.nombre}${i.sinCambio && !todoSinCambio ? " (SIN CAMBIO)" : ""}`, pesos(i.monto));
   r.regla();
   if (recargo) r.linea(`${cantidad} prendas`);
   else r.izqDer(`${cantidad} prendas · subtotal lista`, pesos(venta.subtotal));
+  if (venta.promo) r.izqDer(venta.promo.nombre, `-${pesos(promo)}`);
   if (venta.ajuste < 0) {
     r.izqDer(unico ? `${unico.nombre}${textoPct(unico.pct)}` : "Descuento por medios de pago", `-${pesos(Math.abs(venta.ajuste))}`);
   }
-  r.izqDer("TOTAL", pesos(venta.total), true).regla();
+  r.izqDer("TOTAL", pesos(venta.total), true);
+  if (ahorro > 0) r.izqDer("AHORRASTE", pesos(ahorro));
+  r.regla();
   for (const p of venta.pagos) r.izqDer(`Paga ${p.nombre}${textoPct(p.pct)}`, pesos(p.monto));
   if (venta.recibido !== undefined && efectivo) {
     r.izqDer("Efectivo recibido", pesos(venta.recibido)).izqDer("VUELTO", pesos(venta.recibido - efectivo.monto), true);
   }
-  r.regla().barras(venta.codigo)
-    .centro(`Cambios por ${DIAS_DEVOLUCION} días`, true)
-    .centro(`Hasta el ${limite} presentando este ticket.`)
-    .linea().centro("¡Gracias por tu compra!", true).centro("Te esperamos pronto", true).linea()
+  r.regla().barras(venta.codigo);
+  if (todoSinCambio) r.centro("VENTA SIN CAMBIO", true);
+  else {
+    r.centro(`Cambios por ${DIAS_DEVOLUCION} días`, true).centro(`Hasta el ${limite} presentando este ticket.`);
+    if (sinCambio) r.centro("Las prendas marcadas SIN CAMBIO no tienen cambio.");
+  }
+  r.linea().centro("¡Gracias por tu compra!", true).centro("Te esperamos pronto", true).linea()
     .centro("Ticket interno").centro("No válido como factura")
     .cortar();
   return r.bytes();

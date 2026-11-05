@@ -2,6 +2,8 @@ import type { PoolClient } from "pg";
 import { DEPOSITO, empresa } from "./empresa.config";
 import { type Db, pool, tx } from "./db";
 import { usuarioEnCurso } from "./seguridad/contexto";
+import { descuentoEspecial, mediosParaPromo, mejorPromo, TOPE_PCT, type Promo } from "./promos";
+import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, totalReparto,
   calcularPagos, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
@@ -384,8 +386,34 @@ export async function totalEnSucursal(sucursal: string) {
 // El precio sale siempre de la base, nunca de lo que mande la pantalla.
 // Precio y porcentajes salen siempre de la base, nunca de la pantalla. Solo se puede vender lo que hay en la sucursal.
 // Pagos: transferencia 0%, efectivo -20%, tarjeta +20%; se puede dividir entre varios medios (ver calcularPagos).
-export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number }[], pagos: PagoEntrada[], clave?: string) {
+// Promos vigentes HOY (hora de Argentina) en un local.
+const SELECT_PROMO = `select id::int as id, nombre, tipo, n, m, pct::float8 as pct, precio, tipos, sucursales, desde::text as desde, hasta::text as hasta,
+  descuento_efectivo as "descuentoEfectivo", sin_cambio as "sinCambio",
+  (select coalesce(array_agg(t.nombre order by t.nombre), '{}') from tipos t where t.codigo = any(promos.tipos)) as categorias from promos`;
+export async function promosVigentes(sucursal: string, db: Db = pool): Promise<Promo[]> {
+  const r = await db.query<Promo>(
+    `${SELECT_PROMO} where activa and (cardinality(sucursales) = 0 or $1 = any(sucursales))
+       and (now() at time zone 'America/Argentina/Buenos_Aires')::date between desde and hasta order by id`,
+    [sucursal],
+  );
+  return r.rows;
+}
+
+// Descuento especial (lo hace un encargado y lo tiene que haber consultado): porcentaje, motivo y quien lo autorizo.
+export type Especial = { pct: number; motivo: string; autorizo: string };
+function validarEspecial(e: Especial) {
+  if (!Number.isFinite(e.pct) || e.pct < 1 || e.pct > TOPE_PCT || Math.round(e.pct * 2) !== e.pct * 2) falla(`El descuento especial tiene que ser de 1% a ${TOPE_PCT}%`);
+  const motivo = e.motivo.trim().replace(/\s+/g, " ");
+  const autorizo = e.autorizo.trim().replace(/\s+/g, " ");
+  if (motivo.length < 5 || motivo.length > 200) falla("Escribí el motivo del descuento especial");
+  if (autorizo.length < 2 || autorizo.length > 60) falla("Escribí quién autorizó el descuento especial");
+  return { pct: e.pct, motivo, autorizo };
+}
+
+// totalEsperado: lo que la caja le dijo al cliente. Si el servidor calcula otro total (cambiaron las promos), no se registra nada.
+export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
+  const especial = especialPedido ? validarEspecial(especialPedido) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
   for (const i of itemsPedidos) if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
   // Siempre se bloquean las prendas en el mismo orden (por SKU): dos ventas al mismo tiempo no se traban entre si.
@@ -395,7 +423,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     if (clave) {
       await c.query("select pg_advisory_xact_lock(hashtext($1))", [clave]);
       const previa = await c.query<{ id: number }>("select id::int as id from ventas where clave = $1", [clave]);
-      if (previa.rows[0]) return ticketDeVenta(c, previa.rows[0].id);
+      if (previa.rows[0]) return { ...(await ticketDeVenta(c, previa.rows[0].id)), nueva: false };
     }
     const mr = await c.query<MedioPago>('select id, nombre, ajuste_pct::float8 as "ajustePct" from medios_pago where activo');
     const prods: Producto[] = [];
@@ -411,9 +439,16 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       prods.push(p);
     }
     const subtotal = prods.reduce((s, p, i) => s + p.precio * items[i].cant, 0);
+    // Promo: la elige el servidor con las promos de la base (lo que diga la pantalla no cuenta). El descuento especial la reemplaza.
+    const auto = especial ? { promo: null, descuento: 0, detalle: null } : mejorPromo(await promosVigentes(sucursal, c), prods.map((p, i) => ({ tipo: p.tipo, precio: p.precio, cant: items[i].cant })));
+    const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
+    const promoNombre = especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : null;
+    // Lo que se paga a "precio de lista" despues de la promo: sobre eso se aplican los medios de pago.
+    const neto = subtotal - descuento;
     // Pagos con nota de credito ("nota:N000001"): se bloquea la nota, se valida y entra como un medio mas con su propio ajuste.
     const notas = new Map<string, { id: number; saldo: number }>();
-    const medios = [...mr.rows];
+    // Una promo "sin descuento de efectivo" (feria, mayorista): los medios con descuento pasan a 0%; la tarjeta mantiene su recargo.
+    const medios = mediosParaPromo(mr.rows, auto.promo);
     const pagosOk: PagoEntrada[] = [];
     for (const p of pagos) {
       if (!p.medioId.toLowerCase().startsWith("nota:")) { pagosOk.push(p); continue; }
@@ -431,21 +466,26 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       medios.push({ id: `nota:${cod}`, nombre: `Nota de crédito ${cod}`, ajustePct: nota.ajustePct });
       pagosOk.push({ medioId: `nota:${cod}`, monto: p.monto });
     }
-    const calc = calcularPagos(subtotal, medios, pagosOk);
+    const calc = calcularPagos(neto, medios, pagosOk);
     if (!calc.ok) return falla(calc.motivo);
     // Control de seguridad: las cuentas tienen que cerrar siempre. Si algo no cierra, la venta no se registra.
     const sumaMontos = calc.pagos.reduce((t, p) => t + p.monto, 0);
     const sumaLista = calc.pagos.reduce((t, p) => t + p.valorLista, 0);
-    if (sumaMontos !== calc.total || Math.abs(sumaLista - subtotal) > 1 || calc.pagos.some((p) => p.monto < 0)) {
-      console.error("[venta] las cuentas no cierran", { subtotal, total: calc.total, sumaMontos, sumaLista, pagos: calc.pagos });
+    if (sumaMontos !== calc.total || Math.abs(sumaLista - neto) > 1 || calc.pagos.some((p) => p.monto < 0) || descuento < 0 || neto < 0) {
+      console.error("[venta] las cuentas no cierran", { subtotal, descuento, total: calc.total, sumaMontos, sumaLista, pagos: calc.pagos });
       return falla("Las cuentas de la venta no cierran. No se registró nada: avisá a quien administra el sistema.");
     }
     const total = calc.total;
+    if (totalEsperado !== undefined && totalEsperado !== total) {
+      return falla(`Cambiaron las promos: el total ahora es $ ${total.toLocaleString("es-AR")} (la pantalla decía $ ${totalEsperado.toLocaleString("es-AR")}). Avisale al cliente y tocá Cobrar de nuevo.`);
+    }
     const unico = calc.pagos.length === 1 ? calc.pagos[0] : null;
     const v = await c.query<{ id: number; codigo: string; creado_en: Date }>(
-      `insert into ventas (sucursal_id, subtotal_lista, medio_pago_id, ajuste_medio_pago, ajuste_pct_usado, total, clave, usuario_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id, codigo, creado_en`,
-      [sucursal, subtotal, unico ? (unico.medioId.startsWith("nota:") ? "nota_credito" : unico.medioId) : null, total - subtotal, unico?.pct ?? null, total, clave ?? null, usuarioEnCurso()?.id ?? null],
+      `insert into ventas (sucursal_id, subtotal_lista, medio_pago_id, ajuste_medio_pago, ajuste_pct_usado, total, clave, usuario_id,
+         descuento_promo, promo_id, promo_nombre, especial_pct, especial_motivo, especial_autorizo)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id, codigo, creado_en`,
+      [sucursal, subtotal, unico ? (unico.medioId.startsWith("nota:") ? "nota_credito" : unico.medioId) : null, total - neto, unico?.pct ?? null, total, clave ?? null, usuarioEnCurso()?.id ?? null,
+        descuento, auto.promo?.id ?? null, promoNombre, especial?.pct ?? null, especial?.motivo ?? null, especial?.autorizo ?? null],
     );
     const ventaId = Number(v.rows[0].id);
     for (const p of calc.pagos) {
@@ -456,32 +496,41 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       );
       if (nota) await c.query("update notas_credito set saldo = saldo - $2 where id = $1", [nota.id, p.monto]);
     }
+    const sinCambio = prods.map((_, i) => !!(auto.promo?.sinCambio && auto.detalle?.entran[i]));
     for (const [idx, p] of prods.entries()) {
       const cant = items[idx].cant;
       await c.query(
-        "insert into venta_items (venta_id, sku, nombre, precio_lista, cantidad) values ($1, $2, $3, $4, $5)",
-        [ventaId, p.sku, p.nombre, p.precio, cant],
+        "insert into venta_items (venta_id, sku, nombre, precio_lista, cantidad, sin_cambio) values ($1, $2, $3, $4, $5, $6)",
+        [ventaId, p.sku, p.nombre, p.precio, cant, sinCambio[idx]],
       );
       await sumarStock(c, p.sku, sucursal, -cant);
       await mov(c, p.sku, cant, sucursal, null, "venta", { ventaId });
     }
+    // En la misma transaccion: si la venta se registra, el descuento especial queda auditado (y un reintento no lo duplica).
+    if (especial) {
+      await auditar("descuento_especial", { venta: v.rows[0].codigo, sucursal, pct: especial.pct, monto: descuento, motivo: especial.motivo, autorizo: especial.autorizo }, { db: c });
+    }
     return {
+      nueva: true,
       codigo: v.rows[0].codigo,
       fecha: v.rows[0].creado_en.toISOString(),
       subtotal,
-      ajuste: total - subtotal,
+      promo: promoNombre && descuento > 0 ? { nombre: promoNombre, monto: descuento } : undefined,
+      ajuste: total - neto,
       total,
       pagos: calc.pagos,
-      items: prods.map((p, i) => ({ sku: p.sku, nombre: p.nombre, precio: p.precio, cant: items[i].cant })),
+      items: prods.map((p, i) => ({ sku: p.sku, nombre: p.nombre, precio: p.precio, cant: items[i].cant, sinCambio: sinCambio[i] || undefined })),
     };
   });
 }
 
 // Arma de nuevo el ticket de una venta ya registrada (para devolverlo si el cobro se reintenta).
 async function ticketDeVenta(c: PoolClient, id: number) {
-  const v = await c.query<{ codigo: string; creado_en: Date; subtotal_lista: number; total: number }>("select codigo, creado_en, subtotal_lista, total from ventas where id = $1", [id]);
-  const it = await c.query<{ sku: string; nombre: string; precio: number; cant: number }>(
-    "select sku, nombre, precio_lista as precio, cantidad as cant from venta_items where venta_id = $1 order by id", [id]);
+  const v = await c.query<{ codigo: string; creado_en: Date; subtotal_lista: number; total: number; descuento_promo: number; promo_nombre: string | null }>(
+    "select codigo, creado_en, subtotal_lista, total, descuento_promo, promo_nombre from ventas where id = $1", [id]);
+  const desc = v.rows[0].descuento_promo;
+  const it = await c.query<{ sku: string; nombre: string; precio: number; cant: number; sinCambio?: boolean }>(
+    `select sku, nombre, precio_lista as precio, cantidad as cant, case when sin_cambio then true end as "sinCambio" from venta_items where venta_id = $1 order by id`, [id]);
   const pg = await c.query<{ medioId: string; nombre: string; pct: number; monto: number; valorLista: number; codigo: string | null }>(
     `select case when p.nota_credito_id is null then p.medio_pago_id else 'nota:' || n.codigo end as "medioId",
        case when p.nota_credito_id is null then m.nombre else 'Nota de crédito ' || n.codigo end as nombre,
@@ -489,8 +538,9 @@ async function ticketDeVenta(c: PoolClient, id: number) {
      from venta_pagos p join medios_pago m on m.id = p.medio_pago_id left join notas_credito n on n.id = p.nota_credito_id
      where p.venta_id = $1 order by p.id`, [id]);
   return {
-    codigo: v.rows[0].codigo, fecha: v.rows[0].creado_en.toISOString(), subtotal: v.rows[0].subtotal_lista, ajuste: v.rows[0].total - v.rows[0].subtotal_lista,
-    total: v.rows[0].total, pagos: pg.rows.map((p) => ({ medioId: p.medioId, nombre: p.nombre, pct: p.pct, monto: p.monto, valorLista: p.valorLista })), items: it.rows,
+    codigo: v.rows[0].codigo, fecha: v.rows[0].creado_en.toISOString(), subtotal: v.rows[0].subtotal_lista,
+    promo: desc > 0 ? { nombre: v.rows[0].promo_nombre ?? "Promo", monto: desc } : undefined, ajuste: v.rows[0].total - (v.rows[0].subtotal_lista - desc),
+    total: v.rows[0].total, pagos: pg.rows.map((p) => ({ medioId: p.medioId, nombre: p.nombre, pct: p.pct, monto: p.monto, valorLista: p.valorLista })), items: it.rows.map((x) => ({ ...x, sinCambio: x.sinCambio ?? undefined })),
   };
 }
 
@@ -657,8 +707,11 @@ export async function notaPorCodigo(codigo: string) {
   return aNota(r.rows[0]);
 }
 
-// Con que se pago una venta, en proporcion: la nota de una prenda vale lo que se pago por ella (con el ajuste del medio).
-const factorDeVenta = (v: { total: number; subtotal_lista: number; descuento_promo: number }) => {
+// Con que se pago una venta, en proporcion: la nota de una prenda vale lo que se pago por ella. El descuento de la promo
+// (y el ajuste del medio de pago) se reparte entre todas las prendas de la compra: devolver una prenda de un 3x2 no da su precio entero.
+const factorDeVenta = (v: { total: number; subtotal_lista: number }) => (v.subtotal_lista > 0 ? v.total / v.subtotal_lista : 1);
+// Solo el ajuste del medio de pago (total sobre el precio despues de la promo).
+const ajusteMedio = (v: { total: number; subtotal_lista: number; descuento_promo: number }) => {
   const base = v.subtotal_lista - v.descuento_promo;
   return base > 0 ? v.total / base : 1;
 };
@@ -680,8 +733,8 @@ export async function ventaParaDevolucion(codigo: string, soloSucursal: string |
     return falla(`Esa compra es del ${venta.creado_en.toLocaleDateString("es-AR")}: pasaron más de ${DIAS_DEVOLUCION} días y ya no se acepta la devolución`);
   }
   const f = factorDeVenta(venta);
-  const it = await pool.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number }>(
-    `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas,
+  const it = await pool.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; sinCambio: boolean }>(
+    `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas, vi.sin_cambio as "sinCambio",
        coalesce((select sum(ni.cantidad) from nota_credito_items ni where ni.venta_item_id = vi.id), 0)::int as devueltas
      from venta_items vi where vi.venta_id = $1 order by vi.id`, [venta.id],
   );
@@ -715,8 +768,8 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}: la devolución se hace en ese local.`);
     if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra: ya no se acepta la devolución`);
     const f = factorDeVenta(v.rows[0]);
-    const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number }>(
-      `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas,
+    const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; sin_cambio: boolean }>(
+      `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas, vi.sin_cambio,
          coalesce((select sum(ni.cantidad) from nota_credito_items ni where ni.venta_item_id = vi.id), 0)::int as devueltas
        from venta_items vi where vi.venta_id = $1`, [ventaId],
     );
@@ -724,6 +777,7 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     for (const p of pedidos) {
       const item = vi.rows.find((x) => x.id === p.itemId);
       if (!item) return falla("Una de las prendas no pertenece a esa venta");
+      if (item.sin_cambio) return falla(`${item.nombre} se vendió en una promo SIN CAMBIO: no se acepta la devolución`);
       if (p.cant > item.vendidas - item.devueltas) {
         return falla(`De ${item.nombre} se vendieron ${item.vendidas} y ya se devolvieron ${item.devueltas}: solo se pueden devolver ${item.vendidas - item.devueltas}`);
       }
@@ -734,7 +788,9 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     const n = await c.query<{ id: number; codigo: string }>(
       `insert into notas_credito (venta_id, sucursal_id, monto_inicial, saldo, ajuste_pct, usuario_id)
        values ($1, $2, $3, $3, $4, $5) returning id::int as id, codigo`,
-      [ventaId, sucursal, monto, Math.round((f - 1) * 1_000_000) / 10_000, usuarioEnCurso()?.id ?? null],
+      // El porcentaje de la nota es SOLO el del medio de pago (sin la promo): si no, al usarla en otra compra con promo,
+      // el cliente aprovecharia la promo dos veces.
+      [ventaId, sucursal, monto, Math.round((ajusteMedio(v.rows[0]) - 1) * 1_000_000) / 10_000, usuarioEnCurso()?.id ?? null],
     );
     for (const x of filas) {
       await c.query(

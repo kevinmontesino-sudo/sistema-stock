@@ -1,0 +1,45 @@
+KIT PARA PONER A ANDAR UNA PC NUEVA - X MENOS MAS PRENDAS
+==========================================================
+Sistema (se abre en Chrome):  https://stock-caja-ventas.xmenosmasprendas.com
+
+QUE HAY EN ESTA CARPETA
+  00_LEEME_PRIMERO.txt                  este indice y el paso a paso corto
+  01_Windows\                           instalador del agente de impresion para Windows (zip)
+  02_Mac\                               instalador del agente de impresion para Mac
+  03_Guia_impresora_tickets_Epson.txt   Epson TM-T20IV-L (tickets de venta y notas)
+  04_Guia_etiquetas_Xprinter.txt        Xprinter XP-410B (etiquetas de las prendas)
+  05_Si_algo_falla.txt                  problemas comunes y como resolverlos
+  06_Checklist_por_PC.txt               hoja para tildar PC por PC
+  actualizar-kit.sh                     (solo para Kevin) vuelve a armar los instaladores si cambia el agente
+
+COMO FUNCIONA (en una frase)
+  El sistema esta en internet. Las impresoras estan enchufadas por USB a cada PC, y internet no puede llegar a un USB.
+  Por eso cada PC con impresora lleva un programita chico (el "agente de impresion") que recibe lo que manda el
+  sistema y lo imprime directo, sin ventanas. Se instala UNA vez por PC y arranca solo al prender la PC.
+
+PASO A PASO CORTO (PC con Windows 10 u 11)
+  1. Instalar Chrome (si no esta) y entrar al sistema con la cuenta del local.
+  2. Instalar el driver de cada impresora que tenga esa PC (ver guias 03 y 04). Tienen que aparecer en
+     Configuracion > Bluetooth y dispositivos > Impresoras y escaneres.
+  3. Copiar 01_Windows\agente-impresion-windows.zip a la PC, hacer click derecho > Extraer todo, abrir la carpeta
+     y hacer doble click en  instalar.bat
+     (si Windows avisa "Windows protegio su PC": Mas informacion > Ejecutar de todas formas).
+  4. Al final del instalador aparece "funcionando" y la lista de impresoras de la PC. Revisar que esten ahi:
+     - la de tickets (nombre con "TM-T20", ej. "EPSON TM-T20IV Receipt")
+     - la de etiquetas (nombre con "410", ej. "Xprinter XP-410B")
+  5. Abrir el sistema en Chrome. La primera vez que se imprima, Chrome pregunta si el sitio puede
+     "buscar y conectarse a dispositivos de la red local": tocar PERMITIR (una sola vez por PC).
+  6. Probar (ver 06_Checklist_por_PC.txt).
+
+PASO A PASO CORTO (Mac)
+  1. Instalar el driver de cada impresora (guias 03 y 04) y agregarlas en Ajustes del Sistema > Impresoras y escaneres.
+  2. La Mac necesita Node instalado (nodejs.org). Abrir Terminal en la carpeta 02_Mac y correr:
+         bash instalar-mac.sh
+  3. Seguir desde el punto 4 de Windows.
+
+IMPORTANTE
+  - NO hace falta abrir Chrome con --kiosk-printing, ni dejar una impresora como predeterminada. Eso era antes.
+  - Las contrasenas de las cuentas de cada local NO estan en este kit (para que no circulen por pendrives). Estan en la
+    Mac de Kevin: carpeta del sistema > app > cuentas-sucursales.local
+  - Si cambia el agente, se vuelve a correr actualizar-kit.sh en la Mac de Kevin y se reinstala en cada PC
+    (Windows: volver a correr instalar.bat; Mac: volver a correr instalar-mac.sh).

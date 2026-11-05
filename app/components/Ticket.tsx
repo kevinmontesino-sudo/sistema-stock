@@ -9,10 +9,13 @@ export type DatosTicket = {
   fecha: string;
   sucursal: string;
   subtotal: number;
+  // Promo o descuento especial: se resta del precio de lista antes del medio de pago.
+  promo?: { nombre: string; monto: number };
+  // Ajuste del medio de pago (sobre el precio de lista menos la promo).
   ajuste: number;
   total: number;
   pagos: PagoCalculado[];
-  items: { sku: string; nombre: string; precio: number; cant: number }[];
+  items: { sku: string; nombre: string; precio: number; cant: number; sinCambio?: boolean }[];
   // Solo para mostrar en el ticket (no se guarda): plata en efectivo que entrego el cliente.
   recibido?: number;
 };
@@ -29,7 +32,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
   const cantidad = venta.items.reduce((s, i) => s + i.cant, 0);
   const unico = venta.pagos.length === 1 ? venta.pagos[0] : null;
   const efectivo = venta.pagos.find((p) => p.medioId === "efectivo");
-  const { items, recargo, textoPct } = lineasTicket(venta);
+  const { items, recargo, textoPct, promo, ahorro, sinCambio, todoSinCambio } = lineasTicket(venta);
   return (
     <div className="ticket">
       <img src="/logo-negro.png" alt={empresa.nombre} className="ticket-logo" />
@@ -38,7 +41,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       <hr />
       {items.map((i, k) => (
         <div key={k} className="linea">
-          <span>{i.cant} x {i.nombre}</span>
+          <span>{i.cant} x {i.nombre}{i.sinCambio && !todoSinCambio ? " (SIN CAMBIO)" : ""}</span>
           <span>{pesos(i.monto)}</span>
         </div>
       ))}
@@ -48,6 +51,9 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       ) : (
         <div className="linea"><span>{cantidad} prendas · subtotal lista</span><span>{pesos(venta.subtotal)}</span></div>
       )}
+      {venta.promo && (
+        <div className="linea"><span>{venta.promo.nombre}</span><span>-{pesos(promo)}</span></div>
+      )}
       {venta.ajuste < 0 && (
         <div className="linea">
           <span>{unico ? `${unico.nombre}${textoPct(unico.pct)}` : "Descuento por medios de pago"}</span>
@@ -55,6 +61,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
         </div>
       )}
       <div className="linea"><span className="total-t">TOTAL</span><span className="total-t">{pesos(venta.total)}</span></div>
+      {ahorro > 0 && <div className="linea"><span><strong>AHORRASTE</strong></span><span><strong>{pesos(ahorro)}</strong></span></div>}
       <hr />
       {venta.pagos.map((p) => (
         <div key={p.medioId} className="linea"><span>Paga {p.nombre}{textoPct(p.pct)}</span><span>{pesos(p.monto)}</span></div>
@@ -67,8 +74,15 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       )}
       <hr />
       <CodigoBarras valor={venta.codigo} />
-      <div className="centro"><strong>Cambios por {DIAS_DEVOLUCION} días</strong></div>
-      <div className="centro">Hasta el {limite} presentando este ticket.</div>
+      {todoSinCambio ? (
+        <div className="centro"><strong>VENTA SIN CAMBIO</strong></div>
+      ) : (
+        <>
+          <div className="centro"><strong>Cambios por {DIAS_DEVOLUCION} días</strong></div>
+          <div className="centro">Hasta el {limite} presentando este ticket.</div>
+          {sinCambio && <div className="centro">Las prendas marcadas SIN CAMBIO no tienen cambio.</div>}
+        </>
+      )}
       <div className="centro" style={{ margin: "2mm 0" }}><strong>¡Gracias por tu compra!<br />Te esperamos pronto</strong></div>
       <div className="centro">Ticket interno</div>
       <div className="centro">No válido como factura</div>

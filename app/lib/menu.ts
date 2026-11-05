@@ -36,7 +36,8 @@ export const MOMENTOS: Momento[] = [
       { href: "/admin/informes", texto: "Informes", ayuda: "Ventas, prendas más vendidas, caja", permiso: "admin" },
       { href: "/admin/usuarios", texto: "Usuarios", ayuda: "Cuentas y contraseñas", permiso: "admin" },
       { href: "/admin/auditoria", texto: "Auditoría", ayuda: "Quién hizo qué", permiso: "admin" },
-      { href: "/admin/accesos", texto: "Accesos API", ayuda: "Llaves para consultar informes", permiso: "admin" },
+      { href: "/admin/promos", texto: "Promos", ayuda: "3x2 y descuentos por local y fecha", permiso: "admin" },
+      { href: "/admin/accesos", texto: "Accesos API", ayuda: "Llaves para informes y promos", permiso: "admin" },
     ],
   },
 ];

@@ -1,0 +1,20 @@
+CHECKLIST POR MAC  (una hoja por Mac)
+=====================================
+Local / Mac: ____________________     Fecha: ___/___/______
+
+[ ] Chrome instalado y sesion iniciada con la cuenta del local
+[ ] Epson TM-T20IV-L agregada en Ajustes (nombre: ticket) y con rollo de 80 mm
+[ ] Xprinter XP-410B agregada (nombre: Xprinter XP-410B), si esta Mac imprime etiquetas
+[ ] INSTALAR.command corrido: mostro OK en tickets (y en etiquetas si corresponde)
+[ ] http://127.0.0.1:9101 dice "funcionando"
+[ ] Chrome: permitido "dispositivos de la red local" para el sitio
+[ ] /tickets: ticket de prueba OK (logo, ancho completo, corte justo)
+[ ] /tickets: nota de prueba OK
+[ ] Pistola lectora configurada (escribe el codigo y termina con Enter) y lee el codigo del ticket de prueba
+[ ] Venta de prueba en EFECTIVO: el ticket muestra el descuento
+[ ] Venta de prueba con TARJETA: el ticket NO muestra recargo y los precios suman el total
+[ ] Vender > Ventas: encuentra la venta, Reimprimir OK, Devolver abre la devolucion
+[ ] Etiqueta de prueba OK (solo si imprime etiquetas)
+[ ] Venta/prenda de prueba borrada o devuelta
+
+Observaciones: _______________________________________________________________

@@ -8,7 +8,7 @@ export const NOMBRE_ROL: Record<Rol, string> = { admin: "Administrador", encarga
 // Que puede hacer cada rol. TODA accion del servidor pide uno de estos permisos: es el unico lugar para ajustarlos.
 export type Permiso =
   | "catalogo" | "vender" | "recibir" | "devolver" | "deshacer_recepcion" | "cargar" | "imprimir_etiquetas"
-  | "mover" | "cancelar_envio" | "ver_totales" | "remito" | "editar_producto" | "ajustar_stock" | "eliminar_producto" | "admin";
+  | "mover" | "cancelar_envio" | "ver_totales" | "remito" | "editar_producto" | "ajustar_stock" | "eliminar_producto" | "descuento_especial" | "admin";
 
 const TODOS: Rol[] = ["admin", "encargado", "vendedor", "deposito"];
 export const PERMISOS: Record<Permiso, Rol[]> = {
@@ -26,6 +26,7 @@ export const PERMISOS: Record<Permiso, Rol[]> = {
   editar_producto: ["admin"],                         // cambiar nombre o precio
   ajustar_stock: ["admin"],
   eliminar_producto: ["admin"],
+  descuento_especial: ["admin", "encargado", "deposito"], // descuento a mano en la caja, con motivo y quien lo autorizo (lo ve la oficina)
   admin: ["admin"],                                   // usuarios, auditoria, informes, promos
 };
 

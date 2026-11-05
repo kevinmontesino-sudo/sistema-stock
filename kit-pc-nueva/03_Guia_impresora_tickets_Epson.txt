@@ -1,0 +1,40 @@
+GUIA: IMPRESORA DE TICKETS (Epson TM-T20IV-L, rollo de 80 mm)
+=============================================================
+Los tickets de venta y las notas de credito salen DIRECTO por el agente de impresion: sin ventana, con logo,
+codigo de barras y corte automatico justo. Se repite igual en cada PC (unos 15 minutos).
+
+ANTES DE EMPEZAR
+  - Impresora enchufada a la corriente y al USB de la PC, con rollo de 80 mm (si sale en blanco, el rollo esta al reves:
+    el lado liso va hacia afuera).
+
+PASO 1: DRIVER
+  Windows: epson.com.ar > Soporte > Descargas, buscar "TM-T20IV", sistema Windows, bajar el "Driver de impresora"
+           e instalarlo con la impresora conectada y encendida.
+           Tiene que aparecer en Impresoras y escaneres algo como "EPSON TM-T20IV Receipt".
+  Mac:     epson.com.ar > Soporte > Descargas > "TM-T20IV-Series", sistema macOS, bajar "Driver de impresora"
+           (archivo TMPrinterInstaller_300_n.dmg, NO el "ePOS SDK para iOS"). Abrir el .dmg, correr el instalador, y despues
+           Ajustes del Sistema > Impresoras y escaneres > Agregar impresora > elegir la TM-T20IV-L.
+           En la Mac de Kevin la impresora se llama "ticket" (el sistema la busca por "TM-T20" o por "ticket").
+
+PASO 2: AGENTE DE IMPRESION
+  Instalarlo como dice 00_LEEME_PRIMERO.txt (instalar.bat en Windows, instalar-mac.sh en Mac).
+
+PASO 3: PRUEBA SIN VENDER NADA
+  1. Entrar al sistema con la cuenta del local y abrir la direccion /tickets (al final de la direccion del sistema).
+  2. Tocar "Imprimir ticket de prueba" y despues "Imprimir nota de prueba".
+  3. Revisar: que ocupe todo el ancho, que se vea el logo, que corte solo justo despues del ultimo renglon, y que la
+     pistola lea el codigo de barras (V9F3A2C7B en el ticket de ejemplo).
+
+PASO 4: PRUEBA CON UNA VENTA REAL (usar una prenda de prueba y borrarla despues)
+  1. Vender > Venta: escanear la prenda, elegir el medio de pago y Cobrar. Tildar "Imprimir el ticket automaticamente
+     al cobrar (en esta PC)": esa opcion se guarda en esa PC.
+  2. Cobrar en EFECTIVO: el ticket muestra el descuento (-20%). Cobrar con TARJETA: el ticket NO muestra ningun recargo,
+     los precios ya vienen con el recargo incluido y suman el total.
+  3. Vender > Ventas: buscar la venta, tocar "Reimprimir" y despues "Devolver" (escanea o abre el ticket y emite la nota).
+
+SI ALGO SALE MAL
+  - Sale la ventana de impresion de Chrome: el agente no esta abierto. Abrir http://127.0.0.1:9101 en esa PC; si no
+    responde, volver a correr el instalador del agente.
+  - Sale sin logo o corrido: sacar foto del ticket y mandarla.
+  - "No hay ninguna impresora con TM-T20 en el nombre": mirar la lista que muestra http://127.0.0.1:9101 y avisar el
+    nombre exacto de la impresora.

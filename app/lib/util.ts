@@ -119,7 +119,7 @@ export type VentaListada = {
 };
 export type VentaDevolvible = {
   codigo: string; fecha: string; sucursal: string; total: number;
-  items: { id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; valor: number }[];
+  items: { id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; valor: number; sinCambio: boolean }[];
 };
 // Cuanto de una nota se usa en una compra de `subtotal` (a precio de lista): lo que alcance, sin pasarse del total.
 // Si alcanza para todo, busca el monto que cubre el subtotal justo (el redondeo del ajuste puede dejar 1 peso de diferencia).

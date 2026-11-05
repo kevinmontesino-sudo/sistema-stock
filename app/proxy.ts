@@ -10,8 +10,8 @@ export function proxy(req: NextRequest) {
   const hayCookie = !!req.cookies.get(COOKIE)?.value;
   // Las Server Actions pasan: ellas mismas rechazan con "sesion vencida" y la pantalla vuelve al login.
   const esAccion = req.headers.has("next-action");
-  // La API de informes no usa cookie: se autentica con su propia llave (Bearer) y la verifica el mismo handler.
-  const esApiInformes = pathname === "/api/informes";
+  // Las APIs de informes y promos no usan cookie: se autentican con su propia llave (Bearer) y la verifica el mismo handler.
+  const esApiInformes = pathname === "/api/informes" || pathname === "/api/promos";
   if (!hayCookie && !esLogin && !esAccion && !esApiInformes) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";

@@ -87,11 +87,11 @@ export default function DevolucionPage() {
             <thead><tr><th>Prenda</th><th className="der">Vendidas</th><th className="der">Ya devueltas</th><th className="der">Vale c/u</th><th className="der">Devuelve</th></tr></thead>
             <tbody>
               {venta.items.map((i) => {
-                const max = i.vendidas - i.devueltas;
+                const max = i.sinCambio ? 0 : i.vendidas - i.devueltas;
                 const n = cant[i.id] ?? 0;
                 return (
                   <tr key={i.id}>
-                    <td>{i.nombre} <span className="interno">· {i.sku}</span></td>
+                    <td>{i.nombre} <span className="interno">· {i.sku}</span>{i.sinCambio && <><br /><strong className="sin-stock">SIN CAMBIO (vendida en promo de feria/saldos)</strong></>}</td>
                     <td className="der">{i.vendidas}</td>
                     <td className="der">{i.devueltas}</td>
                     <td className="der">{pesos(i.valor)}</td>

@@ -1,0 +1,28 @@
+GUIA: AGREGAR LAS IMPRESORAS A LA MAC
+=====================================
+El sistema busca las impresoras por su NOMBRE, asi que hay que ponerselos bien:
+    Tickets (Epson TM-T20IV-L)   -> el nombre tiene que contener  ticket   o   TM-T20
+    Etiquetas (Xprinter XP-410B) -> el nombre tiene que contener  410      (ej. "Xprinter XP-410B")
+
+PASO 1: AGREGAR CADA IMPRESORA
+  1. Impresora enchufada por USB y encendida.
+  2. Ajustes del Sistema > Impresoras y escaneres > "Agregar impresora, escaner o fax" (boton + ).
+  3. Elegirla de la lista (aparece con su nombre, ej. "TM-T20IV-L" o "XP-410B").
+  4. En "Nombre", escribir el nombre de arriba (Epson: ticket   |   Xprinter: Xprinter XP-410B).
+  5. En "Usar", elegir el driver de la impresora si aparece. Si no aparece, "Impresora generica" tambien sirve: el sistema manda
+     lo que hay que imprimir directo, sin depender del driver. Tocar Agregar.
+  Driver de la Epson: viene en este kit, carpeta drivers\TMPrinterInstaller_300_n.dmg (es el oficial de Epson, de
+  epson.com.ar > Soporte > TM-T20IV-Series > macOS). Abrirlo, correr el instalador y recien despues agregar la impresora.
+  Driver de la Xprinter: viene en este kit, carpeta drivers\net.xprinter.driver_3.13.36.pkg (oficial, de xprintertech.com;
+  firmado y verificado por Apple). Doble click, seguir los pasos del instalador, y recien despues agregar la impresora y elegir
+  el driver "XP-410B". Hay un video corto de como se instala en la misma carpeta (Video_instalacion_driver_Xprinter.mp4).
+
+PASO 2: PAPEL
+  - Epson: rollo de 80 mm (lado liso hacia afuera; si sale en blanco, el rollo esta al reves).
+  - Xprinter: etiquetas de 50 x 30 mm. Con la impresora encendida, mantener apretado FEED unos segundos hasta que
+    avance varias etiquetas (asi mide el rollo).
+
+PASO 3: PROBAR SIN VENDER NADA
+  - Tickets: en el sistema, abrir la direccion /tickets (al final de la direccion de la pagina) > "Imprimir ticket de prueba" y
+    "Imprimir nota de prueba". Tiene que salir directo, con logo, y cortarse justo despues del ultimo renglon.
+  - Etiquetas: Cargar > Buscar prenda > elegir una > "Etiqueta" > cantidad 1 > Imprimir.

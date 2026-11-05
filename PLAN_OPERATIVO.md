@@ -614,3 +614,37 @@ Propuesta a confirmar: ver el mensaje del 23/10. Se junta con la sección 43 (pr
 - Nueva pantalla `/ventas` (Vender > Ventas, permiso `devolver`): ventas por día o mes, de la más vieja a la más nueva, filtro por prenda/ticket, botones Devolver (abre /devolucion?codigo=…) y Reimprimir (auditado como `ticket_reimpreso`). Un local ve solo las suyas.
 - Había un bug de sesión: la cookie del admin con 2FA vencía a los 10 minutos (arreglado, 15e02af).
 - Pendiente: probar el logo y el corte en la Epson real desde la página; reimprimir notas de crédito; instalar el agente v1.1.0 en cada PC (en la Mac, volver a correr instalar-mac.sh).
+
+## 51. Hacia un programa instalable (idea, 3/11)
+Hoy: el sistema vive en la web y cada PC con impresora lleva el "agente de impresión" (kit Mac / kit Windows). Funciona, pero cada PC requiere 6-8 pasos manuales y los avisos de "desarrollador no identificado".
+Objetivo: UN instalador por sistema operativo ("XMM Caja": .dmg/.pkg para Mac, .exe para Windows) que al abrirlo muestra el sistema en su propia ventana, trae el agente adentro (imprime directo por USB, sin Node que bajar ni permiso de Chrome) y se actualiza solo.
+- Opción recomendada: app de escritorio con Electron (reusa el agente de `agente-impresion/`; sigue usando el sistema web, así no se mantienen dos sistemas). Auto-actualización desde GitHub Releases.
+- Paso previo barato: hacer el sistema "instalable" como app de Chrome (PWA: manifest + íconos) para tener ícono y ventana propia sin barra del navegador.
+- Costos: firma para evitar avisos (Apple Developer ~USD 99/año; Windows: certificado de firma de código o Azure Trusted Signing).
+- Orden: (1) terminar kits Mac y Windows y probarlos en PCs reales; (2) PWA; (3) app Electron con el agente adentro; (4) firmar y distribuir.
+
+## 52. Promos y descuento especial (4/11) — HECHO en pruebas, falta subir
+- **Promos automáticas** (Oficina > Promos, solo administradores, o por API): NxM (3x2, 2x1, 4x3) o porcentaje (hasta 50%) sobre el precio de lista; por locales (vacío = todos), por categorías (vacío = todas) y por fechas de Argentina (ambas incluidas, hasta 3 meses). Se aplican solas al escanear; el cajero no elige nada y la caja avisa "con 1 prenda más entra en el 3x2".
+- **Reglas:** nunca se acumulan (si hay varias va la que más descuenta). En NxM no se pagan las prendas **más baratas**. El descuento del medio de pago (efectivo -20%, tarjeta +20%) se aplica **encima** del precio con promo. El servidor recalcula la promo al cobrar (lo que diga la pantalla no cuenta).
+- **Descuento especial** (encargados, depósito y admin; los vendedores no): botón discreto "Descuento especial (solo si lo consultaste)", de 1% a 50%, con **motivo** y **quién lo autorizó** obligatorios. Reemplaza a la promo del día. Queda en la venta, en la Auditoría y en la lista "Descuentos especiales hechos en las cajas" de Oficina > Promos.
+- **Ticket:** muestra la línea de la promo ("Promo 3x2 -$10.000"). Con tarjeta sigue sin mostrar el recargo: las prendas suman total + promo.
+- **Devoluciones:** el descuento de la promo se reparte entre todas las prendas de la compra (devolver una prenda de un 3x2 no da su precio entero). Ej.: 2 remeras de $10.000 + jean $30.000 en 3x2 y efectivo = $32.000 → una remera vale $6.400 de nota (que vuelve a cubrir $10.000 de lista).
+- **API para el Claude de César:** `GET/POST/DELETE /api/promos` con llave de alcance "promos" (Accesos API > "Leer informes y administrar promos"). Las llaves viejas son solo lectura. El conector `mcp-informes.mjs` (v1.1) suma `ver_promos`, `crear_promo` y `desactivar_promo`: César le dice "mañana y pasado 3x2 en White" y queda cargado. Todo cambio queda en la Auditoría.
+- Base: `db/015_promos.sql` (tabla `promos`, columnas en `ventas`, alcance "promos" en `tokens_api`). **Hay que aplicarla en la base real ANTES de subir el código**, si no las ventas fallan.
+- Pendiente: definir si alguna promo NO lleva el descuento de efectivo encima (hoy siempre lo lleva); promos acumulables; reportes de promos en Informes.
+
+### 52b. Ampliación (5/11, con el listado de promos de César y revisión con varios agentes)
+- **Tres tipos:** NxM (3x2, 2x1, 4x3), porcentaje (hasta 50%) y **precio** (cada prenda a $X: "feria todo a $1.000", "buzos a $4.500 c/u"; con mínimo: "mallas a $9.690 llevando la docena"). Nunca sube un precio.
+- **Opciones por promo:** "además corre el descuento de efectivo" (por defecto sí en NxM y %, no en precio) y "sin cambio" (ferias de saldos: esas prendas no se pueden devolver; el ticket dice SIN CAMBIO).
+- **Caja:** "1 GRATIS por 3x2" en la prenda, "Ahorra $X", aviso "Sumá 1 prenda más y se lleva otra gratis" (solo si conviene más que la promo actual), las promos se recargan cada 2 minutos, y si al cobrar el total cambió **no se registra** y pide avisarle al cliente. El descuento especial avisa si la promo ya conviene más.
+- **Oficina:** plantillas de un toque, fechas rápidas (hoy, mañana, mañana y pasado, finde, 7 días), frase de vista previa y aviso de promos que se pisan.
+- **Ticket:** con tarjeta, las prendas y la promo salen con el recargo incluido (coinciden con la etiqueta) y la línea AHORRASTE.
+- **Correcciones de la revisión:** la nota de crédito guarda solo el ajuste del medio de pago (antes, cambiar una prenda de un 3x2 dejaba usar la promo dos veces); auditoría del descuento especial dentro de la venta; la API rechaza "sucursales"/"tipos" que no sean lista y fechas imposibles; informes con `descuentoPromos` aparte.
+- **Clasificación del listado de César:** 1 kilo → producto especial (etapa 2); 2, 3, 4, 9 y 12 → promos; 5, 6 → medios de pago (ya); 7 e-check → falta agregar el medio "E-check +20%" si lo quieren en la caja; 8, 10, 11, 13 → módulos aparte (mayorista/envíos, señas, clientes y puntos), más adelante; 14 → marketing, fuera del sistema.
+
+## 53. TAREA PARA MÁS ADELANTE: modo FERIA (Kevin, 4/11)
+- En las ferias los precios no son "todo a X": hay prendas de $2.000, $3.000, $7.000, etc.
+- Idea: por cada precio de feria se genera un **código QR único** (un "producto de feria" por precio, ej. "Feria $3.000"), se imprime, se **plastifica** y se lleva al local/feria. Ese producto tiene **stock infinito** (no descuenta ni controla stock).
+- En la caja, la gente va "pickeando": se escanea el QR plastificado del precio de cada prenda que se lleva, y la venta queda registrada con ese precio.
+- **Propuesta (5/11):** "producto especial" con stock infinito (`productos.sin_stock`) y, para la feria por kilo, `por_kilo` (la caja pide el peso y cobra peso × $/kg). Los precios únicos y temáticos ya se resuelven con promos de tipo "precio".
+- A definir: si las ventas de feria se cuentan aparte en Informes, si aplican promos y medios de pago igual, si se puede devolver (y contra qué stock), y en qué sucursal/caja se registra la feria.

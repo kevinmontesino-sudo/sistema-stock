@@ -49,3 +49,10 @@ PEDIDO_COTIZACION_IMPRESORA.txt
 
 # Paquete del agente de impresion (se regenera con agente-impresion/empaquetar.sh)
 agente-impresion/dist/
+
+# Instalador de Windows del kit (se regenera con kit-pc-nueva/actualizar-kit.sh)
+kit-pc-nueva/01_Windows/*.zip
+
+# Drivers y zips del kit (binarios grandes; se guardan en Drive, no en el repositorio)
+kit-pc-nueva/*/drivers/
+kit-pc-nueva/*.zip

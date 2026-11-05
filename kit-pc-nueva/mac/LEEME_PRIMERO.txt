@@ -1,0 +1,36 @@
+KIT PARA MAC - X MENOS MAS PRENDAS
+==================================
+Sistema (se abre en Chrome):  https://stock-caja-ventas.xmenosmasprendas.com
+
+QUE HACE ESTE KIT
+Deja la Mac lista para imprimir tickets (Epson) y etiquetas (Xprinter) directo desde el sistema, sin ventanas.
+Instala un programita chico (el "agente de impresion") que arranca solo cada vez que se prende la Mac.
+No hace falta instalar Node ni nada mas: el instalador baja lo que necesita (necesita internet, unos 45 MB).
+
+QUE HAY EN LA CARPETA
+  INSTALAR.command           <- el instalador (doble click)
+  programa\                  archivos del agente (no tocar)
+  drivers\                   drivers oficiales de la Epson y de la Xprinter (instalarlos antes de agregar las impresoras)
+  Guia_impresoras_Mac.txt    como agregar la Epson y la Xprinter a la Mac
+  Checklist_por_Mac.txt      para tildar a medida que se hace
+  Si_algo_falla.txt          problemas comunes
+
+PASO A PASO (unos 15 minutos por Mac)
+1. Enchufar las impresoras por USB, con papel, y prenderlas.
+2. Agregarlas en la Mac (ver Guia_impresoras_Mac.txt, paso 1).
+3. Instalar el agente. Mac bloquea los archivos que vienen de Drive ("desarrollador no identificado"), asi que hay dos formas:
+     FORMA A (la mas segura): abrir la app Terminal y escribir   bash   (con un espacio, sin apretar Enter). Despues arrastrar
+       a la ventana el archivo  programa/instalar-mac.sh  (esta dentro de esta carpeta) y apretar Enter.
+     FORMA B: hacer doble click en INSTALAR.command; cuando salga el aviso, cerrarlo. Ir a Ajustes del Sistema >
+       Privacidad y seguridad, bajar hasta el final y tocar "Abrir igualmente" (pide la contrasena). Volver a abrir INSTALAR.command.
+     En las dos se abre una ventana negra que baja lo que necesita y termina mostrando la lista de impresoras.
+     Tienen que aparecer dos lineas que dicen OK: la de tickets (Epson) y la de etiquetas (Xprinter).
+     Si la Mac no imprime etiquetas, la segunda puede decir "--" y no pasa nada.
+4. Abrir el sistema en Chrome e iniciar sesion con la cuenta del local.
+5. Imprimir algo (ver Checklist_por_Mac.txt). La primera vez Chrome pregunta si el sitio puede
+   "buscar y conectarse a dispositivos de la red local": tocar PERMITIR (una sola vez por Mac).
+
+IMPORTANTE
+  - NO hace falta abrir Chrome de ninguna forma especial ni dejar una impresora como predeterminada.
+  - Las contrasenas de las cuentas de cada local NO estan en este kit. Las tiene Kevin.
+  - Para actualizar el agente en el futuro: volver a hacer doble click en INSTALAR.command (con el kit nuevo).

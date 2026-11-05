@@ -1,0 +1,31 @@
+SI ALGO FALLA (MAC)
+===================
+DIAGNOSTICO RAPIDO
+  Abrir en Chrome:   http://127.0.0.1:9101
+  - Dice "funcionando" y lista las impresoras: el agente esta bien. El problema es el nombre de la impresora o el
+    permiso de Chrome.
+  - No abre: el agente no esta corriendo. Hacer doble click otra vez en INSTALAR.command.
+  Registro del agente:  ~/.config/xmenosmas/agente-impresion/agente.log
+
+"No se encontro el agente de impresion en esta PC"
+  - Volver a correr INSTALAR.command y recargar la pagina con Cmd+Shift+R.
+  - Chrome tiene que permitir "dispositivos de la red local" para el sitio: candado de la barra de direcciones >
+    Configuracion del sitio > Dispositivos de la red local > Permitir.
+
+"No hay ninguna impresora con ... en el nombre"
+  - Los nombres que busca el sistema: tickets  ticket  o  TM-T20,  etiquetas  410. Cambiar el nombre de la impresora
+    en Ajustes del Sistema > Impresoras y escaneres, o avisar el nombre exacto de la lista de http://127.0.0.1:9101
+
+SALE LA VENTANA DE IMPRESION DE CHROME EN VEZ DE IMPRIMIR DIRECTO
+  - Es el respaldo cuando el agente no responde. Arreglar el agente (arriba) y vuelve a imprimir directo.
+
+EL INSTALADOR NO SE PUEDE ABRIR ("desarrollador no identificado")
+  - Usar Terminal: escribir  bash  (con un espacio), arrastrar programa/instalar-mac.sh a la ventana y apretar Enter.
+  - O: Ajustes del Sistema > Privacidad y seguridad > bajar al final > "Abrir igualmente" (despues de intentar abrirlo una vez).
+
+ETIQUETAS ENCIMADAS O CON LETRAS MEZCLADAS
+  - Apagar y prender la Xprinter y volver a imprimir.
+
+DESINSTALAR EL AGENTE
+  - En Terminal:  launchctl bootout gui/$(id -u)/com.xmenosmasprendas.agente-impresion
+    y despues borrar la carpeta ~/.config/xmenosmas/agente-impresion

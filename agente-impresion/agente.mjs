@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
-const VERSION = "1.1.0";
+const VERSION = "1.1.1";
 const PUERTO = Number(process.env.AGENTE_PUERTO) || 9101;
 const ORIGENES = (process.env.AGENTE_ORIGENES || "https://stock-caja-ventas.xmenosmasprendas.com,http://localhost:3000,http://127.0.0.1:3000")
   .split(",").map((s) => s.trim()).filter(Boolean);
@@ -50,11 +50,11 @@ const normal = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 async function buscarImpresora(consulta) {
   const lista = await impresoras();
   let nombre;
-  for (const opcion of consulta.split("|")) {
-    const q = normal(opcion);
-    nombre = q ? lista.find((n) => normal(n).includes(q)) : undefined;
-    if (nombre) break;
-  }
+  // Primero el nombre exacto (ej. "ticket") y recien despues el que lo contiene: asi no se elige por error una impresora
+  // compartida de otra Mac (ej. "ticket_MacBook_Air_de_otro") en lugar de la propia.
+  const opciones = consulta.split("|").map(normal).filter(Boolean);
+  for (const q of opciones) { nombre = lista.find((n) => normal(n) === q); if (nombre) break; }
+  if (!nombre) for (const q of opciones) { nombre = lista.find((n) => normal(n).includes(q)); if (nombre) break; }
   if (!nombre) throw new Error(`No hay ninguna impresora con "${consulta}" en el nombre. Impresoras de esta PC: ${lista.join(", ") || "ninguna"}.`);
   return nombre;
 }

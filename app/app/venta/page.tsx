@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto } from "@/app/actions";
+import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, promosDeHoy } from "@/app/actions";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { empresa } from "@/lib/empresa.config";
 import { ticketVentaEscpos } from "@/lib/escpos";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
+import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, sugerenciaPromo, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
   calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pesos, precioMedio,
@@ -58,6 +59,13 @@ export default function VentaPage() {
   const [caja, setCaja] = useState<{ filas: Caja[]; ventas: number }>({ filas: [], ventas: 0 });
   const [version, setVersion] = useState(0);
   const [sugeridas, setSugeridas] = useState<Producto[]>([]);
+  // Promos de hoy en este local (se aplican solas) y descuento especial (a mano, con motivo y quien lo autorizo).
+  const [promosHoy, setPromosHoy] = useState<{ suc: string; promos: Promo[]; especial: boolean }>({ suc: "", promos: [], especial: false });
+  const [formEsp, setFormEsp] = useState({ pct: "", motivo: "", autorizo: "" });
+  const [especial, setEspecial] = useState<{ pct: number; motivo: string; autorizo: string } | null>(null);
+  const [verEsp, setVerEsp] = useState(false);
+  const [errEsp, setErrEsp] = useState("");
+  const [recargaPromos, setRecargaPromos] = useState(0);
   const [sel, setSel] = useState(-1);
   const lineasRef = useRef<Linea[]>([]);
   // Identifica este intento de cobro: si hay que reintentarlo tras un corte, el servidor no duplica la venta.
@@ -70,6 +78,16 @@ export default function VentaPage() {
     obtenerMediosPago().then((r) => vivo && r.ok && setMedios(r.medios));
     return () => { vivo = false; };
   }, []);
+
+  useEffect(() => {
+    let vivo = true;
+    const cargar = () => promosDeHoy(sucursal).then((r) => vivo && r.ok && setPromosHoy({ suc: sucursal, promos: r.promos, especial: r.especial }));
+    cargar();
+    // Las promos pueden cambiar durante el dia (la oficina las crea o las saca): se vuelven a pedir cada 2 minutos y al volver a la pestaña.
+    const t = setInterval(cargar, 120_000);
+    window.addEventListener("focus", cargar);
+    return () => { vivo = false; clearInterval(t); window.removeEventListener("focus", cargar); };
+  }, [sucursal, version, recargaPromos]);
 
   useEffect(() => {
     let vivo = true;
@@ -165,13 +183,24 @@ export default function VentaPage() {
 
   const subtotal = lineas.reduce((s, f) => s + f.producto.precio * f.cant, 0);
   const cantidadTotal = lineas.reduce((s, f) => s + f.cant, 0);
+  // Promo: la mejor de las de hoy (no se acumulan). El descuento especial la reemplaza. Al cobrar, el servidor recalcula todo.
+  const promos = promosHoy.suc === sucursal ? promosHoy.promos : [];
+  const itemsPromo = lineas.map((l) => ({ tipo: l.producto.tipo, precio: l.producto.precio, cant: l.cant }));
+  const auto = mejorPromo(promos, itemsPromo);
+  const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
+  const nombrePromo = especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
+  const neto = subtotal - descuento;
+  const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promos, itemsPromo, auto.descuento) : null;
+  // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), el efectivo queda a precio de promo.
+  const mediosVenta = mediosParaPromo(medios, especial ? null : auto.promo);
+  const promoAplicada = especial ? null : auto.promo;
 
   // Pagos: un solo medio (paga todo) o dos (el primero entrega un monto y el segundo paga lo que falta).
   const entrega1Num = parseInt(entrega1) || 0;
   // Nota de credito escaneada: entra como un primer pago (cubre lo que alcance) y el resto se paga con un medio normal.
-  const notaMonto = nota && subtotal > 0 ? montoNotaAplicable(subtotal, nota.saldo, nota.ajustePct) : 0;
+  const notaMonto = nota && neto > 0 ? montoNotaAplicable(neto, nota.saldo, nota.ajustePct) : 0;
   const notaCubre = nota && notaMonto > 0 ? Math.round(notaMonto / (1 + nota.ajustePct / 100)) : 0;
-  const restoLista = Math.max(0, subtotal - notaCubre);
+  const restoLista = Math.max(0, neto - notaCubre);
   const medioNota: MedioPago | null = nota && notaMonto > 0 ? { id: `nota:${nota.codigo}`, nombre: `Nota de crédito ${nota.codigo}`, ajustePct: nota.ajustePct } : null;
   const pagosBase: PagoEntrada[] = mixto
     ? entrega1Num > 0 ? [{ medioId: pago1, monto: entrega1Num }, { medioId: pago2, monto: null }] : []
@@ -179,7 +208,7 @@ export default function VentaPage() {
   const pagos: PagoEntrada[] = !medioNota ? pagosBase
     : restoLista === 0 ? [{ medioId: medioNota.id, monto: notaMonto }, { medioId: "transferencia", monto: null }]
     : pagosBase.length ? [{ medioId: medioNota.id, monto: notaMonto }, ...pagosBase] : [];
-  const calc = pagos.length ? calcularPagos(subtotal, medioNota ? [...medios, medioNota] : medios, pagos) : null;
+  const calc = pagos.length ? calcularPagos(neto, medioNota ? [...mediosVenta, medioNota] : mediosVenta, pagos) : null;
   const otroDe = (id: string) => (id === "efectivo" ? "transferencia" : id === "transferencia" ? "efectivo" : "transferencia");
   function elegirPago1(id: string) {
     setPago1(id);
@@ -199,9 +228,10 @@ export default function VentaPage() {
     if (cobrando || !calc || !calc.ok) return;
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
-    const r = await cobrarVenta(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, lineas.map((l) => [l.producto.sku, l.cant]), pagos]))}`);
+    const r = await cobrarVenta(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, lineas.map((l) => [l.producto.sku, l.cant]), pagos, especial, calc.total]))}`, especial, calc.total);
     setCobrando(false);
-    if (!r.ok) return setAviso(r.motivo);
+    // Si fallo (por ejemplo, cambiaron las promos), se vuelven a pedir: la pantalla muestra el total nuevo.
+    if (!r.ok) { setRecargaPromos((x) => x + 1); return setAviso(r.motivo); }
     claveCobro.current = crypto.randomUUID();
     if (nota && notaMonto > 0 && nota.saldo - notaMonto > 0) setSaldoNota({ codigo: nota.codigo, saldo: nota.saldo - notaMonto });
     setNota(null);
@@ -209,6 +239,9 @@ export default function VentaPage() {
     if (autoTicket) setAImprimir(true);
     setAviso("");
     setLineas(() => []);
+    setEspecial(null);
+    setFormEsp({ pct: "", motivo: "", autorizo: "" });
+    setVerEsp(false);
     setMedioSel(null);
     setMixto(false);
     setEntrega1("");
@@ -234,9 +267,29 @@ export default function VentaPage() {
     : !calc.ok ? "Completá el pago"
     : `Cobrar ${pesos(calc.total)} · ${calc.pagos.map((p) => p.nombre).join(" + ")}`;
 
+  function aplicarEspecial(e: React.FormEvent) {
+    e.preventDefault();
+    const pct = Number(formEsp.pct.replace(",", "."));
+    if (!(pct >= 1 && pct <= TOPE_PCT)) return setErrEsp(`El descuento especial tiene que ser de 1% a ${TOPE_PCT}%`);
+    if (formEsp.motivo.trim().length < 5) return setErrEsp("Escribí el motivo del descuento especial");
+    if (formEsp.autorizo.trim().length < 2) return setErrEsp("Escribí quién lo autorizó");
+    const d = descuentoEspecial(subtotal, pct);
+    if (auto.promo && d <= auto.descuento) {
+      return setErrEsp(`La promo ${textoPromo(auto.promo)} ya le descuenta ${pesos(auto.descuento)} y tu ${pct}% serían ${pesos(d)}: conviene dejar la promo.`);
+    }
+    setErrEsp("");
+    setEspecial({ pct, motivo: formEsp.motivo.trim(), autorizo: formEsp.autorizo.trim() });
+    setVerEsp(false);
+  }
+
   return (
     <>
       <h1>Venta · {nombreSucursal(sucursal)}</h1>
+      {promos.length > 0 && (
+        <p className="alerta no-print" style={{ margin: "-4px 0 12px" }}>
+          <strong>Promos de hoy:</strong> {promos.map((p) => `${descripcionPromo(p)} (hasta el ${p.hasta.slice(8, 10)}/${p.hasta.slice(5, 7)})`).join(" · ")}. Se aplican solas al escanear.
+        </p>
+      )}
       <div className="no-print" style={{ marginBottom: 12 }}>
         <form className="fila" onSubmit={(e) => { e.preventDefault(); confirmar(); }}>
           <input type="text" value={manual} autoComplete="off" autoFocus
@@ -266,12 +319,19 @@ export default function VentaPage() {
           <table className="carrito">
             <thead><tr><th></th><th>Prenda</th><th className="der">Cantidad</th><th className="der">Precio de lista</th><th></th></tr></thead>
             <tbody>
-              {lineas.map((f) => (
+              {lineas.map((f, idx) => (
                 <tr key={f.producto.sku} className={f.producto.sku === ultimoSku ? "ultima" : ""}>
                   <td>{f.producto.foto && <img src={f.producto.foto} alt="" className="miniatura" />}</td>
                   <td>
                     <strong>{f.producto.nombre}</strong><br />
                     <span className="interno"><span className="mono">{f.producto.sku}</span> · {pesos(f.producto.precio)} c/u · hay {f.producto.stock[sucursal] ?? 0} acá</span>
+                    {promoAplicada && auto.detalle && auto.detalle.porItem[idx] > 0 && (
+                      <><br /><strong className="vuelto-monto" style={{ fontSize: 14 }}>
+                        {promoAplicada.tipo === "nxm" ? `${auto.detalle.gratis[idx] === 1 ? "1 GRATIS" : `${auto.detalle.gratis[idx]} GRATIS`} por ${textoPromo(promoAplicada)}`
+                          : promoAplicada.tipo === "precio" ? `A ${pesos(promoAplicada.precio ?? 0)} c/u por promo` : `−${pesos(auto.detalle.porItem[idx])} por ${textoPromo(promoAplicada)}`}
+                      </strong></>
+                    )}
+                    {promoAplicada?.sinCambio && auto.detalle?.entran[idx] && <><br /><strong className="sin-stock" style={{ fontSize: 13 }}>SIN CAMBIO</strong></>}
                   </td>
                   <td className="der" style={{ whiteSpace: "nowrap" }}>
                     <button className="chico" onClick={() => cambiarCantidad(f.producto.sku, -1)} disabled={f.cant <= 1} aria-label={`Una menos de ${f.producto.nombre}`}>−</button>
@@ -287,8 +347,22 @@ export default function VentaPage() {
         )}
         <div className="fila" style={{ justifyContent: "space-between", marginTop: 16 }}>
           <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"} · total a precio de lista</span>
-          <span className="total-venta">{pesos(subtotal)}</span>
+          <span className={descuento > 0 ? "aviso" : "total-venta"} style={descuento > 0 ? { fontSize: 18, textDecoration: "line-through" } : undefined}>{pesos(subtotal)}</span>
         </div>
+        {descuento > 0 && (
+          <div className="vuelto" style={{ marginTop: 8 }}>
+            <div className="fila" style={{ justifyContent: "space-between" }}>
+              <span style={{ fontSize: 16 }}>
+                <strong>{nombrePromo}</strong>{promoAplicada && <> · {descripcionPromo(promoAplicada)}</>}
+                {especial && <> · <span className="interno">Motivo: {especial.motivo} · Autorizó: {especial.autorizo}</span> <button className="chico" onClick={() => setEspecial(null)}>Quitar</button></>}
+              </span>
+              <span className="total-venta">{pesos(neto)}</span>
+            </div>
+            <p style={{ margin: "4px 0 0", fontSize: 18 }}>Ahorra <strong className="vuelto-monto">{pesos(descuento)}</strong> <span className="aviso">· precio de lista {pesos(subtotal)} → con promo {pesos(neto)}</span></p>
+            {promoAplicada && !promoAplicada.descuentoEfectivo && <p className="aviso" style={{ margin: "4px 0 0" }}>Esta promo no lleva el descuento de efectivo: en efectivo paga {pesos(neto)}.</p>}
+          </div>
+        )}
+        {sugerencia && <p className="alerta" style={{ margin: "8px 0 0" }}>💡 {sugerencia.texto}</p>}
 
         {nota && (
           <div className="vuelto" style={{ marginTop: 12 }}>
@@ -312,7 +386,7 @@ export default function VentaPage() {
           <>
             <p className="rotulo" style={{ margin: "16px 0 8px" }}>¿Cómo paga?</p>
             <div className="medios">
-              {medios.map((m) => (
+              {mediosVenta.map((m) => (
                 <button key={m.id} className={`medio ${m.id === medioSel ? "elegido" : ""}`} onClick={() => { setMedioSel(m.id); setRecibido(""); }} aria-pressed={m.id === medioSel}>
                   <span className="medio-nombre">{m.nombre}</span>
                   <span className="medio-monto">{pesos(precioMedio(restoLista, m.ajustePct))}</span>
@@ -331,7 +405,7 @@ export default function VentaPage() {
             <p className="rotulo" style={{ margin: "0 0 8px" }}>Pago con dos medios</p>
             <p className="aviso" style={{ margin: "0 0 4px" }}>1. Lo que entrega el cliente primero</p>
             <div className="fila" style={{ marginBottom: 6 }}>
-              {medios.map((m) => (
+              {mediosVenta.map((m) => (
                 <button key={m.id} className={`chico ${m.id === pago1 ? "on" : ""}`} onClick={() => elegirPago1(m.id)}>
                   {m.nombre} <small>({etiquetaPct(m.ajustePct)})</small>
                 </button>
@@ -346,7 +420,7 @@ export default function VentaPage() {
 
             <p className="aviso" style={{ margin: "10px 0 4px" }}>2. El resto lo paga con</p>
             <div className="fila" style={{ marginBottom: 6 }}>
-              {medios.filter((m) => m.id !== pago1).map((m) => (
+              {mediosVenta.filter((m) => m.id !== pago1).map((m) => (
                 <button key={m.id} className={`chico ${m.id === pago2 ? "on" : ""}`} onClick={() => setPago2(m.id)}>
                   {m.nombre} <small>({etiquetaPct(m.ajustePct)})</small>
                 </button>
@@ -360,7 +434,7 @@ export default function VentaPage() {
                     {p2 ? <>Tiene que entregar con {p2.nombre}: <strong className="vuelto-monto">{pesos(p2.monto)}</strong></> : "No queda resto por pagar."}
                   </p>
                   <p className="aviso" style={{ margin: 0 }}>
-                    Total a cobrar {pesos(calc.total)} · {calc.total === subtotal ? "sin ajuste" : `${calc.total > subtotal ? "recargo" : "descuento"} de ${pesos(Math.abs(calc.total - subtotal))} sobre el precio de lista`}
+                    Total a cobrar {pesos(calc.total)} · {calc.total === neto ? "sin ajuste" : `${calc.total > neto ? "recargo" : "descuento"} de ${pesos(Math.abs(calc.total - neto))} sobre ${descuento > 0 ? "el precio con la promo" : "el precio de lista"}`}
                   </p>
                 </>
               );
@@ -399,6 +473,32 @@ export default function VentaPage() {
           </div>
         )}
 
+        {promosHoy.especial && lineas.length > 0 && !especial && (
+          <div style={{ marginTop: 12 }}>
+            {!verEsp ? (
+              <button className="chico" onClick={() => setVerEsp(true)} style={{ opacity: 0.7 }}>Descuento especial (solo si lo consultaste)</button>
+            ) : (
+              <form className="vuelto" onSubmit={aplicarEspecial} style={{ display: "grid", gap: 8 }}>
+                {errEsp && <p className="alerta mala" role="alert" style={{ margin: 0 }}>{errEsp}</p>}
+                <strong>Descuento especial</strong>
+                <span className="aviso">Solo si lo consultaste con la oficina. Reemplaza a la promo del día y queda registrado con tu usuario, el motivo y quién lo autorizó.</span>
+                <div className="fila" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <input type="number" inputMode="decimal" min={1} max={TOPE_PCT} step={0.5} placeholder="%" value={formEsp.pct}
+                    onChange={(e) => setFormEsp({ ...formEsp, pct: e.target.value })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 90 }} required />
+                  <input placeholder="Motivo (ej. clienta mayorista)" value={formEsp.motivo} maxLength={200}
+                    onChange={(e) => setFormEsp({ ...formEsp, motivo: e.target.value })} style={{ flex: 2, minWidth: 200 }} required />
+                  <input placeholder="¿Quién lo autorizó?" value={formEsp.autorizo} maxLength={60}
+                    onChange={(e) => setFormEsp({ ...formEsp, autorizo: e.target.value })} style={{ flex: 1, minWidth: 150 }} required />
+                </div>
+                <div className="fila" style={{ gap: 8 }}>
+                  <button type="submit">Aplicar descuento</button>
+                  <button type="button" className="chico" onClick={() => { setVerEsp(false); setErrEsp(""); }}>Cancelar</button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
         <button className="principal boton-cobrar" onClick={cobrar}
           disabled={lineas.length === 0 || !calc || !calc.ok || cobrando}>
           {cobrando ? "Registrando…" : textoCobrar}
@@ -418,6 +518,7 @@ export default function VentaPage() {
                 <tr key={i.sku}><td>{i.cant} × {i.nombre}</td><td className="der">{pesos(i.precio * i.cant)}</td></tr>
               ))}
               <tr><td className="aviso">Subtotal a precio de lista</td><td className="der">{pesos(ultima.subtotal)}</td></tr>
+              {ultima.promo && <tr><td className="aviso">{ultima.promo.nombre}</td><td className="der">−{pesos(ultima.promo.monto)}</td></tr>}
               {ultima.pagos.map((p) => (
                 <tr key={p.medioId}><td className="aviso">Pagó con {p.nombre} ({etiquetaPct(p.pct)}){ultima.pagos.length > 1 ? `, cubre ${pesos(p.valorLista)} de lista` : ""}</td><td className="der">{pesos(p.monto)}</td></tr>
               ))}

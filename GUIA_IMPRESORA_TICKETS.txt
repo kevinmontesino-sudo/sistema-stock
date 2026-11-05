@@ -1,51 +1,40 @@
-GUIA: PONER A ANDAR LA IMPRESORA DE TICKETS EN CADA LOCAL
-(Epson TM-T20IVL, papel de 80 mm. Se repite igual en cada PC. Tiempo: unos 15 minutos.)
+GUIA: IMPRESORA DE TICKETS (Epson TM-T20IV-L, rollo de 80 mm)
+=============================================================
+Los tickets de venta y las notas de credito salen DIRECTO por el agente de impresion: sin ventana, con logo,
+codigo de barras y corte automatico justo. Se repite igual en cada PC (unos 15 minutos).
 
 ANTES DE EMPEZAR
-- Tener la impresora enchufada a la corriente y al USB de la PC, con un rollo de papel de 80 mm puesto (el lado liso hacia afuera es el que se imprime; si sale en blanco, el rollo esta al reves).
-- La PC tiene que tener Chrome y entrar al sistema: https://stock-caja-ventas.xmenosmasprendas.com
+  - Impresora enchufada a la corriente y al USB de la PC, con rollo de 80 mm (si sale en blanco, el rollo esta al reves:
+    el lado liso va hacia afuera).
 
 PASO 1: DRIVER
-1. Bajar el driver oficial desde el sitio de Epson (buscar "TM-T20IV" en epson.com.ar > Soporte > Descargas, sistema Windows). Instalarlo con la impresora ya conectada y encendida.
-2. Al terminar tiene que aparecer en Windows (Configuracion > Impresoras y escaneres) una impresora que se llama algo como "EPSON TM-T20IV Receipt".
+  Windows: epson.com.ar > Soporte > Descargas, buscar "TM-T20IV", sistema Windows, bajar el "Driver de impresora"
+           e instalarlo con la impresora conectada y encendida.
+           Tiene que aparecer en Impresoras y escaneres algo como "EPSON TM-T20IV Receipt".
+  Mac:     epson.com.ar > Soporte > Descargas > "TM-T20IV-Series", sistema macOS, bajar "Driver de impresora"
+           (archivo TMPrinterInstaller_300_n.dmg, NO el "ePOS SDK para iOS"). Abrir el .dmg, correr el instalador, y despues
+           Ajustes del Sistema > Impresoras y escaneres > Agregar impresora > elegir la TM-T20IV-L.
+           En la Mac de Kevin la impresora se llama "ticket" (el sistema la busca por "TM-T20" o por "ticket").
 
-PASO 2: PAPEL Y CORTE (en las preferencias de esa impresora)
-1. Tamano de papel: el de 80 mm de ancho con largo continuo (suele llamarse "TM-T20IV 80mm x ... / Receipt 80 mm"). Si hay opcion de largo, elegir "continuo" o "segun el contenido".
-2. Corte de papel: automatico, al final de cada documento.
-3. Margenes: ninguno o los minimos.
-4. Aceptar y guardar.
+PASO 2: AGENTE DE IMPRESION
+  Instalarlo como dice 00_LEEME_PRIMERO.txt (instalar.bat en Windows, instalar-mac.sh en Mac).
 
-PASO 3: DEJARLA COMO PREDETERMINADA
-- Configuracion > Impresoras > elegir la Epson > "Establecer como predeterminada".
-- Importante: la impresora de tickets tiene que ser la predeterminada de esa PC, porque la caja imprime sin preguntar.
+PASO 3: PRUEBA SIN VENDER NADA
+  1. Entrar al sistema con la cuenta del local y abrir la direccion /tickets (al final de la direccion del sistema).
+  2. Tocar "Imprimir ticket de prueba" y despues "Imprimir nota de prueba".
+  3. Revisar: que ocupe todo el ancho, que se vea el logo, que corte solo justo despues del ultimo renglon, y que la
+     pistola lea el codigo de barras (V9F3A2C7B en el ticket de ejemplo).
 
-PASO 4: CHROME QUE IMPRIME SIN VENTANA
-1. Cerrar Chrome por completo.
-2. Crear un acceso directo de Chrome en el escritorio. Click derecho > Propiedades. En "Destino" dejar el texto que ya tiene y agregar al final, con un espacio antes:
-      --kiosk-printing
-   Queda parecido a:
-      "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing
-3. Usar siempre ese acceso directo para abrir el sistema. (Si Chrome ya estaba abierto, el cambio no se aplica: hay que cerrarlo del todo, tambien desde la bandeja de Windows.)
-
-PASO 5: PRUEBA SIN VENDER NADA
-1. Entrar al sistema con la cuenta del local.
-2. Ir a la direccion  /tickets  (agregarla al final de la direccion del sistema).
-3. Tocar "Imprimir ticket de prueba" y despues "Imprimir nota de prueba".
-4. Revisar:
-   - Que el ticket ocupe todo el ancho del papel, sin cortarse a los costados.
-   - Que corte solo, sin dejar un tramo en blanco enorme.
-   - Que el codigo de barras del ticket (V9F3A2C7B de ejemplo) se pueda leer con el lector.
-   - Que el logo y los textos se vean nitidos.
-
-PASO 6: PRUEBA CON UNA VENTA REAL
-1. En Vender > Venta, escanear una prenda y cobrar.
-2. Tildar "Imprimir el ticket automaticamente al cobrar (en esta PC)". Esa opcion se guarda en esa PC.
-3. Cobrar y revisar que salga el ticket.
-4. Ir a Cambio o devolucion, escanear el ticket y verificar que el sistema reconoce la venta.
+PASO 4: PRUEBA CON UNA VENTA REAL (usar una prenda de prueba y borrarla despues)
+  1. Vender > Venta: escanear la prenda, elegir el medio de pago y Cobrar. Tildar "Imprimir el ticket automaticamente
+     al cobrar (en esta PC)": esa opcion se guarda en esa PC.
+  2. Cobrar en EFECTIVO: el ticket muestra el descuento (-20%). Cobrar con TARJETA: el ticket NO muestra ningun recargo,
+     los precios ya vienen con el recargo incluido y suman el total.
+  3. Vender > Ventas: buscar la venta, tocar "Reimprimir" y despues "Devolver" (escanea o abre el ticket y emite la nota).
 
 SI ALGO SALE MAL
-- Sale muy chico o corrido: revisar el tamano de papel del Paso 2.
-- Abre la ventana de impresion: Chrome no esta abierto con el acceso directo del Paso 4.
-- Imprime en la impresora equivocada: revisar el Paso 3.
-- Sale todo en blanco: el rollo esta al reves (Paso "Antes de empezar").
-- Sacar una foto del ticket y mandarla, junto con el nombre de la impresora que figura en Windows.
+  - Sale la ventana de impresion de Chrome: el agente no esta abierto. Abrir http://127.0.0.1:9101 en esa PC; si no
+    responde, volver a correr el instalador del agente.
+  - Sale sin logo o corrido: sacar foto del ticket y mandarla.
+  - "No hay ninguna impresora con TM-T20 en el nombre": mirar la lista que muestra http://127.0.0.1:9101 y avisar el
+    nombre exacto de la impresora.

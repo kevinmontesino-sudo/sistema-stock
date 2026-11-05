@@ -1,0 +1,32 @@
+SI ALGO FALLA - PROBLEMAS COMUNES
+=================================
+DIAGNOSTICO RAPIDO (en la PC con problema)
+  Abrir en Chrome:  http://127.0.0.1:9101
+  - Si dice "funcionando" y lista las impresoras: el agente esta bien; el problema es el nombre de la impresora o el permiso de Chrome.
+  - Si no abre: el agente no esta corriendo. Volver a correr instalar.bat (Windows) o instalar-mac.sh (Mac).
+  Registro del agente:  Windows  %LOCALAPPDATA%\AgenteImpresion\agente.log
+                        Mac      ~/.config/xmenosmas/agente-impresion/agente.log
+
+"No se encontro el agente de impresion en esta PC"
+  - Instalarlo (o volver a correr el instalador) y recargar la pagina con Ctrl+Shift+R (Mac: Cmd+Shift+R).
+  - Chrome tiene que haber permitido "dispositivos de la red local" para el sitio: candado de la barra de direcciones >
+    Configuracion del sitio > Dispositivos de la red local > Permitir.
+
+"No hay ninguna impresora con ... en el nombre"
+  - Los nombres que busca el sistema: tickets "TM-T20" (o "ticket"), etiquetas "410". Si en esa PC la impresora se llama
+    distinto, avisar el nombre exacto y se ajusta en el sistema (empresa.config.ts).
+
+SALE LA VENTANA DE IMPRESION DE CHROME EN VEZ DE IMPRIMIR DIRECTO
+  - Es el respaldo cuando el agente no responde. Arreglar el agente (arriba) y se vuelve a imprimir directo.
+
+LA SESION SE CIERRA
+  - Los admin tienen sesion de hasta 8 horas y se cierra tras 2 horas sin usarla. Los locales, hasta 14 horas y 6 sin usarla.
+
+TICKET SIN LOGO / CORRIDO / CORTADO
+  - Sacar foto del ticket y mandarla junto con el nombre de la impresora. El papel tiene que ser de 80 mm.
+
+ETIQUETAS ENCIMADAS O CON LETRAS MEZCLADAS
+  - Apagar y prender la Xprinter y volver a imprimir.
+
+DESINSTALAR EL AGENTE
+  - Windows: desinstalar.bat (viene en el zip). Mac: launchctl bootout gui/$(id -u)/com.xmenosmasprendas.agente-impresion

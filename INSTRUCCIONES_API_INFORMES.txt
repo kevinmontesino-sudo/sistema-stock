@@ -1,10 +1,9 @@
-API DE INFORMES DE X MENOS MAS PRENDAS: COMO USARLA (para Cesar y su Claude)
+API DE INFORMES Y PROMOS DE X MENOS MAS PRENDAS: COMO USARLA (para Cesar y su Claude)
 
-Esta API permite consultar los informes del sistema (ventas, prendas mas vendidas, medios de pago, notas de credito, stock, horarios, ingresos de mercaderia). Es SOLO LECTURA: no puede modificar nada, y solo devuelve totales (nunca datos personales, contrasenas ni claves).
+Esta API permite consultar los informes del sistema (ventas, prendas mas vendidas, medios de pago, notas de credito, stock, horarios, ingresos de mercaderia). Es SOLO LECTURA (salvo las promos, ver el punto 5): no puede modificar nada mas, y solo devuelve totales (nunca datos personales, contrasenas ni claves).
 
-IMPORTANTE: la API funciona recien cuando el sistema este publicado en internet (hoy corre solo en la computadora del deposito). La direccion va a ser:
-   https://sistema-stock.xmenosmasprendas.com
-Hasta que se publique, la llave y esta guia quedan listas pero no se pueden usar desde otra computadora.
+El sistema esta publicado en:
+   https://stock-caja-ventas.xmenosmasprendas.com
 
 
 1) LA LLAVE
@@ -28,7 +27,7 @@ y agregar:
       "command": "node",
       "args": ["/RUTA/COMPLETA/AL/ARCHIVO/mcp-informes.mjs"],
       "env": {
-        "SISTEMA_URL": "https://sistema-stock.xmenosmasprendas.com",
+        "SISTEMA_URL": "https://stock-caja-ventas.xmenosmasprendas.com",
         "SISTEMA_TOKEN": "xmp_LA_LLAVE_QUE_TE_PASARON"
       }
     }
@@ -38,7 +37,7 @@ y agregar:
 Reiniciar Claude Desktop. Va a aparecer la herramienta "consultar_informe".
 
 Claude Code (terminal):
-   claude mcp add xmenosmasprendas-informes -e SISTEMA_URL=https://sistema-stock.xmenosmasprendas.com -e SISTEMA_TOKEN=xmp_LA_LLAVE -- node /RUTA/COMPLETA/AL/ARCHIVO/mcp-informes.mjs
+   claude mcp add xmenosmasprendas-informes -e SISTEMA_URL=https://stock-caja-ventas.xmenosmasprendas.com -e SISTEMA_TOKEN=xmp_LA_LLAVE -- node /RUTA/COMPLETA/AL/ARCHIVO/mcp-informes.mjs
 
 Despues se le pregunta a Claude en lenguaje normal, por ejemplo:
 - "Cual fue la prenda mas vendida esta semana?"
@@ -53,9 +52,9 @@ Despues se le pregunta a Claude en lenguaje normal, por ejemplo:
 GET /api/informes con el encabezado   Authorization: Bearer xmp_LA_LLAVE
 
 Ejemplos (curl):
-   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://sistema-stock.xmenosmasprendas.com/api/informes"
-   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://sistema-stock.xmenosmasprendas.com/api/informes?tipo=resumen&desde=2026-10-01&hasta=2026-10-31"
-   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://sistema-stock.xmenosmasprendas.com/api/informes?tipo=prendas_mas_vendidas&sucursal=white&limite=10"
+   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://stock-caja-ventas.xmenosmasprendas.com/api/informes"
+   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://stock-caja-ventas.xmenosmasprendas.com/api/informes?tipo=resumen&desde=2026-10-01&hasta=2026-10-31"
+   curl -H "Authorization: Bearer $SISTEMA_TOKEN" "https://stock-caja-ventas.xmenosmasprendas.com/api/informes?tipo=prendas_mas_vendidas&sucursal=white&limite=10"
 
 Sin "tipo" devuelve el catalogo con todo lo disponible y las definiciones.
 
@@ -85,3 +84,23 @@ Limites: 30 pedidos por minuto por llave. Respuestas de error: 401 (llave invali
 - Antes de afirmar cifras, consultar la API; no inventar numeros. Indicar siempre el rango de fechas y la sucursal consultada.
 - Para "esta semana" usar de lunes a hoy; para "este mes" desde el dia 1 hasta hoy. La fecha de hoy es la de Argentina.
 - La llave es secreta: no mostrarla ni repetirla en las respuestas.
+
+
+5) PROMOS (desde el 4/11/2026)
+Con una llave de alcance "promos" (Oficina > Accesos API > "Leer informes y administrar promos") Claude tambien puede crear y desactivar promos.
+Las llaves comunes siguen siendo solo de lectura: para promos hay que crear una llave nueva con ese alcance.
+El conector mcp-informes.mjs (version 1.1) suma tres herramientas: ver_promos, crear_promo y desactivar_promo. Hay que reemplazar el archivo viejo por el nuevo.
+
+Ejemplos para pedirle a Claude:
+- "Mañana y pasado hay 3x2 en White y Zelarrayan."
+- "Este fin de semana 2x1 en jeans en todos los locales."
+- "Que promos hay activas?"  /  "Sacá el 3x2 de White."
+
+Reglas: se aplican solas en las cajas al escanear; no se acumulan (va la que mas descuenta); en un NxM no se pagan las prendas mas baratas;
+el descuento de efectivo se suma encima; hasta 50% y hasta 3 meses por promo. Cada cambio queda en la Auditoria.
+
+Directo (curl):
+   curl -H "Authorization: Bearer $SISTEMA_TOKEN" https://stock-caja-ventas.xmenosmasprendas.com/api/promos
+   curl -X POST -H "Authorization: Bearer $SISTEMA_TOKEN" -H "Content-Type: application/json" \
+        -d '{"tipo":"nxm","n":3,"m":2,"sucursales":["white"],"desde":"2026-11-05","hasta":"2026-11-06"}' https://stock-caja-ventas.xmenosmasprendas.com/api/promos
+   curl -X DELETE -H "Authorization: Bearer $SISTEMA_TOKEN" "https://stock-caja-ventas.xmenosmasprendas.com/api/promos?id=12"

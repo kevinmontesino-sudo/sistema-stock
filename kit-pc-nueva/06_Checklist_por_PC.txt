@@ -1,0 +1,22 @@
+CHECKLIST POR PC  (una hoja por PC, tildar a medida que se hace)
+================================================================
+Local / PC: ____________________     Fecha: ___/___/______     Sistema:  [ ] Windows   [ ] Mac
+
+[ ] Chrome instalado y sesion iniciada con la cuenta del local
+[ ] Driver de la Epson TM-T20IV-L instalado (aparece en Impresoras y escaneres)
+[ ] Driver de la Xprinter XP-410B instalado (solo si esa PC imprime etiquetas)
+[ ] Agente de impresion instalado (instalar.bat / instalar-mac.sh) y dijo "funcionando"
+[ ] En http://127.0.0.1:9101 aparece la Epson (nombre con TM-T20 o "ticket")
+[ ] En http://127.0.0.1:9101 aparece la Xprinter (nombre con 410), si corresponde
+[ ] Chrome: permitido "dispositivos de la red local" para el sitio
+[ ] /tickets: ticket de prueba OK (logo, ancho completo, corte justo, codigo de barras legible)
+[ ] /tickets: nota de prueba OK
+[ ] Pistola lectora configurada (escribe el codigo y termina con Enter) y lee un ticket de prueba
+[ ] Venta de prueba en EFECTIVO: ticket con descuento visible
+[ ] Venta de prueba con TARJETA: ticket SIN recargo explicito, suma = total
+[ ] Vender > Ventas: encuentra la venta, Reimprimir OK, Devolver abre la devolucion
+[ ] Etiqueta de prueba OK (solo si imprime etiquetas)
+[ ] Venta/prenda de prueba borrada o devuelta
+[ ] Se anoto en el nombre de la PC / se le explico al encargado como abrir el sistema
+
+Observaciones: _______________________________________________________________

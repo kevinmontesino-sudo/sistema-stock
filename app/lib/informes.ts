@@ -43,9 +43,9 @@ const base = (p: ParamsInforme) => [p.desde, p.hasta, p.sucursal];
 
 // ---- Resumen de ventas por sucursal ----
 export async function resumen(p: ParamsInforme) {
-  const ventas = await pool.query<{ sucursal: string; ventas: number; unidades: number; lista: number; total_pagado: number }>(
+  const ventas = await pool.query<{ sucursal: string; ventas: number; unidades: number; lista: number; total_pagado: number; promos: number }>(
     `select v.sucursal_id as sucursal, count(*)::int as ventas, coalesce(sum(it.u), 0)::int as unidades,
-       sum(v.subtotal_lista)::float8 as lista, sum(v.total)::float8 as total_pagado
+       sum(v.subtotal_lista)::float8 as lista, sum(v.total)::float8 as total_pagado, sum(v.descuento_promo)::float8 as promos
      from ventas v left join (select venta_id, sum(cantidad) u from venta_items group by venta_id) it on it.venta_id = v.id
      where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")} group by v.sucursal_id order by v.sucursal_id`,
     base(p),
@@ -63,7 +63,7 @@ export async function resumen(p: ParamsInforme) {
     return {
       sucursal: v.sucursal, nombre: nombreSucursal(v.sucursal), ventas: v.ventas, unidades: v.unidades, lista: v.lista,
       totalPagado: v.total_pagado, cobradoEnCaja: cobrado, pagadoConNotas: conNotas,
-      ticketPromedio: v.ventas ? Math.round(v.total_pagado / v.ventas) : 0, ajusteMediosDePago: v.total_pagado - v.lista,
+      ticketPromedio: v.ventas ? Math.round(v.total_pagado / v.ventas) : 0, descuentoPromos: v.promos, ajusteMediosDePago: v.total_pagado - (v.lista - v.promos),
       porMedio: mios.map((m) => ({ medio: m.medio, nombre: m.nombre, monto: m.monto, ventas: m.ventas })),
     };
   });
@@ -245,7 +245,8 @@ export const DEFINICIONES = {
   totalPagado: "Lo que efectivamente pagaron los clientes: lista con el descuento o recargo de cada medio de pago (efectivo -20%, tarjeta +20%). Incluye lo pagado con notas de credito.",
   cobradoEnCaja: "Plata que entro: pagos en transferencia, efectivo y tarjeta (sin las notas de credito).",
   pagadoConNotas: "Parte de las compras pagada con notas de credito (no es plata nueva).",
-  ajusteMediosDePago: "totalPagado - lista: negativo = descuentos por efectivo superan recargos.",
+  descuentoPromos: "Lo descontado por promos (3x2, porcentajes, precios de feria) y descuentos especiales, sobre el precio de lista.",
+  ajusteMediosDePago: "totalPagado - (lista - descuentoPromos): negativo = descuentos por efectivo superan recargos.",
   netas: "Unidades vendidas menos devueltas (las devueltas con nota de credito de ventas del mismo periodo).",
   fechas: "Dia calendario de Argentina (America/Argentina/Buenos_Aires); el rango incluye 'desde' y 'hasta'.",
 } as const;
