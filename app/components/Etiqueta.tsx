@@ -5,7 +5,8 @@ import { QRCodeSVG } from "qrcode.react";
 import { empresa } from "@/lib/empresa.config";
 import { textoPrecioEtiqueta } from "@/lib/util";
 
-export type PrecioEtiqueta = { nombre: string; valor: number; cuotas?: number };
+// lista: la linea "Lista $X · 3x$Y" (mas chica); destacado: el precio que se resalta (el de efectivo).
+export type PrecioEtiqueta = { nombre: string; valor: number; cuotas?: number; lista?: boolean; destacado?: boolean };
 export type DatosEtiqueta = { sku: string; nombre: string; precios: PrecioEtiqueta[]; marco?: boolean };
 
 function Barras({ valor }: { valor: string }) {
@@ -42,7 +43,8 @@ export function Etiqueta({ sku, nombre, precios, marco }: DatosEtiqueta) {
           <span className="etiqueta-nombre">{nombre}</span>
         </div>
         {precios.map((p, i) => (
-          <div key={i} className="etiqueta-precio">{textoPrecioEtiqueta(p)}</div>
+          // Tamanos de la vista previa: igual que en la impresa, la lista chica, los medios normales y el destacado grande.
+          <div key={i} className="etiqueta-precio" style={{ fontSize: p.lista ? 8.5 : p.destacado ? 13 : undefined, lineHeight: 1.1 }}>{textoPrecioEtiqueta(p)}</div>
         ))}
       </div>
     </div>

@@ -385,7 +385,7 @@ export async function totalEnSucursal(sucursal: string) {
 
 // El precio sale siempre de la base, nunca de lo que mande la pantalla.
 // Precio y porcentajes salen siempre de la base, nunca de la pantalla. Solo se puede vender lo que hay en la sucursal.
-// Pagos: transferencia 0%, efectivo -20%, tarjeta +20%; se puede dividir entre varios medios (ver calcularPagos).
+// Pagos: cada medio lleva su porcentaje de la tabla medios_pago (se puede dividir entre varios medios, ver calcularPagos).
 // Promos vigentes HOY (hora de Argentina) en un local.
 const SELECT_PROMO = `select id::int as id, nombre, tipo, n, m, pct::float8 as pct, precio, tipos, sucursales, desde::text as desde, hasta::text as hasta,
   descuento_efectivo as "descuentoEfectivo", sin_cambio as "sinCambio",
@@ -447,7 +447,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     const neto = subtotal - descuento;
     // Pagos con nota de credito ("nota:N000001"): se bloquea la nota, se valida y entra como un medio mas con su propio ajuste.
     const notas = new Map<string, { id: number; saldo: number }>();
-    // Una promo "sin descuento de efectivo" (feria, mayorista): los medios con descuento pasan a 0%; la tarjeta mantiene su recargo.
+    // Una promo "sin descuento de efectivo" (feria, mayorista): los medios con descuento pasan a 0% (precio unico; ver mediosParaPromo).
     const medios = mediosParaPromo(mr.rows, auto.promo);
     const pagosOk: PagoEntrada[] = [];
     for (const p of pagos) {
@@ -716,6 +716,30 @@ const ajusteMedio = (v: { total: number; subtotal_lista: number; descuento_promo
   return base > 0 ? v.total / base : 1;
 };
 
+// Fecha de corte del cambio de estructura de precios (la lista pasa a ser el precio de tarjeta: lista nueva = lista vieja x factor).
+// La fija el script db/cambios/precios-lista-tarjeta.sql (tabla cambios_lista, fila no revertida); si esa tabla no existe o esta
+// vacia se usa empresa.cambioLista.fecha, y sin fecha no hay conversion (el sistema funciona igual que antes del cambio).
+export async function corteDeLista(): Promise<{ fecha: Date; factor: number } | null> {
+  try {
+    const r = await pool.query<{ fecha: Date; factor: number }>(
+      "select aplicado_en as fecha, factor::float8 as factor from cambios_lista where revertido_en is null order by id desc limit 1",
+    );
+    if (r.rows[0]) return { fecha: new Date(r.rows[0].fecha), factor: r.rows[0].factor };
+  } catch {
+    // La tabla todavia no existe (el cambio no se aplico): sigue con la configuracion del archivo.
+  }
+  const c = empresa.cambioLista;
+  const fecha = c.fecha ? new Date(c.fecha) : null;
+  return fecha && !Number.isNaN(fecha.getTime()) && c.factor > 0 ? { fecha, factor: c.factor } : null;
+}
+
+// Porcentaje que lleva la nota de credito (solo el del medio de pago, sin la promo), en %. Una venta anterior al corte se pago contra
+// la lista VIEJA: su porcentaje se divide por el factor para que la nota cubra la misma prenda al usarla con la lista nueva.
+export function ajusteDeNota(v: { total: number; subtotal_lista: number; descuento_promo: number }, creadoEn: Date, corte: { fecha: Date; factor: number } | null) {
+  const k = ajusteMedio(v) / (corte && creadoEn < corte.fecha ? corte.factor : 1);
+  return Math.round((k - 1) * 1_000_000) / 10_000;
+}
+
 // Busca una venta por el codigo de su ticket (V000123, o solo el numero) para devolver prendas.
 export async function ventaParaDevolucion(codigo: string, soloSucursal: string | null = null): Promise<VentaDevolvible> {
   // Solo por el codigo del ticket (no por numero interno): asi nadie puede recorrer las ventas probando numeros.
@@ -753,13 +777,14 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
   for (const i of pedidos) {
     if (!Number.isInteger(i.cant) || !Number.isInteger(i.itemId) || !Number.isInteger(i.falladas) || i.falladas < 0 || i.falladas > i.cant) falla("Cantidad inválida");
   }
+  const corte = await corteDeLista();
   return tx(async (c) => {
     const codigoVenta = String(ventaCodigo).trim().toUpperCase();
     // Dos devoluciones de la misma compra a la vez se hacen una despues de la otra. Se usa un candado por codigo y no
     // "for update" sobre ventas, porque la aplicacion no tiene (ni debe tener) permiso de modificar la tabla de ventas.
     await c.query("select pg_advisory_xact_lock(hashtext($1))", [`devolucion:${codigoVenta}`]);
-    const v = await c.query<{ id: number; total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean; sucursal_id: string }>(
-      `select id::int as id, total, subtotal_lista, descuento_promo, sucursal_id, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera
+    const v = await c.query<{ id: number; total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean; sucursal_id: string; creado_en: Date }>(
+      `select id::int as id, total, subtotal_lista, descuento_promo, sucursal_id, creado_en, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera
        from ventas where codigo = $1`, [codigoVenta],
     );
     if (!v.rows[0]) return falla("No existe esa venta");
@@ -789,8 +814,8 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
       `insert into notas_credito (venta_id, sucursal_id, monto_inicial, saldo, ajuste_pct, usuario_id)
        values ($1, $2, $3, $3, $4, $5) returning id::int as id, codigo`,
       // El porcentaje de la nota es SOLO el del medio de pago (sin la promo): si no, al usarla en otra compra con promo,
-      // el cliente aprovecharia la promo dos veces.
-      [ventaId, sucursal, monto, Math.round((ajusteMedio(v.rows[0]) - 1) * 1_000_000) / 10_000, usuarioEnCurso()?.id ?? null],
+      // el cliente aprovecharia la promo dos veces. Si la venta es anterior al cambio de lista, se convierte (ver ajusteDeNota).
+      [ventaId, sucursal, monto, ajusteDeNota(v.rows[0], v.rows[0].creado_en, corte), usuarioEnCurso()?.id ?? null],
     );
     for (const x of filas) {
       await c.query(

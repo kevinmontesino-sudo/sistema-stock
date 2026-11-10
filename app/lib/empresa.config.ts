@@ -19,12 +19,19 @@ export const empresa = {
     { codigo: "SHO", nombre: "Short", alias: ["short", "shorts", "bermuda", "bermudas"] },
     { codigo: "OTR", nombre: "Otro", alias: [] as string[] },
   ],
+  // Botones de precio de lista de la pantalla de carga (con la estructura nueva, cambiarlos a [9900, 19900, 26900, 36900]).
   preciosFrecuentes: [9000, 17500, 22000, 30000],
+  // Cambio de estructura de precios (lista = precio de tarjeta; lista nueva = lista vieja x factor). Lo que importa es la FECHA DE CORTE:
+  // las notas de credito que salgan de una venta anterior se convierten (porcentaje / factor) para valer lo mismo con la lista nueva.
+  // El script db/cambios/precios-lista-tarjeta.sql deja la fecha en la tabla cambios_lista y esa tiene prioridad; esta es la alternativa
+  // manual (fecha ISO con zona, ej. "2026-11-10T00:00:00-03:00"). Vacia = sin conversion (estructura anterior).
+  cambioLista: { fecha: "", factor: 1.2 },
   skuDigitos: 6,
-  // Medios de pago cuyo precio se imprime en la etiqueta (los porcentajes se leen de la tabla medios_pago).
+  // Etiqueta: arriba "Lista $X · 3x$Y" (la lista = precio de tarjeta, dividida en N cuotas sin interes) y abajo los medios con descuento,
+  // en pesos (los porcentajes salen de la tabla medios_pago). El ultimo medio de la lista sale destacado.
   etiquetaMedios: ["transferencia", "efectivo"],
-  // Ultima linea de la etiqueta: "3 cuotas de $X" = precio con el recargo de este medio, dividido en N cuotas.
-  etiquetaCuotas: { medio: "tarjeta", cantidad: 3 },
+  // Medio al que corresponde la lista (la linea "Lista") y cantidad de cuotas ("3x$..."; 0 = sin cuotas).
+  etiquetaLista: { medio: "tarjeta", cuotas: 3 },
   codigoEtiqueta: "code128" as "code128" | "qr",
   // Medida del rollo de etiquetas, en milímetros. Ajustar a la impresora y rollo reales.
   etiquetaMm: { ancho: 50, alto: 30 },

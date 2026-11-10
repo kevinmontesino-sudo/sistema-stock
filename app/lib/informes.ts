@@ -2,6 +2,7 @@ import { empresa } from "./empresa.config";
 import { pool } from "./db";
 import { ErrorNegocio } from "./repo";
 import { nombreSucursal } from "./util";
+import { cierresEntre, controlDiario } from "./cierre";
 
 // Informes de SOLO LECTURA (solo SELECT). Los usan la pantalla de administracion y la API de informes, asi los numeros coinciden.
 // Todas las fechas son de Argentina (America/Argentina/Buenos_Aires) y el rango "desde-hasta" incluye ambos dias.
@@ -241,17 +242,17 @@ export async function ingresos(p: ParamsInforme) {
 }
 
 export const DEFINICIONES = {
-  lista: "Valor de las prendas a precio de lista (= precio con transferencia).",
-  totalPagado: "Lo que efectivamente pagaron los clientes: lista con el descuento o recargo de cada medio de pago (efectivo -20%, tarjeta +20%). Incluye lo pagado con notas de credito.",
-  cobradoEnCaja: "Plata que entro: pagos en transferencia, efectivo y tarjeta (sin las notas de credito).",
+  lista: "Valor de las prendas a precio de lista (el precio que figura en la etiqueta como Lista; cada medio de pago lo ajusta con su porcentaje, que está en la base).",
+  totalPagado: "Lo que efectivamente pagaron los clientes: lista con el descuento o recargo de cada medio de pago (según el porcentaje vigente de cada medio al momento de la venta). Incluye lo pagado con notas de credito.",
+  cobradoEnCaja: "Plata que entro: pagos en tarjeta, transferencia y efectivo (sin las notas de credito).",
   pagadoConNotas: "Parte de las compras pagada con notas de credito (no es plata nueva).",
   descuentoPromos: "Lo descontado por promos (3x2, porcentajes, precios de feria) y descuentos especiales, sobre el precio de lista.",
-  ajusteMediosDePago: "totalPagado - (lista - descuentoPromos): negativo = descuentos por efectivo superan recargos.",
+  ajusteMediosDePago: "totalPagado - (lista - descuentoPromos): negativo = los descuentos por medio de pago (efectivo, transferencia) superan a los recargos.",
   netas: "Unidades vendidas menos devueltas (las devueltas con nota de credito de ventas del mismo periodo).",
   fechas: "Dia calendario de Argentina (America/Argentina/Buenos_Aires); el rango incluye 'desde' y 'hasta'.",
 } as const;
 
-export type TipoInforme = "resumen" | "periodo" | "prendas_mas_vendidas" | "prendas_menos_vendidas" | "notas_credito" | "stock" | "horarios" | "ingresos" | "panel";
+export type TipoInforme = "resumen" | "periodo" | "prendas_mas_vendidas" | "prendas_menos_vendidas" | "notas_credito" | "stock" | "horarios" | "ingresos" | "control" | "cierres_caja" | "panel";
 export const TIPOS: Record<Exclude<TipoInforme, "panel">, { descripcion: string; usaFechas: boolean }> = {
   resumen: { descripcion: "Ventas, unidades, total pagado, cobrado en caja, ticket promedio y medios de pago, por sucursal y total.", usaFechas: true },
   periodo: { descripcion: "Evolucion de las ventas por dia, semana o mes (parametro agrupar), por sucursal.", usaFechas: true },
@@ -261,6 +262,8 @@ export const TIPOS: Record<Exclude<TipoInforme, "panel">, { descripcion: string;
   stock: { descripcion: "Stock actual por sucursal valorizado a lista, y lo que esta en camino sin recibir.", usaFechas: false },
   horarios: { descripcion: "Ventas por dia de la semana y por hora.", usaFechas: true },
   ingresos: { descripcion: "Mercaderia cargada en el deposito y enviada a cada local en el periodo.", usaFechas: true },
+  control: { descripcion: "Informe de control de UN dia (parametro hasta = el dia; sin fecha, hoy): por local ventas, medios, cierre de caja y diferencia, notas de credito, descuentos especiales, ajustes de stock, envios sin recibir y alertas. Pensado para imprimir.", usaFechas: true },
+  cierres_caja: { descripcion: "Cierres de caja del periodo: efectivo esperado vs contado y diferencia por local y dia.", usaFechas: true },
 };
 
 export async function informe(tipo: TipoInforme, p: ParamsInforme) {
@@ -273,6 +276,8 @@ export async function informe(tipo: TipoInforme, p: ParamsInforme) {
     case "stock": return stock(p);
     case "horarios": return horarios(p);
     case "ingresos": return ingresos(p);
+    case "control": return controlDiario(p.hasta, p.sucursal);
+    case "cierres_caja": return cierresEntre(p.desde, p.hasta, p.sucursal);
     case "panel": return panelCompleto(p);
   }
 }

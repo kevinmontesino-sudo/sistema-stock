@@ -69,8 +69,8 @@ Limites: 30 pedidos por minuto por llave. Respuestas de error: 401 (llave invali
 
 
 4) COMO LEER LOS NUMEROS (definiciones)
-- lista: valor de las prendas a precio de lista (= precio con transferencia).
-- totalPagado: lo que efectivamente pagaron los clientes: lista con el descuento o recargo de cada medio (efectivo -20%, tarjeta +20%). Incluye lo pagado con notas de credito.
+- lista: valor de las prendas a precio de lista (el precio que figura en la etiqueta como Lista; cada medio de pago lo ajusta con su porcentaje, que esta en la base).
+- totalPagado: lo que efectivamente pagaron los clientes: lista con el descuento o recargo de cada medio (segun el porcentaje de cada medio al momento de la venta). Incluye lo pagado con notas de credito.
 - cobradoEnCaja: plata que entro (transferencia, efectivo y tarjeta). No incluye notas de credito.
 - pagadoConNotas: parte de las compras pagada con notas de credito (no es plata nueva).
 - ajusteMediosDePago: totalPagado menos lista.

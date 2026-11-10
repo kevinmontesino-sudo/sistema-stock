@@ -175,3 +175,58 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 .boton-cobrar { width: 100%; margin-top: 12px; min-height: 60px; font-size: 20px; }
 .caja-hoy { margin-top: 20px; }
 .caja-hoy summary { cursor: pointer; padding: 6px 0; }
+
+/* ---- Informes: filtro, vistas, cifras y graficos (una sola linea de color: el acento) ---- */
+.filtro-informe { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.filtro-informe button.chico.on { background: var(--acento-fondo); border-color: var(--acento); color: var(--acento); font-weight: 600; }
+.fechas-exactas summary { cursor: pointer; font-size: 14px; color: var(--suave); }
+.vistas-informe { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--borde); margin-bottom: 16px; }
+.vistas-informe button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; padding: 10px 16px; font-size: 17px; color: var(--suave); min-height: 44px; }
+.vistas-informe button.activa { color: var(--acento); border-bottom-color: var(--acento); font-weight: 600; }
+.cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.cifra { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 14px 16px; }
+.cifra.grande { grid-column: 1 / -1; padding: 18px 20px; }
+.cifra p { margin: 0; }
+.cifra-titulo { font-size: 14px; color: var(--suave); }
+.cifra-valor { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px !important; }
+.cifra.grande .cifra-valor { font-size: 48px; line-height: 1.1; }
+.cifra-nota { font-size: 13px; color: var(--suave); margin-top: 4px !important; }
+.bloque-informe { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px; margin-top: 16px; }
+.bloque-informe-cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.bloque-informe h2 { margin: 0 0 2px; font-size: 18px; }
+.bloque-informe-cab .aviso { margin: 0; }
+.dos-columnas { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.dos-columnas > .bloque-informe { margin-top: 16px; }
+.mini-titulo { margin: 0 0 4px; font-size: 14px; color: var(--suave); }
+.barras-h { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.barras-h li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: baseline; }
+.barras-h-nombre { min-width: 0; overflow-wrap: anywhere; }
+.barras-h-valor { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; white-space: nowrap; }
+.barras-h-pista { grid-column: 1 / -1; height: 10px; }
+.barras-h-barra { height: 10px; background: var(--acento); border-radius: 0 4px 4px 0; }
+.barras-h-detalle { grid-column: 1 / -1; color: var(--suave); font-size: 13px; }
+.columnas svg { display: block; overflow: visible; }
+.columnas .col { fill: var(--acento); opacity: .85; }
+.columnas .col.viva { opacity: 1; }
+.columnas .eje { stroke: var(--borde); stroke-width: 1; }
+.columnas .grilla { stroke: var(--borde); stroke-width: 1; opacity: .5; }
+.columnas .eje-texto { fill: var(--suave); font-size: 11px; }
+.columnas .valor-max { fill: var(--texto); font-size: 12px; font-weight: 600; }
+.columnas rect:focus-visible { outline: 2px solid var(--acento); }
+.columnas .tip { position: absolute; top: -6px; transform: translate(-50%, -100%); background: var(--texto); color: var(--fondo); padding: 6px 10px; border-radius: 8px; font-size: 13px; white-space: nowrap; pointer-events: none; z-index: 5; }
+.ver-tabla { margin-top: 8px; font-size: 14px; }
+.ver-tabla summary { cursor: pointer; color: var(--suave); }
+
+/* Informe de control: se ve en pantalla como una hoja y se imprime en A4 (la pagina se ajusta desde la pantalla). */
+.solo-impresion.hoja-a4 { display: block; background: #fff; color: #000; padding: 14mm; max-width: 210mm; margin: 0 auto; border: 1px solid var(--borde); font-size: 13px; line-height: 1.4; }
+.hoja-a4 h1, .hoja-a4 h2 { color: #000; margin: 0 0 6px; }
+.hoja-a4 h2 { font-size: 15px; margin-top: 16px; border-bottom: 1px solid #000; padding-bottom: 2px; }
+.hoja-a4 table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.hoja-a4 th, .hoja-a4 td { border: 1px solid #999; padding: 3px 6px; text-align: left; color: #000; background: #fff; }
+.hoja-a4 th { background: #eee; }
+.hoja-a4 .der { text-align: right; }
+.hoja-a4 .mal { font-weight: 700; }
+.hoja-a4 .alertas { border: 2px solid #000; padding: 6px 10px; margin: 8px 0; }
+.hoja-a4 .alertas li { margin: 2px 0; }
+.hoja-a4 .firmas { display: flex; gap: 24px; margin-top: 28px; }
+.hoja-a4 .firmas div { flex: 1; border-top: 1px solid #000; padding-top: 2px; font-size: 11px; }

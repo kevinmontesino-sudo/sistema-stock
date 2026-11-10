@@ -12,20 +12,20 @@ import type { NotaCredito } from "@/lib/util";
 // Fecha fija: si fuera "la hora de ahora", el servidor y el navegador mostrarian horas distintas.
 const ahora = "2026-10-13T12:00:00-03:00";
 const ventaEjemplo: DatosTicket = {
-  codigo: "V9F3A2C7B", fecha: ahora, sucursal: "zelarrayan", subtotal: 47500, ajuste: -5500, total: 42000,
+  codigo: "V9F3A2C7B", fecha: ahora, sucursal: "zelarrayan", subtotal: 58700, ajuste: -13610, total: 45090,
   items: [
-    { sku: "REM000001", nombre: "Remera buenos tiempos", precio: 16000, cant: 2 },
-    { sku: "JEA000001", nombre: "Jean wide leg dama", precio: 15500, cant: 1 },
+    { sku: "REM000001", nombre: "Remera buenos tiempos", precio: 19900, cant: 2 },
+    { sku: "JEA000001", nombre: "Jean wide leg dama", precio: 18900, cant: 1 },
   ],
   pagos: [
-    { medioId: "transferencia", nombre: "Transferencia", pct: 0, monto: 20000, valorLista: 20000 },
-    { medioId: "efectivo", nombre: "Efectivo", pct: -20, monto: 22000, valorLista: 27500 },
+    { medioId: "transferencia", nombre: "Transferencia", pct: -10, monto: 18000, valorLista: 20000 },
+    { medioId: "efectivo", nombre: "Efectivo", pct: -30, monto: 27090, valorLista: 38700 },
   ],
-  recibido: 25000,
+  recibido: 30000,
 };
 const notaEjemplo: NotaCredito = {
-  codigo: "N9A8B7C6D5E", ventaCodigo: "V9F3A2C7B", sucursal: "zelarrayan", creada: ahora, montoInicial: 12800, saldo: 12800, ajustePct: -20, estado: "vigente",
-  items: [{ nombre: "Remera buenos tiempos", cantidad: 1, monto: 12800, falladas: 0 }],
+  codigo: "N9A8B7C6D5E", ventaCodigo: "V9F3A2C7B", sucursal: "zelarrayan", creada: ahora, montoInicial: 13930, saldo: 13930, ajustePct: -30, estado: "vigente",
+  items: [{ nombre: "Remera buenos tiempos", cantidad: 1, monto: 13930, falladas: 0 }],
 };
 
 export default function TicketsPrueba() {

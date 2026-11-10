@@ -1,0 +1,49 @@
+CONECTAR CLAUDE CON EL SISTEMA (informes y promos) - para Cesar y quien use la llave
+
+Que es: mcp-informes.mjs es un "conector". Con el, Claude Desktop puede pedir informes del sistema y cargar promos
+hablandole normal ("que se vendio mas esta semana?", "mañana 3x2 en jeans en White").
+
+LO QUE HACE FALTA
+- Claude Desktop (claude.ai/download)
+- Node 18 o mas nuevo (nodejs.org, boton LTS, instalar con todo por defecto)
+- La llave "xmp_..." que te paso Kevin (es privada: no la pegues en grupos ni mails)
+
+PASOS (una sola vez)
+1. Guardar el archivo mcp-informes.mjs en una carpeta fija que no se borre. Por ejemplo:
+     Mac:     /Users/TU_USUARIO/Documents/xmenosmas/mcp-informes.mjs
+     Windows: C:\xmenosmas\mcp-informes.mjs
+2. Abrir Claude Desktop > Ajustes > Desarrollador > "Editar configuracion". Se abre el archivo claude_desktop_config.json.
+3. Pegar esto (si el archivo ya tiene otras cosas, agregar solo el bloque "xmenosmasprendas" dentro de "mcpServers"):
+
+{
+  "mcpServers": {
+    "xmenosmasprendas": {
+      "command": "node",
+      "args": ["/Users/TU_USUARIO/Documents/xmenosmas/mcp-informes.mjs"],
+      "env": {
+        "SISTEMA_URL": "https://stock-caja-ventas.xmenosmasprendas.com",
+        "SISTEMA_TOKEN": "xmp_LA_LLAVE"
+      }
+    }
+  }
+}
+
+   - En "args" va la ruta exacta donde guardaste el archivo. En Windows se escribe con barras dobles:
+     "C:\\xmenosmas\\mcp-informes.mjs"
+   - En SISTEMA_TOKEN va la llave completa.
+4. Guardar, cerrar Claude Desktop del todo y volver a abrirlo.
+5. Probar: "que promos hay activas?" o "cual fue la prenda mas vendida esta semana?".
+
+SI YA TENIAS UNA VERSION VIEJA DEL CONECTOR
+Reemplaza el archivo mcp-informes.mjs por este (misma carpeta, mismo nombre) y reinicia Claude Desktop. No hay que tocar la configuracion.
+
+SI USAS CLAUDE CODE (terminal) EN VEZ DE CLAUDE DESKTOP
+   claude mcp add xmenosmasprendas -e SISTEMA_URL=https://stock-caja-ventas.xmenosmasprendas.com -e SISTEMA_TOKEN=xmp_LA_LLAVE -- node /RUTA/A/mcp-informes.mjs
+
+SI CONECTAN OTRA COSA (por ejemplo el catalogo web)
+No necesita este archivo: llama directo a la API con el encabezado  Authorization: Bearer xmp_LA_LLAVE
+Detalle y ejemplos en INSTRUCCIONES_API.txt (en esta misma carpeta).
+
+PERMISOS
+Con una llave comun, Claude solo puede LEER informes. Para que pueda crear o sacar promos, Kevin toca "Permitir promos"
+al lado de la llave en Oficina > Accesos API (la llave sigue siendo la misma).

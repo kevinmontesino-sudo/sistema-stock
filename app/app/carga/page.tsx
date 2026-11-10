@@ -23,7 +23,7 @@ export default function Carga() {
   const [medios, setMedios] = useState<MedioPago[]>([]);
   const [catManual, setCatManual] = useState<string | undefined>();
   const [precio, setPrecio] = useState("");
-  // El precio se puede escribir como lista o como efectivo: el otro se calcula solo (efectivo ÷ 0,8 = lista; el 0,8 sale de la base).
+  // El precio se puede escribir como lista o como efectivo: el otro se calcula solo (efectivo ÷ (1 + porcentaje del efectivo) = lista; el porcentaje sale de la base).
   const [escribeEfectivo, setEscribeEfectivo] = useState(false);
   const [cantidad, setCantidad] = useState("1");
   const [foto, setFoto] = useState<string | undefined>();
@@ -266,13 +266,13 @@ export default function Carga() {
                 <span style={{ fontSize: 14 }}>Lista</span>
                 <input ref={precioRef} type="number" inputMode="numeric" min={0} step={500}
                   value={escribeEfectivo ? (precioNum || "") : precio}
-                  onChange={(e) => { setEscribeEfectivo(false); setPrecio(e.target.value); }} onKeyDown={enter} placeholder="17500" style={{ width: 120 }} />
+                  onChange={(e) => { setEscribeEfectivo(false); setPrecio(e.target.value); }} onKeyDown={enter} placeholder={String(empresa.preciosFrecuentes[1] ?? "")} style={{ width: 120 }} />
               </label>
               <label className="fila" style={{ gap: 6 }}>
                 <span style={{ fontSize: 14 }}>Efectivo</span>
                 <input type="number" inputMode="numeric" min={0} step={500} disabled={ajusteEfectivo === undefined}
                   value={escribeEfectivo ? precio : (precioNum ? efectivoResultante : "")}
-                  onChange={(e) => { setEscribeEfectivo(true); setPrecio(e.target.value); }} onKeyDown={enter} placeholder="14000" style={{ width: 120 }} />
+                  onChange={(e) => { setEscribeEfectivo(true); setPrecio(e.target.value); }} onKeyDown={enter} placeholder={ajusteEfectivo === undefined ? "" : String(precioMedio(empresa.preciosFrecuentes[1] ?? 0, ajusteEfectivo))} style={{ width: 120 }} />
               </label>
             </div>
             <div className="fila" style={{ marginTop: 6 }}>
@@ -282,7 +282,7 @@ export default function Carga() {
             </div>
             {precioNum > 0 && (
               <p className="nota">
-                Lista <strong>{pesos(precioNum)}</strong> · {preciosDe(precioNum, medios).map((p) => textoPrecioEtiqueta(p)).join(" · ")}
+                Etiqueta: <strong>{preciosDe(precioNum, medios).map((p) => textoPrecioEtiqueta(p)).join(" · ")}</strong>
               </p>
             )}
             {escribeEfectivo && precioNum > 0 && efectivoResultante !== escrito && (
@@ -330,10 +330,10 @@ export default function Carga() {
           </button>
           {avanzado && <>
           <button style={{ width: "100%", marginTop: 8 }} onClick={() => setAImprimir((cola) => [...cola,
-            { sku: "REM000001", nombre: "Remera oversize lisa negra", precios: preciosDe(17500, medios) },
-            { sku: "JEA000002", nombre: "Jean wide leg dama", precios: preciosDe(30000, medios) },
-            { sku: "BUZ000003", nombre: "Buzo canguro friza gris", precios: preciosDe(24900, medios) },
-            { sku: "VES000004", nombre: "Vestido largo estampado", precios: preciosDe(9000, medios) },
+            { sku: "REM000001", nombre: "Remera oversize lisa negra", precios: preciosDe(21900, medios) },
+            { sku: "JEA000002", nombre: "Jean wide leg dama", precios: preciosDe(36900, medios) },
+            { sku: "BUZ000003", nombre: "Buzo canguro friza gris", precios: preciosDe(29900, medios) },
+            { sku: "VES000004", nombre: "Vestido largo estampado", precios: preciosDe(10900, medios) },
           ])}>
             Imprimir 4 etiquetas de prueba (no guarda nada)
           </button>

@@ -45,7 +45,7 @@ export async function GET(req: Request) {
           m: "nxm: cuántas paga (menor que n). 3x2 => m=2",
           pct: `porcentaje: descuento sobre el precio de lista (0,5 a ${TOPE_PCT})`,
           precio: "precio: pesos por prenda, sin centavos (si una prenda vale menos, queda a su precio)",
-          descuento_efectivo: "opcional true/false: si además corre el descuento de efectivo (-20%). Por defecto true en nxm y porcentaje, false en precio. La tarjeta siempre lleva su recargo",
+          descuento_efectivo: "opcional true/false: si además corren los descuentos por medio de pago (efectivo y transferencia; los porcentajes están en la base). Con false es precio único: la prenda se paga al precio de la promo con cualquier medio. Por defecto true en nxm y porcentaje, false en precio",
           sin_cambio: "opcional true/false (por defecto false): las prendas que entran en la promo quedan SIN CAMBIO (feria de saldos)",
           sucursales: `opcional, lista de: ${empresa.sucursales.map((s) => s.id).join(", ")}. Vacía o sin poner = todos los locales`,
           tipos: "opcional, códigos de categoría (ver 'categorias'). Vacía = todas las prendas",

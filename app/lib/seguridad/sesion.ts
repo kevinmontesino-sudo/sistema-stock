@@ -12,7 +12,8 @@ const HORA = 3600;
 // Duracion maxima y tiempo sin actividad, en segundos. Los administradores tienen sesiones mas cortas.
 const POLITICA = {
   admin: { absoluta: 8 * HORA, inactividad: 2 * HORA },
-  otros: { absoluta: 14 * HORA, inactividad: 6 * HORA },
+  // Cuentas de local: la PC del mostrador queda logueada (cookie persistente de 30 dias; un mes aunque no se use).
+  otros: { absoluta: 30 * 24 * HORA, inactividad: 30 * 24 * HORA },
   pendiente: { absoluta: 10 * 60, inactividad: 10 * 60 }, // entre la clave y el codigo de doble verificacion
 };
 export type Fase = "2fa_pendiente" | "2fa_alta" | "activa";

@@ -1,5 +1,6 @@
 "use server";
 import * as repo from "@/lib/repo";
+import * as cierre from "@/lib/cierre";
 import { nombreSucursal, preciosDe, type Reparto } from "@/lib/util";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
 import { imprimirEtiquetasEnServidor } from "@/lib/impresoraServidor";
@@ -276,9 +277,37 @@ export async function imprimirEtiquetasServidor(cola: DatosEtiqueta[]) {
       sku: txt(e?.sku).slice(0, 40),
       nombre: txt(e?.nombre).slice(0, 120),
       marco: !!e?.marco,
-      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 4).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0, ...(ent(p?.cuotas) > 0 ? { cuotas: Math.min(ent(p.cuotas), 24) } : {}) })),
+      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 4).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0, ...(ent(p?.cuotas) > 0 ? { cuotas: Math.min(ent(p.cuotas), 24) } : {}), ...(p?.lista ? { lista: true } : {}), ...(p?.destacado ? { destacado: true } : {}) })),
     }));
     await imprimirEtiquetasEnServidor(limpia);
     return { enviadas: limpia.length };
   });
+}
+
+// ---- Cierre de caja ----
+// Lo que el sistema cobró en el local ese día (y el cierre, si ya se hizo). Cada local ve solo el suyo.
+export async function datosCierre(sucursal: string, dia: string) {
+  return seguro("vender", async (u) => {
+    const d = txt(dia) || (await cierre.hoyAR());
+    return { hoy: await cierre.hoyAR(), resumen: await cierre.resumenDia(suc(u, txt(sucursal)), d) };
+  });
+}
+
+export async function cerrarCajaAccion(sucursal: string, dia: string, d: { fondoInicial: unknown; retiros: unknown; retirosMotivo: unknown; efectivoContado: unknown; otrosContados: unknown; observaciones: unknown }) {
+  return seguro("vender", async (u) => {
+    const otros: Record<string, number> = {};
+    if (d.otrosContados && typeof d.otrosContados === "object") for (const [k, v] of Object.entries(d.otrosContados)) if (v !== "" && v !== null && v !== undefined) otros[k] = ent(v);
+    const c = await cierre.cerrarCaja(suc(u, txt(sucursal)), txt(dia), {
+      fondoInicial: ent(d.fondoInicial || 0), retiros: ent(d.retiros || 0), retirosMotivo: txt(d.retirosMotivo),
+      efectivoContado: d.efectivoContado === "" || d.efectivoContado === null || d.efectivoContado === undefined ? (undefined as unknown as number) : ent(d.efectivoContado),
+      otrosContados: otros, observaciones: txt(d.observaciones),
+    }, { id: u.id, nombre: u.nombre });
+    await auditar("caja_cerrada", { sucursal: c.sucursal, dia: c.dia, efectivoEsperado: c.efectivoEsperado, efectivoContado: c.efectivoContado, diferencia: c.diferencia, ventas: c.ventas });
+    return { cierre: c };
+  });
+}
+
+// Informe de control del día (solo administradores): lo imprime la oficina en A4.
+export async function controlDelDia(dia: string) {
+  return seguro("admin", async () => ({ control: await cierre.controlDiario(txt(dia) || (await cierre.hoyAR())) }));
 }

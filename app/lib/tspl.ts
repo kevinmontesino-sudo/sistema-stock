@@ -1,10 +1,11 @@
 import JsBarcode from "jsbarcode";
 import { empresa } from "./empresa.config";
+import { textoPrecioEtiqueta } from "./util";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
 
 // La impresora es de 203 dpi: 8 puntos por milimetro. Una etiqueta de 50x30 mm son 400x240 puntos.
 const PUNTOS_MM = 8;
-const ANCHO_FUENTE: Record<string, number> = { "2": 12, "3": 16 };
+const ANCHO_FUENTE: Record<string, number> = { "2": 12, "3": 16, "4": 24 };
 
 const soloAscii = (s: string) =>
   s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "").replace(/"/g, "'").trim();
@@ -64,12 +65,37 @@ export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
   const y = doble ? 82 : 110;
   if (doble) L.push(`TEXT ${margen},${y},"2",0,1,1,"${sku}  ${lineas[0]}"`, `TEXT ${margen},${y + 22},"2",0,1,1,"${lineas[1]}"`);
   else L.push(`TEXT ${margen},${y},"2",0,1,1,"${lineas[0]}"`);
-  const yPrecios = doble ? 130 : 134;
-  e.precios.slice(0, 3).forEach((p, i) => {
-    const t = soloAscii(p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`);
-    const fuente = t.length * ANCHO_FUENTE["3"] <= ancho - 2 * margen ? "3" : "2";
-    L.push(`TEXT ${margen},${yPrecios + i * 26},"${fuente}",0,1,1,"${t}"`);
-  });
+  // Precios (50x30 mm = 400x240 puntos). Arriba la LISTA en letra chica con las cuotas ("Lista $36.900  3x$12.300"), debajo los medios
+  // con descuento en letra mediana y el ultimo (efectivo) destacado: etiqueta en fuente 3 y el precio en fuente 4 (24x32 puntos).
+  // Alturas de fuente: 2 = 20, 3 = 24, 4 = 32. Con el nombre en una linea los precios empiezan en 136 y terminan en 222; con dos lineas
+  // empiezan en 130 y terminan en 212 (la etiqueta mide 240). Como mucho entran 3 lineas.
+  const libre = ancho - 2 * margen;
+  const tope = doble ? 130 : 136;
+  const lineasPrecio = e.precios.slice(0, 3);
+  let y2 = tope;
+  for (const p of lineasPrecio) {
+    if (p.lista) {
+      // Fuente 2 (12 puntos por caracter): "Lista $126.900  3x$42.300" son 26 caracteres = 312 de 368 disponibles.
+      L.push(`TEXT ${margen},${y2},"2",0,1,1,"${soloAscii(textoPrecioEtiqueta(p))}"`);
+      y2 += 24;
+      continue;
+    }
+    const nombreP = soloAscii(p.nombre);
+    const valorP = pesos(p.valor);
+    const hueco = 8; // espacio entre la etiqueta y el precio
+    if (p.destacado && (nombreP.length * ANCHO_FUENTE["3"] + hueco + valorP.length * ANCHO_FUENTE["4"]) <= libre) {
+      // La etiqueta chica queda alineada con la base del precio grande (32 - 24 = 8 puntos mas abajo).
+      L.push(`TEXT ${margen},${y2 + 8},"3",0,1,1,"${nombreP}"`);
+      L.push(`TEXT ${margen + nombreP.length * ANCHO_FUENTE["3"] + hueco},${y2},"4",0,1,1,"${valorP}"`);
+      y2 += 36;
+    } else {
+      const t = soloAscii(`${p.nombre} ${valorP}`);
+      // Si en fuente 3 no entra (nombre de medio muy largo), baja a la 2.
+      const fuente = t.length * ANCHO_FUENTE["3"] <= libre ? "3" : "2";
+      L.push(`TEXT ${margen},${y2},"${fuente}",0,1,1,"${t}"`);
+      y2 += 28;
+    }
+  }
   L.push(`PRINT ${Math.max(1, copias)},1`);
   return L.join("\r\n") + "\r\n";
 }

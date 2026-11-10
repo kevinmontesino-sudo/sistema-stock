@@ -58,7 +58,7 @@ export default function Promos() {
   const alternar = (lista: string[], v: string) => (lista.includes(v) ? lista.filter((x) => x !== v) : [...lista, v]);
   function elegir(id: string) {
     const p = PLANTILLAS.find((x) => x.id === id)!;
-    // Por defecto: el efectivo corre encima de NxM y %, pero no en precios de feria o mayorista.
+    // Por defecto: los descuentos por medio de pago corren encima de NxM y %, pero no en precios de feria o mayorista.
     setForm((f) => ({ ...f, plantilla: id, n: p.n ?? (p.minimo ? 12 : f.n), m: p.m ?? f.m, efectivo: p.tipo !== "precio" }));
   }
 
@@ -164,7 +164,7 @@ export default function Promos() {
         </div>
         <label className="fila" style={{ gap: 8 }}>
           <input type="checkbox" checked={form.efectivo} onChange={(e) => setForm({ ...form, efectivo: e.target.checked })} />
-          <span>Además corre el descuento de efectivo (−20%). <span className="aviso">La tarjeta siempre lleva su recargo.</span></span>
+          <span>Además corren los descuentos por medio de pago (efectivo y transferencia). <span className="aviso">Sin tildar es precio único: se paga lo que dice la promo con cualquier medio.</span></span>
         </label>
         <label className="fila" style={{ gap: 8 }}>
           <input type="checkbox" checked={form.sinCambio} onChange={(e) => setForm({ ...form, sinCambio: e.target.checked })} />

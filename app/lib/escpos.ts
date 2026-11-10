@@ -2,6 +2,7 @@ import { empresa } from "./empresa.config";
 import { lineasTicket } from "./ticketLineas";
 import { DIAS_DEVOLUCION, nombreSucursal, pesos, type NotaCredito } from "./util";
 import type { DatosTicket } from "@/components/Ticket";
+import type { CierreCaja, MedioDia } from "./cierre";
 
 // Arma el ticket en ESC/POS (el lenguaje de las impresoras de rollo Epson y compatibles) para mandarlo directo con el agente de
 // impresion: sin ventana, sin tamano de hoja y con el corte justo. Es el mismo contenido que components/Ticket.tsx y TicketNota.tsx.
@@ -127,12 +128,12 @@ export async function ticketVentaEscpos(venta: DatosTicket) {
   else r.izqDer(`${cantidad} prendas · subtotal lista`, pesos(venta.subtotal));
   if (venta.promo) r.izqDer(venta.promo.nombre, `-${pesos(promo)}`);
   if (venta.ajuste < 0) {
-    r.izqDer(unico ? `${unico.nombre}${textoPct(unico.pct)}` : "Descuento por medios de pago", `-${pesos(Math.abs(venta.ajuste))}`);
+    r.izqDer(unico ? `${unico.nombre}${textoPct(unico.pct, unico.medioId)}` : "Descuento por medios de pago", `-${pesos(Math.abs(venta.ajuste))}`);
   }
   r.izqDer("TOTAL", pesos(venta.total), true);
   if (ahorro > 0) r.izqDer("AHORRASTE", pesos(ahorro));
   r.regla();
-  for (const p of venta.pagos) r.izqDer(`Paga ${p.nombre}${textoPct(p.pct)}`, pesos(p.monto));
+  for (const p of venta.pagos) r.izqDer(`Paga ${p.nombre}${textoPct(p.pct, p.medioId)}`, pesos(p.monto));
   if (venta.recibido !== undefined && efectivo) {
     r.izqDer("Efectivo recibido", pesos(venta.recibido)).izqDer("VUELTO", pesos(venta.recibido - efectivo.monto), true);
   }
@@ -160,5 +161,33 @@ export async function ticketNotaEscpos(nota: NotaCredito) {
     .centro("Presentala en la caja: se descuenta del total de tu compra.").regla()
     .centro("Documento interno").centro("No válido como factura")
     .cortar();
+  return r.bytes();
+}
+
+// Ticket del cierre de caja (rollo): lo que se cobro, lo que se conto y la diferencia. Se guarda en la carpeta del local.
+export async function ticketCierreEscpos(c: CierreCaja, medios: MedioDia[]) {
+  const r = await nuevo();
+  const [a, m, d] = c.dia.split("-");
+  const hora = new Date(c.creado);
+  r.centro(nombreSucursal(c.sucursal)).centro("CIERRE DE CAJA", true).centro(`Día ${d}/${m}/${a}`)
+    .centro(`Cerrado ${dos(hora.getDate())}/${dos(hora.getMonth() + 1)} ${dos(hora.getHours())}:${dos(hora.getMinutes())} por ${c.cerradoPor}`).regla();
+  r.izqDer(`${c.ventas} ventas · ${c.unidades} prendas`, pesos(medios.reduce((s, x) => s + x.monto, 0)), true);
+  for (const x of medios) r.izqDer(`${x.nombre} (${x.ventas})`, pesos(x.monto));
+  if (c.notasEmitidas > 0) r.izqDer(`Notas de crédito emitidas (${c.notasEmitidas})`, pesos(c.notasMonto));
+  r.regla().centro("EFECTIVO", true);
+  r.izqDer("Fondo con que abrió", pesos(c.fondoInicial)).izqDer("+ Cobrado en efectivo", pesos(c.esperado.efectivo ?? 0));
+  if (c.retiros > 0) r.izqDer(`- Retiros: ${c.retirosMotivo ?? ""}`, pesos(c.retiros));
+  r.izqDer("Debería haber", pesos(c.efectivoEsperado)).izqDer("Contado", pesos(c.efectivoContado));
+  r.izqDer(c.diferencia === 0 ? "DIFERENCIA" : c.diferencia > 0 ? "SOBRA" : "FALTA", c.diferencia === 0 ? "$0 · OK" : pesos(Math.abs(c.diferencia)), true);
+  const otros = Object.entries(c.contado).filter(([id]) => id !== "efectivo");
+  if (otros.length) {
+    r.regla().centro("OTROS MEDIOS (lo que contó el local)");
+    for (const [id, v] of otros) {
+      const nombre = medios.find((x) => x.id === id)?.nombre ?? id, esp = c.esperado[id] ?? 0;
+      r.izqDer(`${nombre} contado`, pesos(v)).izqDer(`  sistema ${pesos(esp)}  dif.`, v - esp === 0 ? "$0" : `${v - esp > 0 ? "+" : "-"}${pesos(Math.abs(v - esp))}`);
+    }
+  }
+  if (c.observaciones) r.regla().linea("Obs: " + c.observaciones);
+  r.regla().linea().linea().centro("Firma: ______________________").cortar();
   return r.bytes();
 }

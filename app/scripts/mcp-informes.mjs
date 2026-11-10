@@ -10,7 +10,7 @@ import { createInterface } from "node:readline";
 
 const URL_BASE = (process.env.SISTEMA_URL || "").replace(/\/+$/, "");
 const TOKEN = process.env.SISTEMA_TOKEN || "";
-const TIPOS = ["resumen", "periodo", "prendas_mas_vendidas", "prendas_menos_vendidas", "notas_credito", "stock", "horarios", "ingresos", "panel"];
+const TIPOS = ["resumen", "periodo", "prendas_mas_vendidas", "prendas_menos_vendidas", "notas_credito", "stock", "horarios", "ingresos", "control", "cierres_caja", "panel"];
 
 const herramientas = [
   {
@@ -18,7 +18,7 @@ const herramientas = [
     description:
       "Consulta un informe de ventas/stock de X Menos Mas Prendas (solo lectura). Tipos: resumen (ventas, total pagado, cobrado en caja, ticket promedio y medios de pago por sucursal), " +
       "periodo (evolucion por dia/semana/mes), prendas_mas_vendidas (ranking), prendas_menos_vendidas (rotacion), notas_credito (devoluciones y vales), stock (stock actual valorizado), " +
-      "horarios (dias y horas de venta), ingresos (mercaderia cargada y enviada), panel (todo junto). Fechas en formato AAAA-MM-DD; sin fechas = ultimos 30 dias.",
+      "horarios (dias y horas de venta), ingresos (mercaderia cargada y enviada), control (informe de control de UN dia: poner hasta=ese dia; cierres de caja, diferencias y alertas, para imprimir), cierres_caja (cierres del periodo), panel (todo junto). Fechas en formato AAAA-MM-DD; sin fechas = ultimos 30 dias.",
     inputSchema: {
       type: "object",
       properties: {
@@ -56,7 +56,7 @@ const herramientas = [
         m: { type: "integer", minimum: 1, maximum: 9, description: "nxm: cuantas paga (menor que n)." },
         pct: { type: "number", minimum: 0.5, maximum: 50, description: "porcentaje: descuento." },
         precio: { type: "integer", minimum: 1, description: "precio: pesos por prenda." },
-        descuento_efectivo: { type: "boolean", description: "Si ademas corre el -20% de efectivo. Por defecto true en nxm/porcentaje, false en precio." },
+        descuento_efectivo: { type: "boolean", description: "Si ademas corren los descuentos por medio de pago (efectivo y transferencia). false = precio unico: se paga el precio de la promo con cualquier medio. Por defecto true en nxm/porcentaje, false en precio." },
         sin_cambio: { type: "boolean", description: "true = las prendas de la promo quedan SIN CAMBIO (feria de saldos)." },
         sucursales: { type: "array", items: { type: "string", enum: ["deposito", "zelarrayan", "white", "sanlorenzo"] }, description: "Locales donde vale. Vacio = todos." },
         tipos: { type: "array", items: { type: "string" }, description: "Codigos de categoria (ver ver_promos). Vacio = todas las prendas." },

@@ -13,7 +13,11 @@
     "demo:borrar": "node --env-file=.env.local scripts/demo-borrar.mjs",
     "usuario": "node --env-file=.env.local scripts/usuario.mjs",
     "usuario:prod": "node --env-file=.env.prod.local scripts/usuario.mjs",
-    "respaldo:prod": "node --env-file=.env.prod.local scripts/respaldo.mjs"
+    "respaldo:prod": "node --env-file=.env.prod.local scripts/respaldo.mjs",
+    "staging:refrescar": "bash scripts/staging-refrescar.sh",
+    "staging": "bash scripts/staging.sh",
+    "staging:precios": "bash scripts/staging-precios.sh",
+    "staging:probar": "node --env-file=.env.staging.local \"$(npx --yes -p tsx which tsx)\" scripts/staging-probar.mts"
   },
   "dependencies": {
     "@emnapi/core": "^1.11.3",

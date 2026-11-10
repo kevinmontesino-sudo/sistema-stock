@@ -117,13 +117,13 @@ Principio: **ordenar por tipo y cargar con el teclado, sin tocar el mouse.** Com
 
 ### Precio y medio de pago
 - Cada producto tiene **un solo precio: el de lista**. Es el que se carga al ingresar la prenda y el que va en la etiqueta.
-- **El precio de lista equivale a pagar con transferencia.**
+- **Estructura vigente hasta el cambio (ver sección 54):** el precio de lista equivale a pagar con transferencia. **Estructura nueva (en prueba, sección 54):** la lista es el precio de TARJETA (0%) y la transferencia y el efectivo llevan descuento (por defecto −10% y −30%). Los porcentajes salen siempre de la base (`medios_pago`).
 
-| Medio de pago | Ajuste sobre el precio de lista |
-|---|---|
-| Transferencia | 0% (precio de lista) |
-| Efectivo | -20% |
-| Tarjeta | +20% |
+| Medio de pago | Hoy (vigente) | Estructura nueva (sección 54) |
+|---|---|---|
+| Transferencia | 0% (precio de lista) | -10% |
+| Efectivo | -20% | -30% |
+| Tarjeta | +20% | 0% (precio de lista) |
 
 - Los porcentajes se configuran **una vez en un panel de administracion** (solo rol admin). No se cargan por producto.
 - Cada venta **guarda los porcentajes y promos que se usaron ese dia**, asi cambiarlos despues no altera tickets ni reportes viejos.
@@ -138,7 +138,7 @@ Regla del NxM: se ordenan las prendas elegibles de mayor a menor precio y se arm
 ### Orden de calculo (propuesto)
 1. Subtotal a precio de lista.
 2. Se aplica la promo (descuento o NxM) sobre los precios de lista.
-3. Se aplica el ajuste del medio de pago (-20%, 0% o +20%) sobre el resultado.
+3. Se aplica el ajuste del medio de pago (el porcentaje de la tabla `medios_pago`) sobre el resultado.
 4. Redondeo del total final (por definir).
 
 Ejemplo: 3 prendas de $17.500, $30.000 y $17.500 (lista $65.000) con 3x2:
@@ -648,3 +648,27 @@ Objetivo: UN instalador por sistema operativo ("XMM Caja": .dmg/.pkg para Mac, .
 - En la caja, la gente va "pickeando": se escanea el QR plastificado del precio de cada prenda que se lleva, y la venta queda registrada con ese precio.
 - **Propuesta (5/11):** "producto especial" con stock infinito (`productos.sin_stock`) y, para la feria por kilo, `por_kilo` (la caja pide el peso y cobra peso × $/kg). Los precios únicos y temáticos ya se resuelven con promos de tipo "precio".
 - A definir: si las ventas de feria se cuentan aparte en Informes, si aplican promos y medios de pago igual, si se puede devolver (y contra qué stock), y en qué sucursal/caja se registra la feria.
+
+## 54. Nueva estructura de precios (prueba en staging) — 10/11
+
+**Qué cambia (parámetros por defecto = estructura recomendada; Kevin todavía no eligió, todo se puede cambiar):** `productos.precio_lista` pasa a ser el precio de **tarjeta** = lista actual × 1,20, redondeada hacia arriba a terminación 900 (`fin900`; también `centena` o `exacto`). Tarjeta 0%, transferencia −10%, efectivo −30%. Efectivo y transferencia **no se redondean**: salen de aplicar el % sobre la lista.
+
+**Cómo se corre (solo contra la copia de pruebas, `app/`):**
+- `npm run staging:precios` → ensayo (ROLLBACK): imprime antes/después por prenda, notas, promos y choques del índice único.
+- `npm run staging:precios -- --aplicar` → guarda. Parámetros: `--redondeo=fin900|centena|exacto --factor=1.2 --tarjeta=0 --transferencia=-10 --efectivo=-30 --sufijo=AAAAMM`.
+- `npm run staging:precios -- --revertir` → vuelve todo atrás (si hubo ventas después del cambio pide `--forzar`).
+- El SQL es `db/cambios/precios-lista-tarjeta.sql` (NO es una migración numerada; no corre solo al refrescar). Para producción habría que correrlo a mano con `psql -v modo=aplicar ...` con el usuario dueño de las tablas (stock_app), fuera de horario de venta.
+
+**Qué hace el script (una transacción):** actualiza precios (suelta y recrea `productos_unico_activo` y avisa choques; en `--aplicar` frena si hay); cambia los % de `medios_pago` (y ensancha `ajuste_pct` a `numeric(8,4)` en medios_pago, venta_pagos y ventas solo si hace falta); convierte las **notas de crédito vigentes**: `ajuste' = ((1 + ajuste/100) / 1,2 − 1) × 100` (la nota sigue cubriendo la misma prenda; usa `app.mantenimiento = 'on'` por el trigger); multiplica por 1,2 las **promos de tipo precio vigentes con descuento de efectivo** (las de precio único no cambian); guarda respaldos `respaldo_precios_AAAAMM`, `respaldo_notas_AAAAMM`, `respaldo_promos_AAAAMM`; escribe la fila `cambio_estructura_precios` en auditoría y una fila en la tabla `cambios_lista` (fecha de corte, factor, % anteriores).
+
+**Fecha de corte (devoluciones):** `repo.corteDeLista()` lee la última fila de `cambios_lista` sin revertir (si no hay, usa `empresa.cambioLista.fecha`; sin fecha no convierte). `emitirNota` guarda `ajuste_pct ÷ factor` cuando la venta es anterior al corte; el monto de la nota (plata pagada) no cambia. La fecha exacta es la del instante del COMMIT, no solo el día: las ventas del mismo día anteriores al cambio también se convierten.
+
+**Etiqueta (50×30 mm = 400×240 puntos):** línea 1 (fuente 2, 12 pt/letra): `Lista $36.900 · 3x$12.300`; línea 2 (fuente 3): `Transferencia $33.210`; línea 3: `Efectivo` (fuente 3) + precio en fuente 4 (24×32) destacado. Con nombre en una línea los precios van de y=136 a 222; con dos líneas de y=130 a 212. El BITMAP blanco inicial y la altura de las barras no se tocaron. Config: `etiquetaLista` y `etiquetaMedios` en `empresa.config.ts`.
+
+**Promos sin descuento de efectivo (decisión d):** sin cambios en `mediosParaPromo`. Ya pone en 0% **todos** los medios con descuento (efectivo y transferencia), así que la promo es de precio único: nadie paga la lista por efectivo mientras otro paga menos con transferencia. Solo se cambiaron los textos ("precio único").
+
+**Textos:** los % se muestran con máximo 1 decimal (`-33,3%`); las notas de crédito pagando no muestran porcentaje. **Antes de subir el código a producción** conviene mantener `etiquetaLista.medio` en `"transferencia"` y `preciosFrecuentes` en los valores viejos hasta el día del cambio (hoy están puestos para la estructura nueva).
+
+**Cómo revertir:** `npm run staging:precios -- --revertir`. Los respaldos quedan como `respaldo_*_AAAAMM_revDDHHMMSS`. Las columnas ensanchadas no se vuelven a achicar (es inofensivo).
+
+**Pruebas:** `npm run staging:probar` sin porcentajes fijos (los lee de la base) más casos de la estructura nueva: venta en cada medio, nota vieja convertida usada en una compra, devolución anterior al corte, promo de precio ajustada, TSPL y PDF de etiqueta (dentro de 400×240 y sin encimarse).

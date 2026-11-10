@@ -23,11 +23,19 @@ export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; motivo: st
 export const normalizar = (s: string) =>
   s.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
 
-// Texto de una linea de precio de la etiqueta: "Efectivo: $ 14.000" o "3 cuotas de $ 6.400".
+// Texto de una linea de precio de la etiqueta (pesos pegados al signo, para que entre en 50 mm):
+// "Lista $36.900 · 3x$12.300" (la linea de la lista, con las cuotas) o "Efectivo $25.830" (un medio con descuento).
 export const textoPrecioEtiqueta = (p: { nombre: string; valor: number; cuotas?: number }) =>
-  p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`;
+  `${p.nombre} ${pesosCorto(p.valor)}${p.cuotas ? ` · ${p.cuotas}x${pesosCorto(Math.round(p.valor / p.cuotas))}` : ""}`;
 
 export const pesos = (n: number) => "$ " + n.toLocaleString("es-AR");
+export const pesosCorto = (n: number) => "$" + n.toLocaleString("es-AR");
+
+// Porcentaje para mostrar, sin signo y sin decimales feos: 30 -> "30%", 33.3333 -> "33,3%", 16.6667 -> "16,7%".
+export const pctTexto = (pct: number) => {
+  const r = Math.round(Math.abs(pct) * 10) / 10;
+  return `${String(r).replace(".", ",")}%`;
+};
 
 export function fechaCorta(iso: string) {
   const d = new Date(iso);
@@ -51,7 +59,7 @@ export function tipoDesdeNombre(nombre: string, tipos: Tipo[]): Tipo | undefined
 }
 
 export const nombreTipo = (codigo: string, tipos: Tipo[]) => tipos.find((t) => t.codigo === codigo)?.nombre ?? codigo;
-// Precio segun medio de pago: transferencia = lista (0%), efectivo = -20%, etc. El porcentaje sale de la base.
+// Precio segun medio de pago: lista x (1 + porcentaje del medio). Los porcentajes salen siempre de la tabla medios_pago.
 export const precioMedio = (precio: number, ajustePct: number) => Math.round(precio * (1 + ajustePct / 100));
 
 export const nombreSucursal = (id: string | null) => empresa.sucursales.find((s) => s.id === id)?.nombre ?? "—";
@@ -145,15 +153,16 @@ export function repartoPorPorcentaje(stock: number, pct: Record<string, number>)
   return Object.fromEntries(Object.entries(out).filter(([, n]) => n > 0));
 }
 
-// Precios que se imprimen: transferencia (= lista) y efectivo, con el porcentaje que figura en la base.
+// Lineas de precio de la etiqueta: primero la LISTA (con las cuotas) y debajo los medios con descuento, en pesos
+// (empresa.etiquetaLista / etiquetaMedios; los porcentajes salen de la tabla medios_pago). El ultimo medio sale destacado.
 export function preciosDe(precio: number, medios: MedioPago[]): PrecioEtiqueta[] {
-  const p: PrecioEtiqueta[] = empresa.etiquetaMedios.flatMap((id) => {
+  const { medio, cuotas } = empresa.etiquetaLista;
+  const ml = medios.find((x) => x.id === medio);
+  const p: PrecioEtiqueta[] = [{ nombre: "Lista", valor: ml ? precioMedio(precio, ml.ajustePct) : precio, lista: true, ...(cuotas > 0 ? { cuotas } : {}) }];
+  const otros = empresa.etiquetaMedios.flatMap((id) => {
     const m = medios.find((x) => x.id === id);
     return m ? [{ nombre: m.nombre, valor: precioMedio(precio, m.ajustePct) }] : [];
   });
-  // Cuotas: precio con el recargo de la tarjeta dividido en la cantidad de cuotas (redondeado al peso).
-  const { medio, cantidad } = empresa.etiquetaCuotas;
-  const mc = medios.find((x) => x.id === medio);
-  if (mc && cantidad > 0) p.push({ nombre: `${cantidad} cuotas`, valor: Math.round(precioMedio(precio, mc.ajustePct) / cantidad), cuotas: cantidad } );
-  return p.length ? p : [{ nombre: "Precio", valor: precio }];
+  otros.forEach((o, i) => p.push(i === otros.length - 1 ? { ...o, destacado: true } : o));
+  return p;
 }

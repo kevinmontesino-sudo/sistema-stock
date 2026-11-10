@@ -6,6 +6,9 @@ import { permisosDe, sucursalFija } from "@/lib/seguridad/permisos";
 import { usuarioActual } from "@/lib/seguridad/sesion";
 import "./globals.css";
 
+// Copia de pruebas (staging): se compila con NEXT_PUBLIC_ENTORNO=pruebas (npm run staging). En produccion no esta y no se ve nada.
+const PRUEBAS = process.env.NEXT_PUBLIC_ENTORNO === "pruebas";
+
 export const metadata: Metadata = {
   title: "Sistema de stock",
   description: "Control de mercadería y movimientos entre sucursales",
@@ -25,6 +28,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       } as React.CSSProperties}
     >
       <body>
+        {PRUEBAS && (
+          <div role="alert" className="no-print" style={{ background: "#c62828", color: "#fff", textAlign: "center", fontWeight: 700, padding: "6px 12px", letterSpacing: "0.03em" }}>
+            COPIA DE PRUEBAS — no es el sistema real. Lo que hagas acá no cuenta.
+          </div>
+        )}
         <SesionProvider valor={sesion}>
           <Cabecera />
           <main>{children}</main>

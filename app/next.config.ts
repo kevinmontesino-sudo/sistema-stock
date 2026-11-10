@@ -18,6 +18,8 @@ const csp = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // La copia de pruebas (npm run staging) compila en otra carpeta para no pisar el build normal. Sin la variable: .next como siempre.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   async headers() {
     return [
       {

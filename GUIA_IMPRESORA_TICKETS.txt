@@ -28,7 +28,7 @@ PASO 3: PRUEBA SIN VENDER NADA
 PASO 4: PRUEBA CON UNA VENTA REAL (usar una prenda de prueba y borrarla despues)
   1. Vender > Venta: escanear la prenda, elegir el medio de pago y Cobrar. Tildar "Imprimir el ticket automaticamente
      al cobrar (en esta PC)": esa opcion se guarda en esa PC.
-  2. Cobrar en EFECTIVO: el ticket muestra el descuento (-20%). Cobrar con TARJETA: el ticket NO muestra ningun recargo,
+  2. Cobrar en EFECTIVO: el ticket muestra el descuento del medio (el porcentaje de la base). Cobrar con TARJETA: el ticket NO muestra ningun recargo,
      los precios ya vienen con el recargo incluido y suman el total.
   3. Vender > Ventas: buscar la venta, tocar "Reimprimir" y despues "Devolver" (escanea o abre el ticket y emite la nota).
 

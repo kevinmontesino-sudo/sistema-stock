@@ -8,7 +8,7 @@ import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, sugerenciaPromo, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
-  calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pesos, precioMedio,
+  calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
   type MedioPago, type NotaCredito, type PagoEntrada, type Producto,
 } from "@/lib/util";
 
@@ -27,7 +27,7 @@ function mensajeSinStock(p: Producto, sucursal: string) {
   const camino = p.enCamino[sucursal] ? ` Hay ${p.enCamino[sucursal]} en camino a este local: recibilos en Distribuir → Recibir.` : "";
   return `${p.nombre} no tiene stock en ${nombreSucursal(sucursal)}.${otras.length ? ` Hay ${otras.join(", ")}.` : ""}${camino}`;
 }
-const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0 ? "+" : "−"}${Math.abs(pct)}%`);
+const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0 ? "+" : "−"}${pctTexto(pct)}`);
 
 export default function VentaPage() {
   const [sucursal] = useSucursal();
@@ -191,7 +191,7 @@ export default function VentaPage() {
   const nombrePromo = especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
   const neto = subtotal - descuento;
   const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promos, itemsPromo, auto.descuento) : null;
-  // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), el efectivo queda a precio de promo.
+  // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), los medios con descuento pasan a 0%: se paga el precio de la promo.
   const mediosVenta = mediosParaPromo(medios, especial ? null : auto.promo);
   const promoAplicada = especial ? null : auto.promo;
 
@@ -359,7 +359,7 @@ export default function VentaPage() {
               <span className="total-venta">{pesos(neto)}</span>
             </div>
             <p style={{ margin: "4px 0 0", fontSize: 18 }}>Ahorra <strong className="vuelto-monto">{pesos(descuento)}</strong> <span className="aviso">· precio de lista {pesos(subtotal)} → con promo {pesos(neto)}</span></p>
-            {promoAplicada && !promoAplicada.descuentoEfectivo && <p className="aviso" style={{ margin: "4px 0 0" }}>Esta promo no lleva el descuento de efectivo: en efectivo paga {pesos(neto)}.</p>}
+            {promoAplicada && !promoAplicada.descuentoEfectivo && <p className="aviso" style={{ margin: "4px 0 0" }}>Esta promo tiene precio único: se paga {pesos(neto)} con cualquier medio (sin los descuentos por medio de pago).</p>}
           </div>
         )}
         {sugerencia && <p className="alerta" style={{ margin: "8px 0 0" }}>💡 {sugerencia.texto}</p>}
@@ -520,7 +520,7 @@ export default function VentaPage() {
               <tr><td className="aviso">Subtotal a precio de lista</td><td className="der">{pesos(ultima.subtotal)}</td></tr>
               {ultima.promo && <tr><td className="aviso">{ultima.promo.nombre}</td><td className="der">−{pesos(ultima.promo.monto)}</td></tr>}
               {ultima.pagos.map((p) => (
-                <tr key={p.medioId}><td className="aviso">Pagó con {p.nombre} ({etiquetaPct(p.pct)}){ultima.pagos.length > 1 ? `, cubre ${pesos(p.valorLista)} de lista` : ""}</td><td className="der">{pesos(p.monto)}</td></tr>
+                <tr key={p.medioId}><td className="aviso">Pagó con {p.nombre}{p.medioId.startsWith("nota:") ? "" : ` (${etiquetaPct(p.pct)})`}{ultima.pagos.length > 1 ? `, cubre ${pesos(p.valorLista)} de lista` : ""}</td><td className="der">{pesos(p.monto)}</td></tr>
               ))}
             </tbody>
           </table>

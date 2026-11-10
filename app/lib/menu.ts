@@ -28,12 +28,14 @@ export const MOMENTOS: Momento[] = [
       { href: "/venta", texto: "Venta", ayuda: "Escanear y cobrar", permiso: "vender" },
       { href: "/ventas", texto: "Ventas", ayuda: "Buscar una venta por día o mes", permiso: "devolver" },
       { href: "/devolucion", texto: "Cambio o devolución", ayuda: "Nota de crédito con el ticket", permiso: "devolver" },
+      { href: "/cierre", texto: "Cierre de caja", ayuda: "Contar la plata y cerrar el día", permiso: "vender" },
     ],
   },
   {
     id: "oficina", titulo: "Oficina", icono: "🏢",
     items: [
       { href: "/admin/informes", texto: "Informes", ayuda: "Ventas, prendas más vendidas, caja", permiso: "admin" },
+      { href: "/admin/control", texto: "Control diario", ayuda: "Cierres de caja y alertas, para imprimir en A4", permiso: "admin" },
       { href: "/admin/usuarios", texto: "Usuarios", ayuda: "Cuentas y contraseñas", permiso: "admin" },
       { href: "/admin/auditoria", texto: "Auditoría", ayuda: "Quién hizo qué", permiso: "admin" },
       { href: "/admin/promos", texto: "Promos", ayuda: "3x2 y descuentos por local y fecha", permiso: "admin" },

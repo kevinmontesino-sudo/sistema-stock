@@ -10,7 +10,7 @@ export type Promo = {
   pct: number | null;     // porcentaje
   precio: number | null;  // precio: $ por prenda
   tipos: string[]; sucursales: string[]; desde: string; hasta: string;
-  descuentoEfectivo: boolean; // si ademas corre el descuento de efectivo (la tarjeta siempre lleva su recargo)
+  descuentoEfectivo: boolean; // si ademas corren los descuentos por medio de pago (efectivo, transferencia); false = precio unico
   sinCambio: boolean;         // las prendas que entran quedan sin cambio
   categorias?: string[];      // nombres de las categorias (para mostrar)
 };
@@ -50,7 +50,7 @@ export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "pr
   } else {
     s = p.n && p.n > 1 ? `Llevando ${p.n} o más prendas${de}, cada una a ${pesos(p.precio ?? 0)}` : `${cats ? cats.charAt(0).toUpperCase() + cats.slice(1) : "Todas las prendas"} a ${pesos(p.precio ?? 0)} c/u`;
   }
-  if (!p.descuentoEfectivo) s += " (sin el descuento de efectivo)";
+  if (!p.descuentoEfectivo) s += " (precio único, sin descuento por medio de pago)";
   if (p.sinCambio) s += " · SIN CAMBIO";
   return s;
 }
@@ -121,7 +121,9 @@ export function sugerenciaPromo(promos: Promo[], items: ItemPromo[], actual: num
 // Descuento especial: porcentaje sobre todo el carrito. Reemplaza a las promos automaticas (no se suman).
 export const descuentoEspecial = (subtotal: number, pct: number) => Math.round((subtotal * pct) / 100);
 
-// Si la promo ganadora no lleva el descuento de efectivo: los medios con descuento pasan a 0% (los recargos quedan igual).
+// Si la promo ganadora no lleva el descuento de efectivo: TODOS los medios con descuento (efectivo y transferencia) pasan a 0% y los recargos
+// (si algun medio tiene) quedan igual. Asi la promo es de precio unico: nunca un medio con descuento sale mas caro que otro. Con la estructura
+// "lista = tarjeta" (tarjeta 0%) eso significa que se paga el precio de la promo con cualquier medio; no hace falta ningun caso especial.
 // Las notas de credito no se tocan: su porcentaje es una conversion de lo que se pago, no un descuento.
 export const mediosParaPromo = (medios: MedioPago[], promo: Pick<Promo, "descuentoEfectivo"> | null) =>
   !promo || promo.descuentoEfectivo ? medios : medios.map((m) => (m.id.startsWith("nota:") || m.ajustePct >= 0 ? m : { ...m, ajustePct: 0 }));

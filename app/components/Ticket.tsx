@@ -56,7 +56,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       )}
       {venta.ajuste < 0 && (
         <div className="linea">
-          <span>{unico ? `${unico.nombre}${textoPct(unico.pct)}` : "Descuento por medios de pago"}</span>
+          <span>{unico ? `${unico.nombre}${textoPct(unico.pct, unico.medioId)}` : "Descuento por medios de pago"}</span>
           <span>{signo(venta.ajuste)}{pesos(Math.abs(venta.ajuste))}</span>
         </div>
       )}
@@ -64,7 +64,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       {ahorro > 0 && <div className="linea"><span><strong>AHORRASTE</strong></span><span><strong>{pesos(ahorro)}</strong></span></div>}
       <hr />
       {venta.pagos.map((p) => (
-        <div key={p.medioId} className="linea"><span>Paga {p.nombre}{textoPct(p.pct)}</span><span>{pesos(p.monto)}</span></div>
+        <div key={p.medioId} className="linea"><span>Paga {p.nombre}{textoPct(p.pct, p.medioId)}</span><span>{pesos(p.monto)}</span></div>
       ))}
       {venta.recibido !== undefined && efectivo && (
         <>

@@ -73,9 +73,12 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
       y -= 2.7 * MM;
       p.drawText(lineasNombre[1], { x: margen, y, size: 7, font: normal });
     }
+    // Lista chica con las cuotas, medios en tamano mediano y el destacado (efectivo) grande. Mide lo mismo que la etiqueta TSPL:
+    // con el nombre en una linea el ultimo precio queda a ~27,6 mm del borde de arriba (la etiqueta mide 30).
     for (const pr of e.precios.slice(0, 3)) {
-      y -= (doble ? 3.5 : 3.7) * MM;
-      p.drawText(recortar(textoPrecioEtiqueta(pr), negrita, 9.5, maxAncho), { x: margen, y, size: 9.5, font: negrita });
+      const tam = pr.lista ? 8.5 : pr.destacado ? 12 : 9.5;
+      y -= (pr.lista ? (doble ? 3.5 : 3.6) : pr.destacado ? (doble ? 4.6 : 4.8) : (doble ? 3.6 : 3.8)) * MM;
+      p.drawText(recortar(textoPrecioEtiqueta(pr), negrita, tam, maxAncho), { x: margen, y, size: tam, font: negrita });
     }
   }
   return doc.save();
