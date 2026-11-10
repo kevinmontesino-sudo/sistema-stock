@@ -277,7 +277,7 @@ export async function imprimirEtiquetasServidor(cola: DatosEtiqueta[]) {
       sku: txt(e?.sku).slice(0, 40),
       nombre: txt(e?.nombre).slice(0, 120),
       marco: !!e?.marco,
-      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 4).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0, ...(ent(p?.cuotas) > 0 ? { cuotas: Math.min(ent(p.cuotas), 24) } : {}), ...(p?.lista ? { lista: true } : {}), ...(p?.destacado ? { destacado: true } : {}) })),
+      precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 4).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0, ...(ent(p?.cuotas) > 0 ? { cuotas: Math.min(ent(p.cuotas), 24) } : {}) })),
     }));
     await imprimirEtiquetasEnServidor(limpia);
     return { enviadas: limpia.length };

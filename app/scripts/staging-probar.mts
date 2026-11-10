@@ -357,10 +357,8 @@ try {
       const t = etiquetaTspl({ sku: A, nombre: c.nombre, precios }, 2).split("\r\n");
       const rotulo = `Etiqueta ${c.precio}`;
       check(`${rotulo}: BITMAP en blanco inicial intacto`, t.some((l) => l.startsWith(`BITMAP 0,0,${W / 8},${H},0,`)));
-      check(`${rotulo}: lista primero y efectivo destacado al final`, !!precios[0].lista && !!precios[precios.length - 1].destacado && precios[precios.length - 1].nombre === mediosBase.find((m) => m.id === "efectivo")?.nombre);
-      igual(`${rotulo}: lista y efectivo en pesos`, [precios[0].valor, precios[precios.length - 1].valor], [pc(c.precio, empresa.etiquetaLista.medio), pc(c.precio, "efectivo")]);
       const txt = t.filter((l) => l.startsWith("TEXT ")).map((l) => l.replace(/^TEXT \d+,\d+,"\d",0,1,1,"/, "").replace(/"$/, "")).join(" | ");
-      check(`${rotulo}: dice Lista, las cuotas y Efectivo`, txt.includes("Lista $") && (empresa.etiquetaLista.cuotas === 0 || txt.includes(`${empresa.etiquetaLista.cuotas}x$`)) && txt.includes("Efectivo"), txt);
+      check(`${rotulo}: dice Transferencia, Efectivo y las cuotas`, txt.includes("Transferencia") && txt.includes("Efectivo") && txt.includes("cuotas"), txt);
       const rects: { n: string; x: number; y: number; w: number; h: number }[] = [];
       for (const l of t) {
         const m = /^TEXT (\d+),(\d+),"(\d)",0,1,1,"(.*)"$/.exec(l);
@@ -378,7 +376,7 @@ try {
     }
     const pdf = await etiquetasPdf(casos.map((c) => ({ sku: A, nombre: c.nombre, precios: preciosDe(c.precio, mediosBase) })));
     igual("Etiquetas en PDF: una pagina por etiqueta", (await PDFDocument.load(pdf)).getPageCount(), casos.length);
-    check("Texto de la vista previa", textoPrecioEtiqueta(preciosDe(36900, mediosBase)[0]).startsWith(`Lista $${pc(36900, empresa.etiquetaLista.medio).toLocaleString("es-AR")}`), textoPrecioEtiqueta(preciosDe(36900, mediosBase)[0]));
+    check("Texto de la vista previa", textoPrecioEtiqueta(preciosDe(36900, mediosBase)[0]).startsWith("Transferencia: $"), textoPrecioEtiqueta(preciosDe(36900, mediosBase)[0]));
   });
 
   // ---- 9. Controles sobre TODA la base (datos reales incluidos) ----

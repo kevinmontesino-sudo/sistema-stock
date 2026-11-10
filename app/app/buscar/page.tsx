@@ -51,7 +51,6 @@ export default function Buscar() {
     obtenerMediosPago().then((r) => vivo && r.ok && setMedios(r.medios));
     return () => { vivo = false; };
   }, []);
-  const transferencia = medios.find((m) => m.id === "transferencia");
   const efectivo = medios.find((m) => m.id === "efectivo");
   const elegido = lista.find((p) => p.sku === sku);
 
@@ -158,7 +157,7 @@ export default function Buscar() {
           <table>
             <thead>
               <tr>
-                <th></th><th>SKU</th><th>Prenda</th><th>Lista</th>{transferencia && <th>Transferencia</th>}{efectivo && <th>Efectivo</th>}
+                <th></th><th>SKU</th><th>Prenda</th><th>Transferencia</th>{efectivo && <th>Efectivo</th>}
                 {empresa.sucursales.map((s) => <th key={s.id} className="der">{s.nombre}</th>)}
                 <th></th>
               </tr>
@@ -170,7 +169,6 @@ export default function Buscar() {
                   <td className="mono">{p.sku}</td>
                   <td>{p.nombre} <span className="interno">· ing {fechaCorta(p.ultimoIngreso)}</span></td>
                   <td>{pesos(p.precio)}</td>
-                  {transferencia && <td>{pesos(precioMedio(p.precio, transferencia.ajustePct))}</td>}
                   {efectivo && <td>{pesos(precioMedio(p.precio, efectivo.ajustePct))}</td>}
                   {empresa.sucursales.map((s) => (
                     <td key={s.id} className="der">

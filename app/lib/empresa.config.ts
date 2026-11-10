@@ -27,11 +27,10 @@ export const empresa = {
   // manual (fecha ISO con zona, ej. "2026-11-10T00:00:00-03:00"). Vacia = sin conversion (estructura anterior).
   cambioLista: { fecha: "", factor: 1.2 },
   skuDigitos: 6,
-  // Etiqueta: arriba "Lista $X · 3x$Y" (la lista = precio de tarjeta, dividida en N cuotas sin interes) y abajo los medios con descuento,
-  // en pesos (los porcentajes salen de la tabla medios_pago). El ultimo medio de la lista sale destacado.
+  // Medios de pago cuyo precio se imprime en la etiqueta (los porcentajes se leen de la tabla medios_pago).
   etiquetaMedios: ["transferencia", "efectivo"],
-  // Medio al que corresponde la lista (la linea "Lista") y cantidad de cuotas ("3x$..."; 0 = sin cuotas).
-  etiquetaLista: { medio: "tarjeta", cuotas: 3 },
+  // Ultima linea de la etiqueta: "3 cuotas de $X" = precio con el recargo de este medio, dividido en N cuotas.
+  etiquetaCuotas: { medio: "tarjeta", cantidad: 3 },
   codigoEtiqueta: "code128" as "code128" | "qr",
   // Medida del rollo de etiquetas, en milímetros. Ajustar a la impresora y rollo reales.
   etiquetaMm: { ancho: 50, alto: 30 },
