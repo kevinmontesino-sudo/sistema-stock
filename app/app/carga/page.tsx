@@ -12,7 +12,7 @@ import { trabajosTspl } from "@/lib/tspl";
 import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, preciosDe, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo, textoPrecioEtiqueta } from "@/lib/util";
 
 type FilaLote = { sku: string; nombre: string; precio: number; precios: PrecioEtiqueta[]; ultimoIngreso: string; n: number; reparto: Reparto };
-type Vista = { sku: string; existe: boolean; existente: { stockTotal: number; ultimoIngreso: string | null } | null; otrosPrecios: number[]; tipo: { codigo: string; nombre: string; nuevo: boolean } };
+type Vista = { clave: string; sku: string; existe: boolean; existente: { stockTotal: number; ultimoIngreso: string | null } | null; otrosPrecios: number[]; tipo: { codigo: string; nombre: string; nuevo: boolean } };
 
 const etiquetasDe = (p: { sku: string; nombre: string; precios: PrecioEtiqueta[] }, n: number): DatosEtiqueta[] =>
   Array.from({ length: n }, () => ({ sku: p.sku, nombre: p.nombre, precios: p.precios }));
@@ -126,7 +126,7 @@ export default function Carga() {
 
   useEffect(() => {
     let vivo = true;
-    vistaPreviaCarga({ categoria: dCategoria, nombre: dNombre, precio: dPrecio, unico: dUnico }).then((r) => vivo && r.ok && setVista(r));
+    vistaPreviaCarga({ categoria: dCategoria, nombre: dNombre, precio: dPrecio, unico: dUnico }).then((r) => vivo && r.ok && setVista({ ...r, clave: [dCategoria, dNombre, dPrecio, dUnico].join("|") }));
     return () => { vivo = false; };
   }, [dCategoria, dNombre, dPrecio, dUnico]);
 
@@ -221,7 +221,9 @@ export default function Carga() {
 
   const enviando = LOCALES.reduce((s, l) => s + (parseInt(reparto[l.id] ?? "") || 0), 0);
   const queda = Math.max(0, (parseInt(cantidad) || 0) - enviando);
-  const etiqueta: DatosEtiqueta = { sku: vista?.sku ?? "", nombre: capitalizar(nombre) || vista?.tipo.nombre || "", precios: preciosDe(precioNum, medios, fijos) };
+  // La vista previa llega un instante despues de escribir: si todavia es de otra categoria/nombre/precio, no se muestra un codigo viejo.
+  const vistaAlDia = vista && vista.clave === [categoria, nombre, precioNum, unico].join("|") ? vista : null;
+  const etiqueta: DatosEtiqueta = { sku: vistaAlDia?.sku ?? "", nombre: capitalizar(nombre) || vista?.tipo.nombre || "", precios: preciosDe(precioNum, medios, fijos) };
 
   return (
     <>
@@ -262,8 +264,8 @@ export default function Carga() {
               ))}
             </div>
             <p className="nota">
-              {vista?.tipo.nuevo ? (
-                <>Categoría nueva <strong>{vista.tipo.nombre}</strong>: se crea al guardar (código <strong>{vista.tipo.codigo}</strong>).</>
+              {vistaAlDia?.tipo.nuevo ? (
+                <>Categoría nueva <strong>{vistaAlDia.tipo.nombre}</strong>: se crea al guardar (código <strong>{vistaAlDia.tipo.codigo}</strong>).</>
               ) : (
                 <>Categoría: <strong>{vista?.tipo.nombre ?? "…"}</strong>{catManual ? "" : detectado ? " (detectada)" : " (sale de la primera palabra del nombre; cambiala arriba si querés otra)"}</>
               )}
@@ -328,9 +330,9 @@ export default function Carga() {
             {escribeEfectivo && precioNum > 0 && efectivoResultante !== escrito && (
               <p className="nota">El precio de lista va en pesos enteros: el efectivo queda en <strong>{pesos(efectivoResultante)}</strong>, no en {pesos(escrito)}.</p>
             )}
-            {vista && vista.otrosPrecios.length > 0 && precioNum > 0 && (
+            {vistaAlDia && vistaAlDia.otrosPrecios.length > 0 && precioNum > 0 && (
               <p className="nota">
-                Ya hay &quot;{capitalizar(nombre)}&quot; a {vista.otrosPrecios.map(pesos).join(", ")}. Con este precio se crea un producto aparte (SKU nuevo).
+                Ya hay &quot;{capitalizar(nombre)}&quot; a {vistaAlDia.otrosPrecios.map(pesos).join(", ")}. Con este precio se crea un producto aparte (SKU nuevo).
               </p>
             )}
           </div>
@@ -398,8 +400,8 @@ export default function Carga() {
           <p className="rotulo">Así sale la etiqueta ({empresa.etiquetaMm.ancho}x{empresa.etiquetaMm.alto} mm)</p>
           <Etiqueta {...etiqueta} />
           <p className="aviso">
-            {vista?.existente
-              ? `Recarga: este producto ya existe (hay ${vista.existente.stockTotal} en total${vista.existente.ultimoIngreso ? `, último ingreso ${fechaCorta(vista.existente.ultimoIngreso)}` : ""}). Se suma al mismo SKU y la fecha de ingreso pasa a hoy.`
+            {vistaAlDia?.existente
+              ? `Recarga: este producto ya existe (hay ${vistaAlDia.existente.stockTotal} en total${vistaAlDia.existente.ultimoIngreso ? `, último ingreso ${fechaCorta(vistaAlDia.existente.ultimoIngreso)}` : ""}). Se suma al mismo SKU y la fecha de ingreso pasa a hoy.`
               : "Producto nuevo (SKU nuevo)."}
           </p>
           <p className="aviso">Las prendas iguales comparten SKU: se imprime una etiqueta por prenda con el mismo código.</p>
