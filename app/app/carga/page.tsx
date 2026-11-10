@@ -47,7 +47,9 @@ export default function Carga() {
   const precioRef = useRef<HTMLInputElement>(null);
 
   const detectado = tipoDesdeNombre(nombre, tipos);
-  const categoria = catManual ?? detectado?.nombre ?? "";
+  // Sin categoria conocida en el nombre: se usa la primera palabra ("Camisa poplin" -> Camisa, codigo CAx), no "Otro".
+  const primeraPalabra = nombre.trim().split(/\s+/)[0]?.replace(/[^\p{L}]/gu, "") ?? "";
+  const categoria = catManual ?? detectado?.nombre ?? (primeraPalabra.length >= 3 ? primeraPalabra : "");
   const ajusteEfectivo = medios.find((m) => m.id === "efectivo")?.ajustePct;
   const escrito = parseInt(precio) || 0;
   const efvoUnicoNum = parseInt(efvoUnico) || 0;
@@ -263,7 +265,7 @@ export default function Carga() {
               {vista?.tipo.nuevo ? (
                 <>Categoría nueva <strong>{vista.tipo.nombre}</strong>: se crea al guardar (código <strong>{vista.tipo.codigo}</strong>).</>
               ) : (
-                <>Categoría: <strong>{vista?.tipo.nombre ?? "…"}</strong>{catManual ? "" : detectado ? " (detectada)" : " (sin categoría: queda como Otro. Escribila arriba si querés una)"}</>
+                <>Categoría: <strong>{vista?.tipo.nombre ?? "…"}</strong>{catManual ? "" : detectado ? " (detectada)" : " (sale de la primera palabra del nombre; cambiala arriba si querés otra)"}</>
               )}
             </p>
             </>}
