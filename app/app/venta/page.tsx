@@ -8,7 +8,7 @@ import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, sugerenciaPromo, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
-  calcularPagos, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
+  calcularPagos, mediosDelCarrito, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
   type MedioPago, type NotaCredito, type PagoEntrada, type Producto,
 } from "@/lib/util";
 
@@ -192,7 +192,10 @@ export default function VentaPage() {
   const neto = subtotal - descuento;
   const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promos, itemsPromo, auto.descuento) : null;
   // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), los medios con descuento pasan a 0%: se paga el precio de la promo.
-  const mediosVenta = mediosParaPromo(medios, especial ? null : auto.promo);
+  // Productos unicos (efectivo cargado a mano): cada medio toma el % que da el carrito, igual que en el servidor.
+  const sinDescEfvo = !especial && !!auto.promo && !auto.promo.descuentoEfectivo;
+  const mediosVenta = sinDescEfvo ? mediosParaPromo(medios, auto.promo)
+    : mediosDelCarrito(medios, lineas.map((l) => ({ precio: l.producto.precio, preciosMedio: l.producto.preciosMedio, cant: l.cant })));
   const promoAplicada = especial ? null : auto.promo;
 
   // Pagos: un solo medio (paga todo) o dos (el primero entrega un monto y el segundo paga lo que falta).

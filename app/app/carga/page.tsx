@@ -26,6 +26,9 @@ export default function Carga() {
   // El precio se puede escribir como lista o como efectivo: el otro se calcula solo (efectivo ÷ 0,8 = lista; el 0,8 sale de la base).
   const [escribeEfectivo, setEscribeEfectivo] = useState(false);
   const [cantidad, setCantidad] = useState("1");
+  // Producto unico (casos especiales): lista = transferencia = tarjeta, y el efectivo se escribe a mano. Siempre lleva SKU propio.
+  const [unico, setUnico] = useState(false);
+  const [efvoUnico, setEfvoUnico] = useState("");
   const [foto, setFoto] = useState<string | undefined>();
   const [reparto, setReparto] = useState<Record<string, string>>({});
   const [avanzado] = useAvanzado();
@@ -47,11 +50,14 @@ export default function Carga() {
   const categoria = catManual ?? detectado?.nombre ?? "";
   const ajusteEfectivo = medios.find((m) => m.id === "efectivo")?.ajustePct;
   const escrito = parseInt(precio) || 0;
-  const precioNum = escribeEfectivo && ajusteEfectivo !== undefined ? Math.round(escrito / (1 + ajusteEfectivo / 100)) : escrito;
+  const efvoUnicoNum = parseInt(efvoUnico) || 0;
+  const fijos = unico ? Object.fromEntries(medios.map((m) => [m.id, m.id === "efectivo" ? efvoUnicoNum : escrito])) : null;
+  const precioNum = !unico && escribeEfectivo && ajusteEfectivo !== undefined ? Math.round(escrito / (1 + ajusteEfectivo / 100)) : escrito;
   const efectivoResultante = ajusteEfectivo === undefined ? 0 : precioMedio(precioNum, ajusteEfectivo);
   const dNombre = useDebounced(nombre);
   const dPrecio = useDebounced(precioNum);
   const dCategoria = useDebounced(categoria);
+  const dUnico = useDebounced(unico);
 
   useEffect(() => {
     let vivo = true;
@@ -118,9 +124,9 @@ export default function Carga() {
 
   useEffect(() => {
     let vivo = true;
-    vistaPreviaCarga({ categoria: dCategoria, nombre: dNombre, precio: dPrecio }).then((r) => vivo && r.ok && setVista(r));
+    vistaPreviaCarga({ categoria: dCategoria, nombre: dNombre, precio: dPrecio, unico: dUnico }).then((r) => vivo && r.ok && setVista(r));
     return () => { vivo = false; };
-  }, [dCategoria, dNombre, dPrecio]);
+  }, [dCategoria, dNombre, dPrecio, dUnico]);
 
   function elegir(p: Producto) {
     setNombre(p.nombre);
@@ -137,7 +143,8 @@ export default function Carga() {
     if (guardando) return;
     const cant = parseInt(cantidad);
     if (!nombre.trim()) return setError("Escribí el nombre de la prenda");
-    if (!precioNum || precioNum <= 0) return setError("Ingresá el precio (de lista o de efectivo)");
+    if (!precioNum || precioNum <= 0) return setError(unico ? "Ingresá el precio de lista (transferencia y tarjeta)" : "Ingresá el precio (de lista o de efectivo)");
+    if (unico && (efvoUnicoNum <= 0 || efvoUnicoNum > precioNum)) return setError("Ingresá el precio de efectivo (no puede ser más que el de lista)");
     if (!cant || cant < 1) return setError("La cantidad tiene que ser 1 o más");
     const rep: Reparto = {};
     for (const l of LOCALES) {
@@ -149,7 +156,7 @@ export default function Carga() {
     if (enviadas > cant) return setError(`Estás enviando ${enviadas} prendas pero cargaste ${cant}`);
     setError("");
     setGuardando(true);
-    const r = await cargarProducto({ categoria, nombre, precio: precioNum, cantidad: cant, foto, reparto: rep });
+    const r = await cargarProducto({ categoria, nombre, precio: precioNum, cantidad: cant, foto, reparto: rep, efectivoUnico: unico ? efvoUnicoNum : null });
     setGuardando(false);
     if (!r.ok) return setError(r.motivo);
     const p = r.producto;
@@ -163,14 +170,16 @@ export default function Carga() {
           return { ...f, n: f.n + cant, reparto: acum };
         });
       }
-      return [{ sku: p.sku, nombre: p.nombre, precio: p.precio, precios: preciosDe(p.precio, medios), ultimoIngreso: p.ultimoIngreso, n: cant, reparto: rep }, ...l];
+      return [{ sku: p.sku, nombre: p.nombre, precio: p.precio, precios: preciosDe(p.precio, medios, p.preciosMedio), ultimoIngreso: p.ultimoIngreso, n: cant, reparto: rep }, ...l];
     });
-    setAImprimir((cola) => [...cola, ...etiquetasDe({ sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios) }, cant)]);
+    setAImprimir((cola) => [...cola, ...etiquetasDe({ sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios, p.preciosMedio) }, cant)]);
     setNombre("");
     setCatManual(undefined);
     obtenerTipos().then((t) => t.ok && setTipos(t.tipos));
     setEscribeEfectivo(false);
     setPrecio("");
+    setUnico(false);
+    setEfvoUnico("");
     setCantidad("1");
     setFoto(undefined);
     setReparto({});
@@ -208,8 +217,9 @@ export default function Carga() {
     if (f) setFoto(await redimensionar(f));
   }
 
-  const queda = Math.max(0, (parseInt(cantidad) || 0) - LOCALES.reduce((s, l) => s + (parseInt(reparto[l.id] ?? "") || 0), 0));
-  const etiqueta: DatosEtiqueta = { sku: vista?.sku ?? "", nombre: capitalizar(nombre) || vista?.tipo.nombre || "", precios: preciosDe(precioNum, medios) };
+  const enviando = LOCALES.reduce((s, l) => s + (parseInt(reparto[l.id] ?? "") || 0), 0);
+  const queda = Math.max(0, (parseInt(cantidad) || 0) - enviando);
+  const etiqueta: DatosEtiqueta = { sku: vista?.sku ?? "", nombre: capitalizar(nombre) || vista?.tipo.nombre || "", precios: preciosDe(precioNum, medios, fijos) };
 
   return (
     <>
@@ -259,6 +269,34 @@ export default function Carga() {
             </>}
           </div>
 
+          <label className="fila" style={{ gap: 8, marginBottom: 10, fontSize: 15 }}>
+            <input type="checkbox" checked={unico} onChange={(e) => { setUnico(e.target.checked); setEscribeEfectivo(false); }} />
+            <span><strong>Producto único</strong>: el efectivo lo pongo a mano (lista = transferencia = tarjeta)</span>
+          </label>
+
+          {unico ? (
+          <div className="campo">
+            <span>2. Precios a mano</span>
+            <div className="fila">
+              <label className="fila" style={{ gap: 6 }}>
+                <span style={{ fontSize: 14 }}>Lista (transferencia y tarjeta)</span>
+                <input ref={precioRef} type="number" inputMode="numeric" min={0} step={100} value={precio}
+                  onChange={(e) => setPrecio(e.target.value)} onKeyDown={enter} placeholder="27200" style={{ width: 120 }} />
+              </label>
+              <label className="fila" style={{ gap: 6 }}>
+                <span style={{ fontSize: 14 }}>Efectivo</span>
+                <input type="number" inputMode="numeric" min={0} step={100} value={efvoUnico}
+                  onChange={(e) => setEfvoUnico(e.target.value)} onKeyDown={enter} placeholder="19000" style={{ width: 120 }} />
+              </label>
+            </div>
+            {precioNum > 0 && (
+              <p className="nota">
+                Sale así: {preciosDe(precioNum, medios, fijos).map((p) => textoPrecioEtiqueta(p)).join(" · ")}
+              </p>
+            )}
+            <p className="nota">Se crea con un SKU propio, aunque haya otra prenda con el mismo nombre.</p>
+          </div>
+          ) : (
           <div className="campo">
             <span>2. Precio: escribí el de lista <em>o</em> el de efectivo, el otro se calcula solo</span>
             <div className="fila">
@@ -294,6 +332,7 @@ export default function Carga() {
               </p>
             )}
           </div>
+          )}
 
           <div className="campo">
             <span>3. Cantidad</span>
@@ -301,18 +340,8 @@ export default function Carga() {
               onChange={(e) => setCantidad(e.target.value)} onKeyDown={enter} style={{ width: 90 }} />
           </div>
 
-          <details style={{ marginBottom: 12 }} open={Object.values(reparto).some((v) => parseInt(v) > 0) || !!foto || undefined}>
-            <summary style={{ cursor: "pointer" }}>Opcional: foto y enviar a los locales</summary>
-            <div className="campo" style={{ marginTop: 8 }}>
-              <span>Foto (opcional)</span>
-              <div className="fila">
-                <input type="file" accept="image/*" capture="environment" onChange={elegirFoto} />
-                {foto && <img src={foto} alt="Foto de la prenda" className="miniatura" />}
-              </div>
-            </div>
-
           <div className="campo">
-            <span>Enviar a los locales (opcional). Lo que no envíes queda en el {nombreSucursal(DEPOSITO)}. Lo enviado queda en camino hasta que cada local lo reciba.</span>
+            <span>4. ¿Cuántas enviás a cada local? Lo que no envíes queda en el {nombreSucursal(DEPOSITO)}. Lo enviado queda en camino hasta que el local lo reciba.</span>
             <div className="fila">
               {LOCALES.map((l) => (
                 <label key={l.id} className="fila" style={{ gap: 6 }}>
@@ -322,8 +351,21 @@ export default function Carga() {
                 </label>
               ))}
             </div>
-            <p className="nota">Queda en depósito: <strong>{queda}</strong></p>
+            <p className="nota">
+              {enviando > (parseInt(cantidad) || 0)
+                ? <strong>Estás enviando {enviando} pero cargás {parseInt(cantidad) || 0}.</strong>
+                : <>Se envían <strong>{enviando}</strong> · queda en depósito: <strong>{queda}</strong></>}
+            </p>
           </div>
+
+          <details style={{ marginBottom: 12 }} open={!!foto || undefined}>
+            <summary style={{ cursor: "pointer" }}>Opcional: foto</summary>
+            <div className="campo" style={{ marginTop: 8 }}>
+              <div className="fila">
+                <input type="file" accept="image/*" capture="environment" onChange={elegirFoto} />
+                {foto && <img src={foto} alt="Foto de la prenda" className="miniatura" />}
+              </div>
+            </div>
           </details>
           <button className="principal" style={{ width: "100%" }} onClick={guardar} disabled={guardando}>
             {guardando ? "Guardando…" : "Guardar e imprimir (Enter)"}

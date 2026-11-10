@@ -6,7 +6,7 @@ import { descuentoEspecial, mediosParaPromo, mejorPromo, TOPE_PCT, type Promo } 
 import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, totalReparto,
-  calcularPagos, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
+  calcularPagos, mediosDelCarrito, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
 // Error esperado: se le muestra el mensaje al usuario.
@@ -16,7 +16,7 @@ const falla = (m: string): never => {
 };
 
 const SELECT_PRODUCTO = `
-  select p.sku, p.tipo, p.nombre, p.precio_lista as precio, p.foto_url as foto, p.creado_en as creado,
+  select p.sku, p.tipo, p.nombre, p.precio_lista as precio, p.precios_medio as "preciosMedio", p.foto_url as foto, p.creado_en as creado,
     (select max(c.creado_en) from cargas c where c.sku = p.sku) as "ultimoIngreso",
     coalesce((select jsonb_object_agg(x.hasta, x.n) from (
       select t.hasta, sum(t.cantidad - t.cantidad_recibida)::int as n from traslados t
@@ -106,19 +106,20 @@ async function resolverTipo(db: Db, categoria: string, crear: boolean) {
   return { codigo, nombre, nuevo: true };
 }
 
-export async function vistaPrevia(a: { categoria: string; nombre: string; precio: number }) {
+export async function vistaPrevia(a: { categoria: string; nombre: string; precio: number; unico?: boolean }) {
   const t = await resolverTipo(pool, a.categoria, false);
-  const k = normalizar(a.nombre);
+  // Producto unico: siempre SKU nuevo, no se compara con lo ya cargado.
+  const k = a.unico ? "" : normalizar(a.nombre);
   const ex = await pool.query<{ sku: string; total: number; ultimo: Date | null }>(
     `select p.sku, coalesce(sum(s.cantidad), 0)::int as total, (select max(c.creado_en) from cargas c where c.sku = p.sku) as ultimo
      from productos p left join stock s on s.sku = p.sku
-     where p.activo and p.tipo = $1 and p.nombre_norm = $2 and p.precio_lista = $3 group by p.sku`,
+     where p.activo and p.precios_medio is null and p.tipo = $1 and p.nombre_norm = $2 and p.precio_lista = $3 group by p.sku`,
     [t.codigo, k, a.precio],
   );
   const c = await pool.query<{ siguiente: number }>("select ultimo + 1 as siguiente from contadores_sku where tipo = $1", [t.codigo]);
   const otros = k && a.precio > 0
     ? await pool.query<{ precio: number }>(
-        "select precio_lista as precio from productos where activo and tipo = $1 and nombre_norm = $2 and precio_lista <> $3 order by precio_lista",
+        "select precio_lista as precio from productos where activo and precios_medio is null and tipo = $1 and nombre_norm = $2 and precio_lista <> $3 order by precio_lista",
         [t.codigo, k, a.precio],
       )
     : { rows: [] as { precio: number }[] };
@@ -183,6 +184,8 @@ function validarReparto(r: Reparto) {
 
 export async function cargar(a: {
   categoria: string; nombre: string; precio: number; cantidad: number; foto?: string | null; reparto: Reparto;
+  // Producto unico: precio de efectivo a mano. Transferencia, tarjeta y el resto de los medios quedan al precio de lista.
+  efectivoUnico?: number | null;
 }) {
   const nombre = capitalizar(a.nombre);
   if (!nombre) falla("Escribí el nombre de la prenda");
@@ -192,21 +195,29 @@ export async function cargar(a: {
   validarReparto(a.reparto);
   if (Object.keys(a.reparto).some((k) => a.reparto[k] > 0 && !esLocal(k))) falla("El reparto es solo para los locales");
   if (totalReparto(a.reparto) > a.cantidad) falla(`Estás enviando ${totalReparto(a.reparto)} prendas pero cargaste ${a.cantidad}`);
+  const unico = a.efectivoUnico != null;
+  if (unico && (!Number.isInteger(a.efectivoUnico) || a.efectivoUnico! <= 0 || a.efectivoUnico! > a.precio)) falla("El precio de efectivo tiene que ser mayor a 0 y no más que el de lista");
 
   return tx(async (c) => {
     const k = normalizar(nombre);
     const tipo = (await resolverTipo(c, a.categoria, true)).codigo;
-    const ex = await c.query<{ sku: string }>(
-      "select sku from productos where activo and tipo = $1 and nombre_norm = $2 and precio_lista = $3 for update",
+    const ex = unico ? { rows: [] as { sku: string }[] } : await c.query<{ sku: string }>(
+      "select sku from productos where activo and precios_medio is null and tipo = $1 and nombre_norm = $2 and precio_lista = $3 for update",
       [tipo, k, a.precio],
     );
     let sku = ex.rows[0]?.sku;
     if (!sku) {
+      let fijos: Record<string, number> | null = null;
+      if (unico) {
+        const mr = await c.query<{ id: string }>("select id from medios_pago where activo");
+        fijos = Object.fromEntries(mr.rows.map((m) => [m.id, m.id === "efectivo" ? a.efectivoUnico! : a.precio]));
+        if (!("efectivo" in fijos)) falla("No está el medio de pago Efectivo");
+      }
       const n = await c.query<{ ultimo: number }>("update contadores_sku set ultimo = ultimo + 1 where tipo = $1 returning ultimo", [tipo]);
       sku = tipo + String(n.rows[0].ultimo).padStart(empresa.skuDigitos, "0");
       await c.query(
-        "insert into productos (sku, tipo, nombre, nombre_norm, precio_lista, foto_url) values ($1, $2, $3, $4, $5, $6)",
-        [sku, tipo, nombre, k, a.precio, a.foto ?? null],
+        "insert into productos (sku, tipo, nombre, nombre_norm, precio_lista, foto_url, precios_medio) values ($1, $2, $3, $4, $5, $6, $7)",
+        [sku, tipo, nombre, k, a.precio, a.foto ?? null, fijos ? JSON.stringify(fijos) : null],
       );
     } else if (a.foto) {
       await c.query("update productos set foto_url = coalesce(foto_url, $2) where sku = $1", [sku, a.foto]);
@@ -448,7 +459,10 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     // Pagos con nota de credito ("nota:N000001"): se bloquea la nota, se valida y entra como un medio mas con su propio ajuste.
     const notas = new Map<string, { id: number; saldo: number }>();
     // Una promo "sin descuento de efectivo" (feria, mayorista): los medios con descuento pasan a 0% (precio unico; ver mediosParaPromo).
-    const medios = mediosParaPromo(mr.rows, auto.promo);
+    // Productos unicos (precio a mano por medio): cada medio toma el % que da el carrito. Con una promo de precio unico no se usan.
+    const sinDescEfvo = !!auto.promo && !auto.promo.descuentoEfectivo;
+    const medios = sinDescEfvo ? mediosParaPromo(mr.rows, auto.promo)
+      : mediosDelCarrito(mr.rows, prods.map((p, i) => ({ precio: p.precio, preciosMedio: p.preciosMedio, cant: items[i].cant })));
     const pagosOk: PagoEntrada[] = [];
     for (const p of pagos) {
       if (!p.medioId.toLowerCase().startsWith("nota:")) { pagosOk.push(p); continue; }
@@ -606,7 +620,7 @@ export async function editar(sku: string, a: { nombre: string; precio: number })
   if (!Number.isInteger(a.precio) || a.precio <= 0) falla("Ingresá un precio válido");
   try {
     const r = await pool.query(
-      "update productos set nombre = $2, nombre_norm = $3, precio_lista = $4 where sku = $1 and activo",
+      "update productos set nombre = $2, nombre_norm = $3, precio_lista = $4, precios_medio = case when precios_medio is null then null else (select jsonb_object_agg(k, case when k = 'efectivo' then v else to_jsonb($4::int) end) from jsonb_each(precios_medio) e(k, v)) end where sku = $1 and activo",
       [sku, nombre, normalizar(nombre), a.precio],
     );
     if (r.rowCount === 0) falla("No existe el producto");

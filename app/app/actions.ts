@@ -84,12 +84,12 @@ export async function ingresosProducto(sku: string) {
 }
 
 // ---- Carga y movimientos de mercaderia ----
-export async function vistaPreviaCarga(a: { categoria: string; nombre: string; precio: number }) {
-  return seguro("cargar", () => repo.vistaPrevia({ categoria: txt(a.categoria), nombre: txt(a.nombre), precio: ent(a.precio) || 0 }));
+export async function vistaPreviaCarga(a: { categoria: string; nombre: string; precio: number; unico?: boolean }) {
+  return seguro("cargar", () => repo.vistaPrevia({ categoria: txt(a.categoria), nombre: txt(a.nombre), precio: ent(a.precio) || 0, unico: a.unico === true }));
 }
 
 export async function cargarProducto(a: {
-  categoria: string; nombre: string; precio: number; cantidad: number; foto?: string | null; reparto: Reparto;
+  categoria: string; nombre: string; precio: number; cantidad: number; foto?: string | null; reparto: Reparto; efectivoUnico?: number | null;
 }) {
   return seguro("cargar", async () => {
     // La foto solo puede ser una imagen embebida (data:image): nada de direcciones externas ni otros tipos de dato.
@@ -97,8 +97,9 @@ export async function cargarProducto(a: {
     const producto = await repo.cargar({
       categoria: txt(a.categoria), nombre: txt(a.nombre), precio: ent(a.precio), cantidad: ent(a.cantidad),
       foto: a.foto ? txt(a.foto).slice(0, 60000) : null, reparto: reparto(a.reparto),
+      efectivoUnico: a.efectivoUnico == null ? null : ent(a.efectivoUnico),
     });
-    await auditar("carga", { sku: producto.sku, nombre: producto.nombre, precio: producto.precio, cantidad: ent(a.cantidad), reparto: reparto(a.reparto) });
+    await auditar("carga", { sku: producto.sku, nombre: producto.nombre, precio: producto.precio, cantidad: ent(a.cantidad), reparto: reparto(a.reparto), ...(producto.preciosMedio ? { preciosMedio: producto.preciosMedio } : {}) });
     return { producto };
   });
 }
@@ -265,7 +266,7 @@ export async function reimprimirEtiqueta(sku: string, cantidad: number) {
     const p = await repo.productoPorSku(txt(sku));
     if (!p) throw new repo.ErrorNegocio("No existe esa prenda.");
     const medios = await repo.listarMediosPago();
-    const etiqueta = { sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios) };
+    const etiqueta = { sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios, p.preciosMedio) };
     await auditar("etiqueta_reimpresa", { sku: p.sku, nombre: p.nombre, precio: p.precio, cantidad: n });
     return { etiquetas: Array.from({ length: n }, () => etiqueta) };
   });

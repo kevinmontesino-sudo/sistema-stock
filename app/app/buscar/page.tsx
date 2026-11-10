@@ -6,7 +6,7 @@ import { Etiqueta } from "@/components/Etiqueta";
 import { empresa } from "@/lib/empresa.config";
 import { imprimirConAgente } from "@/lib/agenteImpresion";
 import { useDebounced, useModoEtiquetas } from "@/lib/hooks";
-import { fechaCorta, nombreSucursal, pesos, precioMedio, preciosDe, type MedioPago, type Producto } from "@/lib/util";
+import { fechaCorta, nombreSucursal, pesos, precioDeMedio, preciosDe, type MedioPago, type Producto } from "@/lib/util";
 
 type Panel = "editar" | "ajustar" | "ingresos" | "etiqueta" | null;
 
@@ -169,7 +169,7 @@ export default function Buscar() {
                   <td className="mono">{p.sku}</td>
                   <td>{p.nombre} <span className="interno">· ing {fechaCorta(p.ultimoIngreso)}</span></td>
                   <td>{pesos(p.precio)}</td>
-                  {efectivo && <td>{pesos(precioMedio(p.precio, efectivo.ajustePct))}</td>}
+                  {efectivo && <td>{pesos(precioDeMedio(p, efectivo))}</td>}
                   {empresa.sucursales.map((s) => (
                     <td key={s.id} className="der">
                       {p.stock[s.id] ?? 0}
@@ -194,7 +194,7 @@ export default function Buscar() {
         <div className="tarjeta" style={{ marginTop: 16 }}>
           <h2 style={{ marginTop: 0 }}>Imprimir etiqueta de {elegido.nombre} ({elegido.sku})</h2>
           <p className="aviso">Para una etiqueta perdida o que salió mal. <strong>No suma ni resta stock.</strong> Sale con el precio actual.</p>
-          <Etiqueta sku={elegido.sku} nombre={elegido.nombre} precios={preciosDe(elegido.precio, medios)} />
+          <Etiqueta sku={elegido.sku} nombre={elegido.nombre} precios={preciosDe(elegido.precio, medios, elegido.preciosMedio)} />
           <label className="fila" style={{ gap: 8, margin: "12px 0" }}>
             <span>Cantidad de etiquetas</span>
             <input type="number" inputMode="numeric" min={1} max={100} value={cantEtiq} style={{ width: 90 }}

@@ -12,7 +12,10 @@ export type Producto = {
   ultimoIngreso: string;
   // Unidades enviadas a cada sucursal que todavia no fueron recibidas (destino -> cantidad).
   enCamino: Record<string, number>;
+  // Producto unico: precio por unidad cargado a mano para cada medio de pago (null = producto comun).
+  preciosMedio: PreciosMedio | null;
 };
+export type PreciosMedio = Record<string, number>;
 export type Traslado = {
   id: number; sku: string; nombre: string; cantidad: number; recibidas: number; desde: string; hasta: string; fecha: string;
 };
@@ -60,6 +63,22 @@ export function tipoDesdeNombre(nombre: string, tipos: Tipo[]): Tipo | undefined
 export const nombreTipo = (codigo: string, tipos: Tipo[]) => tipos.find((t) => t.codigo === codigo)?.nombre ?? codigo;
 // Precio segun medio de pago: lista x (1 + porcentaje del medio). Los porcentajes salen siempre de la tabla medios_pago.
 export const precioMedio = (precio: number, ajustePct: number) => Math.round(precio * (1 + ajustePct / 100));
+// Precio de una prenda con un medio: el cargado a mano (producto unico) o el de lista con el % del medio.
+export const precioDeMedio = (p: { precio: number; preciosMedio?: PreciosMedio | null }, m: MedioPago) =>
+  p.preciosMedio?.[m.id] ?? precioMedio(p.precio, m.ajustePct);
+
+// Si en el carrito hay productos unicos, cada medio pasa a tener el % "efectivo" del carrito: lo que suman las prendas con ese medio
+// sobre lo que suman a precio de lista. Asi calcularPagos, los pagos divididos y las notas de credito funcionan igual que siempre.
+export function mediosDelCarrito(medios: MedioPago[], lineas: { precio: number; preciosMedio?: PreciosMedio | null; cant: number }[]) {
+  if (!lineas.some((l) => l.preciosMedio)) return medios;
+  const lista = lineas.reduce((s, l) => s + l.precio * l.cant, 0);
+  if (lista <= 0) return medios;
+  return medios.map((m) => {
+    if (m.id.startsWith("nota:")) return m;
+    const conMedio = lineas.reduce((s, l) => s + precioDeMedio(l, m) * l.cant, 0);
+    return { ...m, ajustePct: (conMedio / lista - 1) * 100 };
+  });
+}
 
 export const nombreSucursal = (id: string | null) => empresa.sucursales.find((s) => s.id === id)?.nombre ?? "—";
 export const totalReparto = (r: Reparto) => Object.values(r).reduce((s, n) => s + n, 0);
@@ -153,14 +172,14 @@ export function repartoPorPorcentaje(stock: number, pct: Record<string, number>)
 }
 
 // Precios que se imprimen: transferencia (= lista) y efectivo, con el porcentaje que figura en la base, y las cuotas con tarjeta.
-export function preciosDe(precio: number, medios: MedioPago[]): PrecioEtiqueta[] {
+export function preciosDe(precio: number, medios: MedioPago[], fijos?: PreciosMedio | null): PrecioEtiqueta[] {
   const p: PrecioEtiqueta[] = empresa.etiquetaMedios.flatMap((id) => {
     const m = medios.find((x) => x.id === id);
-    return m ? [{ nombre: m.nombre, valor: precioMedio(precio, m.ajustePct) }] : [];
+    return m ? [{ nombre: m.nombre, valor: precioDeMedio({ precio, preciosMedio: fijos }, m) }] : [];
   });
   // Cuotas: precio con el recargo de la tarjeta dividido en la cantidad de cuotas (redondeado al peso).
   const { medio, cantidad } = empresa.etiquetaCuotas;
   const mc = medios.find((x) => x.id === medio);
-  if (mc && cantidad > 0) p.push({ nombre: `${cantidad} cuotas`, valor: Math.round(precioMedio(precio, mc.ajustePct) / cantidad), cuotas: cantidad } );
+  if (mc && cantidad > 0) p.push({ nombre: `${cantidad} cuotas`, valor: Math.round(precioDeMedio({ precio, preciosMedio: fijos }, mc) / cantidad), cuotas: cantidad } );
   return p.length ? p : [{ nombre: "Precio", valor: precio }];
 }
