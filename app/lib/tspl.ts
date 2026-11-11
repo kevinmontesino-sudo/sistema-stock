@@ -59,16 +59,19 @@ export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
   const primera = `${sku}  ${nombre}`;
   const lineas = primera.length <= maxLinea ? [primera] : partir(nombre, maxLinea - sku.length - 2, maxLinea);
   const doble = lineas.length > 1;
-  const altoBarras = doble ? 64 : 88;
-  L.push(`BARCODE ${barraX},${doble ? 10 : 14},"128",${altoBarras},0,0,2,2,"${sku}"`);
-  const y = doble ? 82 : 110;
-  if (doble) L.push(`TEXT ${margen},${y},"2",0,1,1,"${sku}  ${lineas[0]}"`, `TEXT ${margen},${y + 22},"2",0,1,1,"${lineas[1]}"`);
+  // Etiqueta baja (25 mm o menos): barras mas cortas y precios mas juntos, para que entre todo. Con 30 mm queda como siempre.
+  const baja = alto <= 208;
+  const altoBarras = baja ? (doble ? 40 : 52) : doble ? 64 : 88;
+  L.push(`BARCODE ${barraX},${baja ? (doble ? 8 : 10) : doble ? 10 : 14},"128",${altoBarras},0,0,2,2,"${sku}"`);
+  const y = baja ? (doble ? 54 : 68) : doble ? 82 : 110;
+  if (doble) L.push(`TEXT ${margen},${y},"2",0,1,1,"${sku}  ${lineas[0]}"`, `TEXT ${margen},${y + (baja ? 20 : 22)},"2",0,1,1,"${lineas[1]}"`);
   else L.push(`TEXT ${margen},${y},"2",0,1,1,"${lineas[0]}"`);
-  const yPrecios = doble ? 130 : 134;
+  const yPrecios = baja ? (doble ? 100 : 96) : doble ? 130 : 134;
+  const paso = baja ? 24 : 26;
   e.precios.slice(0, 3).forEach((p, i) => {
     const t = soloAscii(p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`);
     const fuente = t.length * ANCHO_FUENTE["3"] <= ancho - 2 * margen ? "3" : "2";
-    L.push(`TEXT ${margen},${yPrecios + i * 26},"${fuente}",0,1,1,"${t}"`);
+    L.push(`TEXT ${margen},${yPrecios + i * paso},"${fuente}",0,1,1,"${t}"`);
   });
   L.push(`PRINT ${Math.max(1, copias)},1`);
   return L.join("\r\n") + "\r\n";

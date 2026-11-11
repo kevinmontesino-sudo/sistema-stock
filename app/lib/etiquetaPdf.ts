@@ -56,8 +56,9 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
     const lineasNombre = partirNombre(e.nombre, W - margen - xNombre, W - 2 * margen, 7);
     const doble = lineasNombre.length > 1;
     // Con el nombre en dos lineas las barras bajan a 8,5 mm para que entre todo (lo que importa para leer es el ancho de cada barra, no el alto).
-    const altoBarras = (doble ? 8.5 : 10) * MM;
-    const yBarras = H - (doble ? 1.8 : 2.2) * MM - altoBarras;
+    const baja = empresa.etiquetaMm.alto <= 26;
+    const altoBarras = (baja ? (doble ? 5 : 6.5) : doble ? 8.5 : 10) * MM;
+    const yBarras = H - (baja ? 1.4 : doble ? 1.8 : 2.2) * MM - altoBarras;
     for (let i = 0; i < bits.length; ) {
       if (bits[i] !== "1") { i++; continue; }
       let j = i;
@@ -66,15 +67,15 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
       i = j;
     }
     const maxAncho = W - 2 * margen;
-    let y = yBarras - 3.2 * MM;
+    let y = yBarras - (baja ? 3 : 3.2) * MM;
     p.drawText(e.sku, { x: margen, y, size: 8.5, font: negrita });
     p.drawText(lineasNombre[0], { x: xNombre, y, size: 7, font: normal });
     if (doble) {
-      y -= 2.7 * MM;
+      y -= (baja ? 2.5 : 2.7) * MM;
       p.drawText(lineasNombre[1], { x: margen, y, size: 7, font: normal });
     }
     for (const pr of e.precios.slice(0, 3)) {
-      y -= (doble ? 3.5 : 3.7) * MM;
+      y -= (baja ? 3.2 : doble ? 3.5 : 3.7) * MM;
       p.drawText(recortar(textoPrecioEtiqueta(pr), negrita, 9.5, maxAncho), { x: margen, y, size: 9.5, font: negrita });
     }
   }

@@ -33,7 +33,7 @@ export const empresa = {
   etiquetaCuotas: { medio: "tarjeta", cantidad: 3 },
   codigoEtiqueta: "code128" as "code128" | "qr",
   // Medida del rollo de etiquetas, en milímetros. Ajustar a la impresora y rollo reales.
-  etiquetaMm: { ancho: 50, alto: 30 },
+  etiquetaMm: { ancho: 50, alto: 25 },
   // Etiquetas: "agente" (recomendado) usa el agente de impresion instalado en esa PC (Windows o Mac); "servidor" imprime desde la maquina donde corre el sistema (solo sirve en desarrollo local); "directa" manda la etiqueta en el lenguaje de la impresora (TSPL) con QZ Tray; "ventana" usa la ventana de impresion del navegador.
   impresionEtiquetas: "agente" as "agente" | "directa" | "ventana" | "servidor",
   // Parte del nombre de la impresora de etiquetas tal como la ve el sistema (ej. "Xprinter XP-410B" o "Xprinter_XP_410B").

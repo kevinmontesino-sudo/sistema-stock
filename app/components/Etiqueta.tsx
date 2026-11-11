@@ -34,7 +34,7 @@ export function Etiqueta({ sku, nombre, precios, marco }: DatosEtiqueta) {
   const barras = empresa.codigoEtiqueta === "code128";
   return (
     // Vista previa: con nombre largo (dos lineas) las barras bajan un poco, igual que en la etiqueta impresa.
-    <div className={`${barras ? "etiqueta con-barras" : "etiqueta"}${marco ? " con-marco" : ""}${sku.length + nombre.length > 26 ? " nombre-largo" : ""}`}>
+    <div className={`${barras ? "etiqueta con-barras" : "etiqueta"}${marco ? " con-marco" : ""}${sku.length + nombre.length > 26 ? " nombre-largo" : ""}${empresa.etiquetaMm.alto <= 26 ? " baja" : ""}`}>
       {barras ? <Barras valor={sku} /> : <QRCodeSVG value={sku || "SKU"} size={84} marginSize={0} />}
       <div className="etiqueta-texto">
         <div className="etiqueta-cab">
