@@ -5,7 +5,7 @@ import { Etiqueta, type DatosEtiqueta, type PrecioEtiqueta } from "@/components/
 import { DEPOSITO, empresa, LOCALES } from "@/lib/empresa.config";
 import { redimensionar } from "@/lib/foto";
 import { imprimir } from "@/lib/imprimir";
-import { useDebounced, useModoEtiquetas, type ModoEtiquetas, useAvanzado } from "@/lib/hooks";
+import { useDebounced, useModoEtiquetas, useAltoEtiqueta, type ModoEtiquetas, useAvanzado } from "@/lib/hooks";
 import { imprimirConAgente } from "@/lib/agenteImpresion";
 import { imprimirDirecto } from "@/lib/qz";
 import { trabajosTspl } from "@/lib/tspl";
@@ -14,8 +14,8 @@ import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos,
 type FilaLote = { sku: string; nombre: string; precio: number; precios: PrecioEtiqueta[]; ultimoIngreso: string; n: number; reparto: Reparto };
 type Vista = { clave: string; sku: string; existe: boolean; existente: { stockTotal: number; ultimoIngreso: string | null } | null; otrosPrecios: number[]; tipo: { codigo: string; nombre: string; nuevo: boolean } };
 
-const etiquetasDe = (p: { sku: string; nombre: string; precios: PrecioEtiqueta[] }, n: number): DatosEtiqueta[] =>
-  Array.from({ length: n }, () => ({ sku: p.sku, nombre: p.nombre, precios: p.precios }));
+const etiquetasDe = (p: { sku: string; nombre: string; precios: PrecioEtiqueta[] }, n: number, altoMm: number): DatosEtiqueta[] =>
+  Array.from({ length: n }, () => ({ sku: p.sku, nombre: p.nombre, precios: p.precios, altoMm }));
 
 export default function Carga() {
   const [nombre, setNombre] = useState("");
@@ -41,6 +41,7 @@ export default function Carga() {
   const [verSug, setVerSug] = useState(true);
   const [vista, setVista] = useState<Vista | null>(null);
   const [modoEtiq, setModoEtiq] = useModoEtiquetas(empresa.impresionEtiquetas);
+  const [altoEtiq, setAltoEtiq] = useAltoEtiqueta(empresa.etiquetaMm.alto, empresa.etiquetaAltos);
   const [falloImpresion, setFalloImpresion] = useState<{ mensaje: string; cola: DatosEtiqueta[]; tspl: string } | null>(null);
   const [okImpresion, setOkImpresion] = useState("");
   const nombreRef = useRef<HTMLInputElement>(null);
@@ -73,7 +74,7 @@ export default function Carga() {
     const cola = aImprimir;
     const t = setTimeout(async () => {
       if (modoEtiq === "ventana") {
-        imprimir(`${empresa.etiquetaMm.ancho}mm ${empresa.etiquetaMm.alto}mm`);
+        imprimir(`${empresa.etiquetaMm.ancho}mm ${altoEtiq}mm`);
         setAImprimir([]);
         return;
       }
@@ -113,7 +114,7 @@ export default function Carga() {
       }
     }, 400);
     return () => clearTimeout(t);
-  }, [aImprimir, modoEtiq]);
+  }, [aImprimir, modoEtiq, altoEtiq]);
 
   const consulta = verSug && dNombre.trim().length >= 2 ? dNombre : "";
   useEffect(() => {
@@ -174,7 +175,7 @@ export default function Carga() {
       }
       return [{ sku: p.sku, nombre: p.nombre, precio: p.precio, precios: preciosDe(p.precio, medios, p.preciosMedio), ultimoIngreso: p.ultimoIngreso, n: cant, reparto: rep }, ...l];
     });
-    setAImprimir((cola) => [...cola, ...etiquetasDe({ sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios, p.preciosMedio) }, cant)]);
+    setAImprimir((cola) => [...cola, ...etiquetasDe({ sku: p.sku, nombre: p.nombre, precios: preciosDe(p.precio, medios, p.preciosMedio) }, cant, altoEtiq)]);
     setNombre("");
     setCatManual(undefined);
     obtenerTipos().then((t) => t.ok && setTipos(t.tipos));
@@ -223,11 +224,17 @@ export default function Carga() {
   const queda = Math.max(0, (parseInt(cantidad) || 0) - enviando);
   // La vista previa llega un instante despues de escribir: si todavia es de otra categoria/nombre/precio, no se muestra un codigo viejo.
   const vistaAlDia = vista && vista.clave === [categoria, nombre, precioNum, unico].join("|") ? vista : null;
-  const etiqueta: DatosEtiqueta = { sku: vistaAlDia?.sku ?? "", nombre: capitalizar(nombre) || vista?.tipo.nombre || "", precios: preciosDe(precioNum, medios, fijos) };
+  const etiqueta: DatosEtiqueta = { sku: vistaAlDia?.sku ?? "", nombre: capitalizar(nombre) || vista?.tipo.nombre || "", precios: preciosDe(precioNum, medios, fijos), altoMm: altoEtiq };
 
   return (
     <>
       <h1>Cargar mercadería · {nombreSucursal(DEPOSITO)}</h1>
+      <label className="fila no-print" style={{ gap: 8, margin: "0 0 12px", fontSize: 14 }}>
+        <span>Rollo de etiquetas en esta PC</span>
+        <select value={altoEtiq} onChange={(e) => setAltoEtiq(Number(e.target.value))}>
+          {empresa.etiquetaAltos.map((a) => <option key={a} value={a}>{empresa.etiquetaMm.ancho} x {a} mm</option>)}
+        </select>
+      </label>
       <div className="grilla no-print">
         <div className="tarjeta">
           <div className="campo">
@@ -376,10 +383,10 @@ export default function Carga() {
           </button>
           {avanzado && <>
           <button style={{ width: "100%", marginTop: 8 }} onClick={() => setAImprimir((cola) => [...cola,
-            { sku: "REM000001", nombre: "Remera oversize lisa negra", precios: preciosDe(17500, medios) },
-            { sku: "JEA000002", nombre: "Jean wide leg dama", precios: preciosDe(30000, medios) },
-            { sku: "BUZ000003", nombre: "Buzo canguro friza gris", precios: preciosDe(24900, medios) },
-            { sku: "VES000004", nombre: "Vestido largo estampado", precios: preciosDe(9000, medios) },
+            { sku: "REM000001", nombre: "Remera oversize lisa negra", precios: preciosDe(17500, medios), altoMm: altoEtiq },
+            { sku: "JEA000002", nombre: "Jean wide leg dama", precios: preciosDe(30000, medios), altoMm: altoEtiq },
+            { sku: "BUZ000003", nombre: "Buzo canguro friza gris", precios: preciosDe(24900, medios), altoMm: altoEtiq },
+            { sku: "VES000004", nombre: "Vestido largo estampado", precios: preciosDe(9000, medios), altoMm: altoEtiq },
           ])}>
             Imprimir 4 etiquetas de prueba (no guarda nada)
           </button>
@@ -397,7 +404,7 @@ export default function Carga() {
         </div>
 
         <div>
-          <p className="rotulo">Así sale la etiqueta ({empresa.etiquetaMm.ancho}x{empresa.etiquetaMm.alto} mm)</p>
+          <p className="rotulo">Así sale la etiqueta ({empresa.etiquetaMm.ancho}x{altoEtiq} mm)</p>
           <Etiqueta {...etiqueta} />
           <p className="aviso">
             {vistaAlDia?.existente
@@ -441,7 +448,7 @@ export default function Carga() {
                   <td className="der">{f.n}</td>
                   <td className="aviso">{LOCALES.filter((l) => f.reparto[l.id]).map((l) => `${l.nombre} ${f.reparto[l.id]}`).join(" · ") || "—"}</td>
                   <td className="der">
-                    <button className="chico" onClick={() => setAImprimir((cola) => [...cola, ...etiquetasDe(f, f.n)])}>Reimprimir</button>
+                    <button className="chico" onClick={() => setAImprimir((cola) => [...cola, ...etiquetasDe(f, f.n, altoEtiq)])}>Reimprimir</button>
                   </td>
                 </tr>
               ))}
@@ -451,7 +458,7 @@ export default function Carga() {
       </div>
 
       <div className="solo-impresion" aria-hidden="true"
-        style={{ "--etq-w": `${empresa.etiquetaMm.ancho}mm`, "--etq-h": `${empresa.etiquetaMm.alto}mm` } as React.CSSProperties}>
+        style={{ "--etq-w": `${empresa.etiquetaMm.ancho}mm`, "--etq-h": `${altoEtiq}mm` } as React.CSSProperties}>
         {aImprimir.map((d, i) => <div key={i} className="giro"><Etiqueta {...d} /></div>)}
       </div>
     </>

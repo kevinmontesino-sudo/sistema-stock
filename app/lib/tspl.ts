@@ -33,12 +33,13 @@ function partir(nombre: string, max1: number, max2: number) {
 // Arma el trabajo de impresion de una etiqueta en TSPL. El codigo de barras lo dibuja la propia impresora.
 export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
   const ancho = Math.round(empresa.etiquetaMm.ancho * PUNTOS_MM);
-  const alto = Math.round(empresa.etiquetaMm.alto * PUNTOS_MM);
+  const altoMm = e.altoMm ?? empresa.etiquetaMm.alto;
+  const alto = Math.round(altoMm * PUNTOS_MM);
   const margen = 16;
   const sku = soloAscii(e.sku);
   const barraX = Math.max(0, Math.floor((ancho - modulos(sku) * 2) / 2));
   const L: string[] = [
-    `SIZE ${empresa.etiquetaMm.ancho} mm,${empresa.etiquetaMm.alto} mm`,
+    `SIZE ${empresa.etiquetaMm.ancho} mm,${altoMm} mm`,
     `GAP ${empresa.tspl.separacionMm} mm,0 mm`,
     `DIRECTION ${empresa.tspl.direccion},0`,
     "REFERENCE 0,0",
@@ -81,7 +82,7 @@ export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
 export function trabajosTspl(cola: DatosEtiqueta[]) {
   const grupos = new Map<string, { e: DatosEtiqueta; n: number }>();
   for (const e of cola) {
-    const k = `${e.sku}|${e.nombre}|${e.precios.map((p) => p.valor).join(",")}|${e.marco ? 1 : 0}`;
+    const k = `${e.altoMm ?? ""}|${e.sku}|${e.nombre}|${e.precios.map((p) => p.valor).join(",")}|${e.marco ? 1 : 0}`;
     const g = grupos.get(k);
     if (g) g.n++;
     else grupos.set(k, { e, n: 1 });

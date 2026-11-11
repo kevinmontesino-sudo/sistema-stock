@@ -6,7 +6,8 @@ import { empresa } from "@/lib/empresa.config";
 import { textoPrecioEtiqueta } from "@/lib/util";
 
 export type PrecioEtiqueta = { nombre: string; valor: number; cuotas?: number };
-export type DatosEtiqueta = { sku: string; nombre: string; precios: PrecioEtiqueta[]; marco?: boolean };
+// altoMm: alto del rollo con el que se imprime (si falta, el de empresa.config).
+export type DatosEtiqueta = { sku: string; nombre: string; precios: PrecioEtiqueta[]; marco?: boolean; altoMm?: number };
 
 function Barras({ valor }: { valor: string }) {
   const ref = useRef<SVGSVGElement>(null);
@@ -30,11 +31,12 @@ function Barras({ valor }: { valor: string }) {
   return <svg ref={ref} className="barras" role="img" aria-label={`Código de barras ${valor}`} />;
 }
 
-export function Etiqueta({ sku, nombre, precios, marco }: DatosEtiqueta) {
+export function Etiqueta({ sku, nombre, precios, marco, altoMm }: DatosEtiqueta) {
   const barras = empresa.codigoEtiqueta === "code128";
+  const alto = altoMm ?? empresa.etiquetaMm.alto;
   return (
     // Vista previa: con nombre largo (dos lineas) las barras bajan un poco, igual que en la etiqueta impresa.
-    <div className={`${barras ? "etiqueta con-barras" : "etiqueta"}${marco ? " con-marco" : ""}${sku.length + nombre.length > 26 ? " nombre-largo" : ""}${empresa.etiquetaMm.alto <= 26 ? " baja" : ""}`}>
+    <div className={`${barras ? "etiqueta con-barras" : "etiqueta"}${marco ? " con-marco" : ""}${sku.length + nombre.length > 26 ? " nombre-largo" : ""}${alto <= 26 ? " baja" : ""}`} style={{ "--etq-h": `${alto}mm` } as React.CSSProperties}>
       {barras ? <Barras valor={sku} /> : <QRCodeSVG value={sku || "SKU"} size={84} marginSize={0} />}
       <div className="etiqueta-texto">
         <div className="etiqueta-cab">

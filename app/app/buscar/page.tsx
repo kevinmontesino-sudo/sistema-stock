@@ -5,7 +5,7 @@ import { ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto
 import { Etiqueta } from "@/components/Etiqueta";
 import { empresa } from "@/lib/empresa.config";
 import { imprimirConAgente } from "@/lib/agenteImpresion";
-import { useDebounced, useModoEtiquetas } from "@/lib/hooks";
+import { useDebounced, useModoEtiquetas, useAltoEtiqueta } from "@/lib/hooks";
 import { fechaCorta, nombreSucursal, pesos, precioDeMedio, preciosDe, type MedioPago, type Producto } from "@/lib/util";
 
 type Panel = "editar" | "ajustar" | "ingresos" | "etiqueta" | null;
@@ -19,6 +19,7 @@ export default function Buscar() {
   const [cantEtiq, setCantEtiq] = useState("1");
   const cantidadEtiq = parseInt(cantEtiq) || 0;
   const [modoEtiq] = useModoEtiquetas(empresa.impresionEtiquetas);
+  const [altoEtiq, setAltoEtiq] = useAltoEtiqueta(empresa.etiquetaMm.alto, empresa.etiquetaAltos);
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
   const [lista, setLista] = useState<Producto[]>([]);
@@ -65,8 +66,9 @@ export default function Buscar() {
     if (cantidadEtiq > 10 && !window.confirm(`¿Imprimir ${cantidadEtiq} etiquetas de ${elegido.nombre}?`)) return;
     setOcupado(true);
     setMensaje(null);
-    const r = await reimprimirEtiqueta(elegido.sku, parseInt(cantEtiq) || 0);
-    if (!r.ok) { setOcupado(false); return setMensaje({ texto: r.motivo, mala: true }); }
+    const r0 = await reimprimirEtiqueta(elegido.sku, parseInt(cantEtiq) || 0);
+    if (!r0.ok) { setOcupado(false); return setMensaje({ texto: r0.motivo, mala: true }); }
+    const r = { ...r0, etiquetas: r0.etiquetas.map((e) => ({ ...e, altoMm: altoEtiq })) };
     try {
       if (modoEtiq === "servidor") {
         const s = await imprimirEtiquetasServidor(r.etiquetas);
@@ -194,7 +196,13 @@ export default function Buscar() {
         <div className="tarjeta" style={{ marginTop: 16 }}>
           <h2 style={{ marginTop: 0 }}>Imprimir etiqueta de {elegido.nombre} ({elegido.sku})</h2>
           <p className="aviso">Para una etiqueta perdida o que salió mal. <strong>No suma ni resta stock.</strong> Sale con el precio actual.</p>
-          <Etiqueta sku={elegido.sku} nombre={elegido.nombre} precios={preciosDe(elegido.precio, medios, elegido.preciosMedio)} />
+          <Etiqueta sku={elegido.sku} nombre={elegido.nombre} precios={preciosDe(elegido.precio, medios, elegido.preciosMedio)} altoMm={altoEtiq} />
+          <label className="fila" style={{ gap: 8, margin: "12px 0 0", fontSize: 14 }}>
+            <span>Rollo de etiquetas en esta PC</span>
+            <select value={altoEtiq} onChange={(e) => setAltoEtiq(Number(e.target.value))}>
+              {empresa.etiquetaAltos.map((a) => <option key={a} value={a}>{empresa.etiquetaMm.ancho} x {a} mm</option>)}
+            </select>
+          </label>
           <label className="fila" style={{ gap: 8, margin: "12px 0" }}>
             <span>Cantidad de etiquetas</span>
             <input type="number" inputMode="numeric" min={1} max={100} value={cantEtiq} style={{ width: 90 }}

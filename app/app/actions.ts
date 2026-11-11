@@ -2,6 +2,7 @@
 import * as repo from "@/lib/repo";
 import * as cierre from "@/lib/cierre";
 import { nombreSucursal, preciosDe, type Reparto } from "@/lib/util";
+import { empresa } from "@/lib/empresa.config";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
 import { imprimirEtiquetasEnServidor } from "@/lib/impresoraServidor";
 import { auditar } from "@/lib/seguridad/auditoria";
@@ -278,6 +279,7 @@ export async function imprimirEtiquetasServidor(cola: DatosEtiqueta[]) {
       sku: txt(e?.sku).slice(0, 40),
       nombre: txt(e?.nombre).slice(0, 120),
       marco: !!e?.marco,
+      ...((empresa.etiquetaAltos as readonly number[]).includes(ent(e?.altoMm)) ? { altoMm: ent(e.altoMm) } : {}),
       precios: (Array.isArray(e?.precios) ? e.precios : []).slice(0, 4).map((p) => ({ nombre: txt(p?.nombre).slice(0, 30), valor: ent(p?.valor) || 0, ...(ent(p?.cuotas) > 0 ? { cuotas: Math.min(ent(p.cuotas), 24) } : {}) })),
     }));
     await imprimirEtiquetasEnServidor(limpia);

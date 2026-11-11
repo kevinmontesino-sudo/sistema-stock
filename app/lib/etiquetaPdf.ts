@@ -21,7 +21,6 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
   const normal = await doc.embedFont(StandardFonts.Helvetica);
   const negrita = await doc.embedFont(StandardFonts.HelveticaBold);
   const W = empresa.etiquetaMm.ancho * MM;
-  const H = empresa.etiquetaMm.alto * MM;
   const margen = 2.2 * MM;
 
   const recortar = (t: string, f: typeof normal, tam: number, max: number) => {
@@ -46,6 +45,8 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
   };
 
   for (const e of cola) {
+    const altoMm = e.altoMm ?? empresa.etiquetaMm.alto;
+    const H = altoMm * MM;
     const p = doc.addPage([W, H]);
     if (e.marco) p.drawRectangle({ x: 0.3 * MM, y: 0.3 * MM, width: W - 0.6 * MM, height: H - 0.6 * MM, borderWidth: 0.6, borderColor: rgb(0, 0, 0) });
     const bits = barras(e.sku || "SKU");
@@ -56,7 +57,7 @@ export async function etiquetasPdf(cola: DatosEtiqueta[]) {
     const lineasNombre = partirNombre(e.nombre, W - margen - xNombre, W - 2 * margen, 7);
     const doble = lineasNombre.length > 1;
     // Con el nombre en dos lineas las barras bajan a 8,5 mm para que entre todo (lo que importa para leer es el ancho de cada barra, no el alto).
-    const baja = empresa.etiquetaMm.alto <= 26;
+    const baja = altoMm <= 26;
     const altoBarras = (baja ? (doble ? 5 : 6.5) : doble ? 8.5 : 10) * MM;
     const yBarras = H - (baja ? 1.4 : doble ? 1.8 : 2.2) * MM - altoBarras;
     for (let i = 0; i < bits.length; ) {

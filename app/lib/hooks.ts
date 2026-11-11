@@ -97,6 +97,25 @@ export function useModoEtiquetas(porDefecto: ModoEtiquetas) {
   return [modo, set] as const;
 }
 
+// Alto del rollo de etiquetas que tiene puesto esta PC (30 o 25 mm), guardado en esta PC.
+const KEY_ALTO = "stock:altoetiqueta";
+const oyentesAlto = new Set<() => void>();
+export function useAltoEtiqueta(porDefecto: number, permitidos: readonly number[]) {
+  const alto = useSyncExternalStore(
+    (cb) => {
+      oyentesAlto.add(cb);
+      return () => oyentesAlto.delete(cb);
+    },
+    () => { const v = Number(localStorage.getItem(KEY_ALTO)); return permitidos.includes(v) ? v : porDefecto; },
+    () => porDefecto,
+  );
+  const set = (v: number) => {
+    localStorage.setItem(KEY_ALTO, String(v));
+    oyentesAlto.forEach((l) => l());
+  };
+  return [alto, set] as const;
+}
+
 // Lector de codigos de barras: funciona como un teclado que escribe el codigo muy rapido y termina con Enter
 // (o con Tab, segun como venga configurado). Se escucha en toda la pagina, salvo mientras se escribe en un campo.
 export function useEscaner(alCodigo: (codigo: string) => void) {
