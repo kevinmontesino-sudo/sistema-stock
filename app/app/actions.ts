@@ -34,6 +34,9 @@ async function seguro<T extends object>(permiso: Permiso, fn: (u: UsuarioSesion)
   } catch (e) {
     if (e instanceof repo.ErrorNegocio) return { ok: false, motivo: e.message };
     console.error("[acciones]", e);
+    // Falta una tabla o columna: se desplego el codigo nuevo sin correr la migracion de la base. No es un problema de conexion.
+    const codigo = (e as { code?: string }).code;
+    if (codigo === "42P01" || codigo === "42703") return { ok: false, motivo: "El sistema se actualizó pero falta actualizar la base de datos (migración). No se registró nada: avisá a quien administra el sistema." };
     return { ok: false, motivo: "No se pudo completar la operación. Revisá la conexión e intentá de nuevo." };
   }
 }
