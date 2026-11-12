@@ -30,14 +30,6 @@ const SIN_LINEAS: Linea[] = [];
 // Stocks de los que puede vender un local: el deposito puede usar tambien el de San Lorenzo.
 const origenesDe = (sucursal: string) => (sucursal === DEPOSITO ? [DEPOSITO, ORIGEN_SL] : [sucursal]);
 
-function mensajeSinStock(p: Producto, sucursal: string) {
-  const propios = origenesDe(sucursal);
-  const otras = empresa.sucursales
-    .filter((s) => !propios.includes(s.id) && (p.stock[s.id] ?? 0) > 0)
-    .map((s) => `${p.stock[s.id]} en ${s.nombre}`);
-  const camino = p.enCamino[sucursal] ? ` Hay ${p.enCamino[sucursal]} en camino a este local: recibilos en Distribuir → Recibir.` : "";
-  return `${p.nombre} no tiene stock en ${propios.map(nombreSucursal).join(" ni en ")}.${otras.length ? ` Hay ${otras.join(", ")}.` : ""}${camino}`;
-}
 const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0 ? "+" : "−"}${pctTexto(pct)}`);
 
 export default function VentaPage() {
