@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, promosDeHoy } from "@/app/actions";
+import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy } from "@/app/actions";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import { ticketVentaEscpos } from "@/lib/escpos";
@@ -13,7 +13,11 @@ import {
 } from "@/lib/util";
 
 // origen: de que stock sale la prenda. Casi siempre es el propio local; el deposito tambien puede vender con el stock de San Lorenzo.
-type Linea = { producto: Producto; cant: number; origen: string };
+// faltante: la prenda esta en el local pero el sistema no la tiene; al cobrar se corrige el stock (traer de otra sucursal o sumarla).
+type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
+type Linea = { producto: Producto; cant: number; origen: string; faltante?: Faltante };
+// Cuantas se pueden vender en una linea: lo que hay en su stock, mas lo que se puede pasar de la otra sucursal (o sin tope si no estaba cargada).
+const topeLinea = (l: Linea) => (l.faltante?.modo === "sin_cargar" ? 999 : (l.producto.stock[l.origen] ?? 0) + (l.faltante?.modo === "traer" ? l.producto.stock[l.faltante.desde] ?? 0 : 0));
 const ORIGEN_SL = "sanlorenzo";
 const claveLinea = (l: { producto: { sku: string }; origen: string }) => `${l.producto.sku}|${l.origen}`;
 type Caja = { id: string; nombre: string; ventas: number; total: number };
@@ -48,6 +52,8 @@ export default function VentaPage() {
   );
   const [manual, setManual] = useState("");
   const [aviso, setAviso] = useState("");
+  const [pregunta, setPregunta] = useState<Producto | null>(null); // prenda sin stock en el sistema: se pregunta si esta igual en el local
+  const [sinCargar, setSinCargar] = useState<{ nombre: string; precio: string } | null>(null); // vender una prenda que no esta cargada
   const [avisoOrigen, setAvisoOrigen] = useState(""); // el deposito vendiendo con stock de San Lorenzo: se avisa (no es un error)
   const [ultimoSku, setUltimoSku] = useState<string | null>(null); // la ultima prenda escaneada se resalta en la lista
   const [nota, setNota] = useState<NotaCredito | null>(null);
@@ -112,8 +118,18 @@ export default function VentaPage() {
     const existente = lineasRef.current.find((x) => x.producto.sku === p.sku && usadas(x.origen) + 1 <= hayEn(x.origen));
     const origen = existente?.origen ?? origenes.find((o) => usadas(o) + 1 <= hayEn(o));
     if (!origen) {
-      const total = origenes.reduce((s, o) => s + hayEn(o), 0);
-      return setAviso(total <= 0 ? mensajeSinStock(p, sucursal) : `De ${p.nombre} solo hay ${total} en ${origenes.map(nombreSucursal).join(" y ")}`);
+      // Si ya hay una linea de esta prenda vendiendose sin stock y todavia entra, se suma ahi.
+      const conFaltante = lineasRef.current.find((x) => x.producto.sku === p.sku && x.faltante && x.cant + 1 <= topeLinea(x));
+      if (conFaltante) {
+        setAviso("");
+        setUltimoSku(claveLinea(conFaltante));
+        setLineas((l) => l.map((x) => (claveLinea(x) === claveLinea(conFaltante) ? { ...x, cant: x.cant + 1 } : x)));
+        return;
+      }
+      // El sistema no tiene mas: se pregunta si la prenda esta igual en el local (de otra sucursal o sin cargar).
+      setAviso("");
+      setPregunta(p);
+      return;
     }
     setAviso("");
     // El aviso solo cuando el origen se eligio solo para una linea nueva (si se suma a una linea que ya estaba, no cambia).
@@ -131,8 +147,10 @@ export default function VentaPage() {
   const cambiarCantidad = useCallback((clave: string, delta: number) => {
     const f = lineasRef.current.find((x) => claveLinea(x) === clave);
     if (!f) return;
-    const hay = f.producto.stock[f.origen] ?? 0;
-    if (delta > 0 && f.cant + 1 > hay) return setAviso(`De ${f.producto.nombre} solo hay ${hay} en ${nombreSucursal(f.origen)}`);
+    if (delta > 0 && f.cant + 1 > topeLinea(f)) {
+      if (!f.faltante) return setPregunta(f.producto);
+      return setAviso(`De ${f.producto.nombre} no se pueden vender más de ${topeLinea(f)}`);
+    }
     setAviso("");
     setUltimoSku(clave);
     setLineas((l) => l.map((x) => (claveLinea(x) === clave ? { ...x, cant: Math.max(1, x.cant + delta) } : x)));
@@ -142,6 +160,7 @@ export default function VentaPage() {
   const cambiarOrigen = useCallback((clave: string, nuevo: string) => {
     const f = lineasRef.current.find((x) => claveLinea(x) === clave);
     if (!f || f.origen === nuevo) return;
+    if (f.faltante) return setAviso("Esta línea se vende sin stock en el sistema: para cambiar de dónde sale, quitala y volvé a agregarla.");
     const otra = lineasRef.current.find((x) => x.producto.sku === f.producto.sku && x.origen === nuevo);
     const total = f.cant + (otra?.cant ?? 0);
     const hay = f.producto.stock[nuevo] ?? 0;
@@ -153,6 +172,34 @@ export default function VentaPage() {
       ? l.filter((x) => claveLinea(x) !== clave).map((x) => (claveLinea(x) === claveLinea(otra) ? { ...x, cant: total } : x))
       : l.map((x) => (claveLinea(x) === clave ? { ...x, origen: nuevo } : x)));
   }, [sucursal, setLineas]);
+
+  // Respuesta a la pregunta: la prenda esta en el local. Se agrega (o se suma) en la linea del propio stock, marcada para corregir al cobrar.
+  const elegirFaltante = useCallback((p: Producto, f: Faltante) => {
+    const origen = origenesDe(sucursal)[0];
+    setPregunta(null);
+    setAviso("");
+    setUltima(null);
+    setUltimoSku(`${p.sku}|${origen}`);
+    setLineas((l) => {
+      const i = l.findIndex((x) => x.producto.sku === p.sku && x.origen === origen);
+      if (i >= 0) return l.map((x, j) => (j === i ? { ...x, cant: x.cant + 1, faltante: f } : x));
+      return [...l, { producto: p, cant: 1, origen, faltante: f }];
+    });
+  }, [sucursal, setLineas]);
+
+  async function agregarSinCargar() {
+    if (!sinCargar) return;
+    const precio = parseInt(sinCargar.precio) || 0;
+    if (sinCargar.nombre.trim().length < 3) return setAviso("Escribí el nombre de la prenda");
+    if (precio <= 0) return setAviso("Escribí el precio de lista (el de transferencia)");
+    const r = await productoSinCargar(sinCargar.nombre, precio);
+    if (!r.ok) return setAviso(r.motivo);
+    setSinCargar(null);
+    // Si resulta que ya estaba cargada y tiene stock aca, se vende normal; si no, sin stock (se suma al cobrar).
+    const p = r.producto;
+    if (origenesDe(sucursal).some((o) => (p.stock[o] ?? 0) > 0)) agregarProducto(p);
+    else elegirFaltante(p, { modo: "sin_cargar" });
+  }
 
   const agregar = useCallback(async (codigo: string) => {
     const texto = codigo.trim();
@@ -175,13 +222,19 @@ export default function VentaPage() {
 
   // Sugerencias por nombre: solo prendas con stock en este local, las que mas tienen arriba.
   const dManual = useDebounced(manual, 200);
-  const consulta = dManual.trim().length >= 2 && !ES_SKU.test(dManual.trim()) ? dManual : "";
+  const consulta = dManual.trim().length >= 2 && ![ES_SKU, ES_CODIGO_NOTA, ES_CODIGO_VENTA].some((r) => r.test(dManual.trim())) ? dManual : "";
   const stockTotal = useCallback((p: Producto) => origenesDe(sucursal).reduce((s, o) => s + (p.stock[o] ?? 0), 0), [sucursal]);
   const ordenar = useCallback((ps: Producto[]) => [...ps].sort((a, b) => stockTotal(b) - stockTotal(a)).slice(0, 8), [stockTotal]);
   useEffect(() => {
     if (!consulta) return;
     let vivo = true;
-    buscarProductos({ q: consulta, sucursalConStock: origenesDe(sucursal).join(",") }).then((r) => vivo && r.ok && setSugeridas(ordenar(r.productos)));
+    // Primero las que tienen stock aca; si no hay ninguna, todas (la prenda puede estar en el local aunque el sistema no la tenga).
+    buscarProductos({ q: consulta, sucursalConStock: origenesDe(sucursal).join(",") }).then(async (r) => {
+      if (!vivo || !r.ok) return;
+      if (r.productos.length) return setSugeridas(ordenar(r.productos));
+      const t = await buscarProductos({ q: consulta });
+      if (vivo && t.ok) setSugeridas(t.productos.slice(0, 8));
+    });
     return () => { vivo = false; };
   }, [consulta, sucursal, ordenar]);
   const lista = consulta ? sugeridas : [];
@@ -192,11 +245,15 @@ export default function VentaPage() {
     setManual("");
     setSel(-1);
     if (sel >= 0 && lista[sel]) return agregarProducto(lista[sel]);
-    if (ES_SKU.test(t)) return agregar(t);
+    // SKU, nota de credito o ticket escaneados con el cursor en el buscador: se tratan igual que escaneados fuera (no se buscan como nombre).
+    if (ES_SKU.test(t) || ES_CODIGO_NOTA.test(t) || ES_CODIGO_VENTA.test(t)) return agregar(t);
     const r = await buscarProductos({ q: t, sucursalConStock: origenesDe(sucursal).join(",") });
     const primero = r.ok ? ordenar(r.productos)[0] : undefined;
     if (primero) return agregarProducto(primero);
-    setAviso(`No hay ninguna prenda con stock en ${origenesDe(sucursal).map(nombreSucursal).join(" ni en ")} para "${t}"`);
+    const todas = await buscarProductos({ q: t });
+    if (todas.ok && todas.productos[0]) return agregarProducto(todas.productos[0]);
+    setAviso(`No hay ninguna prenda cargada que coincida con "${t}". Si no está cargada, tocá «Vender una prenda que no está cargada».`);
+    setSinCargar({ nombre: t, precio: "" });
   }
 
   function teclaBuscador(e: React.KeyboardEvent) {
@@ -264,7 +321,7 @@ export default function VentaPage() {
     if (cobrando || !calc || !calc.ok) return;
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
-    const r = await cobrarVenta(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, lineas.map((l) => [l.producto.sku, l.cant, l.origen]), pagos, especial, calc.total]))}`, especial, calc.total);
+    const r = await cobrarVenta(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, lineas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null]), pagos, especial, calc.total]))}`, especial, calc.total);
     setCobrando(false);
     // Si fallo (por ejemplo, cambiaron las promos), se vuelven a pedir: la pantalla muestra el total nuevo.
     if (!r.ok) { setRecargaPromos((x) => x + 1); return setAviso(r.motivo); }
@@ -333,6 +390,20 @@ export default function VentaPage() {
             placeholder="Escaneá una prenda, o escribí el nombre o el SKU" style={{ flex: 1, minWidth: 200 }} />
           <button type="submit">Agregar</button>
         </form>
+        {!sinCargar ? (
+          <button type="button" className="chico" style={{ marginTop: 6 }} onClick={() => { setSinCargar({ nombre: "", precio: "" }); setAviso(""); }}>Vender una prenda que no está cargada</button>
+        ) : (
+          <form className="fila tarjeta" style={{ gap: 8, marginTop: 8, flexWrap: "wrap", padding: 10 }} onSubmit={(e) => { e.preventDefault(); agregarSinCargar(); }}>
+            <strong style={{ width: "100%" }}>Prenda que no está cargada</strong>
+            <input type="text" value={sinCargar.nombre} autoFocus placeholder="Nombre (ej: remera basquet negra)" maxLength={120}
+              onChange={(e) => setSinCargar({ ...sinCargar, nombre: e.target.value })} style={{ flex: 2, minWidth: 180 }} />
+            <input type="number" inputMode="numeric" min={0} value={sinCargar.precio} placeholder="Precio de lista"
+              onChange={(e) => setSinCargar({ ...sinCargar, precio: e.target.value })} style={{ flex: 1, minWidth: 120 }} />
+            <button type="submit" className="principal">Agregar a la venta</button>
+            <button type="button" className="chico" onClick={() => setSinCargar(null)}>Cancelar</button>
+            <p className="aviso" style={{ width: "100%", margin: 0 }}>Se crea la prenda en el sistema (con código propio) y al cobrar se suma al stock de este local. Queda registrado para la oficina. El precio es el de lista (transferencia); efectivo y tarjeta se calculan como siempre.</p>
+          </form>
+        )}
         {lista.length > 0 && (
           <div className="sugerencias" role="listbox" aria-label="Prendas con stock en este local">
             {lista.map((p, i) => (
@@ -347,6 +418,21 @@ export default function VentaPage() {
         )}
       </div>
       {aviso && <p className="alerta mala no-print" role="alert" style={{ margin: "0 0 12px", fontSize: 16 }}>{aviso}</p>}
+      {pregunta && (
+        <div className="alerta no-print" role="alertdialog" style={{ margin: "0 0 12px", fontSize: 16, background: "#fff3c4", color: "#000", border: "1px solid #e0b100" }}>
+          <strong>{pregunta.nombre}</strong> ({pesos(pregunta.precio)}): el sistema no tiene {lineas.some((l) => l.producto.sku === pregunta.sku) ? "más " : ""}en {origenesDe(sucursal).map(nombreSucursal).join(" ni en ")}. ¿La tenés igual acá?
+          <div className="fila" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {empresa.sucursales.filter((s) => !origenesDe(sucursal).includes(s.id) && (pregunta.stock[s.id] ?? 0) > 0).map((s) => (
+              <button key={s.id} className="principal" onClick={() => elegirFaltante(pregunta, { modo: "traer", desde: s.id })}>
+                Sí: el sistema la tiene en {s.nombre} ({pregunta.stock[s.id]}), pasarla acá
+              </button>
+            ))}
+            <button className="principal" onClick={() => elegirFaltante(pregunta, { modo: "sin_cargar" })}>Sí: no estaba cargada, sumarla y vender</button>
+            <button className="chico" onClick={() => setPregunta(null)}>No, cancelar</button>
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 13 }}>El stock se corrige al cobrar y queda registrado para la oficina (informe de control).</p>
+        </div>
+      )}
       {avisoOrigen && lineas.some((l) => l.origen !== sucursal) && <p className="alerta no-print" role="status" style={{ margin: "0 0 12px", fontSize: 15, background: "#fff3c4", color: "#000", border: "1px solid #e0b100" }}>{avisoOrigen}</p>}
 
       <div className="tarjeta no-print">
@@ -363,10 +449,15 @@ export default function VentaPage() {
                   <td>
                     <strong>{f.producto.nombre}</strong><br />
                     <span className="interno"><span className="mono">{f.producto.sku}</span> · {pesos(f.producto.precio)} c/u · hay {f.producto.stock[f.origen] ?? 0} {sucursal === DEPOSITO ? `en ${nombreSucursal(f.origen)}` : "acá"}</span>
+                    {f.faltante && (
+                      <><br /><strong style={{ background: "#fff3c4", color: "#000", padding: "1px 6px", borderRadius: 4, fontSize: 13 }}>
+                        {f.faltante.modo === "traer" ? `Sin stock acá: al cobrar se pasa de ${nombreSucursal(f.faltante.desde)}` : "No estaba cargada: al cobrar se suma al stock"}
+                      </strong></>
+                    )}
                     {sucursal === DEPOSITO && (
                       <><br /><label className="fila" style={{ gap: 6, fontSize: 13, marginTop: 4, flexWrap: "wrap" }}>
                         <span>Sale del stock de:</span>
-                        <select value={f.origen} onChange={(e) => cambiarOrigen(claveLinea(f), e.target.value)}
+                        <select value={f.origen} disabled={!!f.faltante} onChange={(e) => cambiarOrigen(claveLinea(f), e.target.value)}
                           style={f.origen !== sucursal ? { background: "#fff3c4", color: "#000", fontWeight: 700 } : undefined}>
                           {origenesDe(sucursal).map((o) => <option key={o} value={o}>{nombreSucursal(o)} (hay {f.producto.stock[o] ?? 0})</option>)}
                         </select>

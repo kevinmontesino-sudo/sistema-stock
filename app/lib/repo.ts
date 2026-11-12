@@ -5,7 +5,7 @@ import { usuarioEnCurso } from "./seguridad/contexto";
 import { descuentoEspecial, mediosParaPromo, mejorPromo, TOPE_PCT, type Promo } from "./promos";
 import { auditar } from "./seguridad/auditoria";
 import {
-  capitalizar, nombreSucursal, normalizar, totalReparto,
+  capitalizar, nombreSucursal, normalizar, tipoDesdeNombre, totalReparto,
   calcularPagos, mediosDelCarrito, NO_ANULADA, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
@@ -43,7 +43,9 @@ export async function listar(
   }
   for (const t of normalizar(f.q ?? "").replace(/[%_\\]/g, "").split(" ").filter(Boolean)) {
     params.push(`%${t}%`);
-    cond.push(`(p.nombre_norm like $${params.length} or lower(p.sku) like $${params.length})`);
+    // Un numero de 4 o mas cifras tambien busca por precio de lista ("17500" encuentra las prendas de $17.500).
+    const precio = /^\d{4,8}$/.test(t) ? ` or p.precio_lista = ${Number(t)}` : "";
+    cond.push(`(p.nombre_norm like $${params.length} or lower(p.sku) like $${params.length}${precio})`);
   }
   if (f.sucursalConStock) {
     // Puede ser una sola sucursal o varias separadas por coma (el deposito vende tambien con el stock de San Lorenzo).
@@ -227,6 +229,32 @@ export async function cargar(a: {
     await c.query("insert into cargas (sku, cantidad, usuario_id) values ($1, $2, $3)", [sku, a.cantidad, usuarioEnCurso()?.id ?? null]);
     await mov(c, sku, a.cantidad, null, DEPOSITO, "carga");
     await repartir(c, sku, DEPOSITO, a.reparto);
+    return (await productoPorSku(sku, c))!;
+  });
+}
+
+// Prenda que todavia no esta cargada en el sistema y se quiere vender ya: se crea el producto (SKU nuevo, categoria por el nombre)
+// SIN stock; al venderla, la caja la manda como "sin_cargar" y el stock se corrige en la misma venta. Si ya existe una prenda
+// comun con ese nombre y precio, se usa esa.
+export async function productoSinCargar(a: { nombre: string; precio: number }) {
+  const nombre = capitalizar(a.nombre);
+  if (nombre.replace(/[^\p{L}]/gu, "").length < 3) falla("Escribí el nombre de la prenda");
+  if (nombre.length > 120) falla("El nombre es demasiado largo");
+  if (!Number.isInteger(a.precio) || a.precio <= 0 || a.precio > 10_000_000) falla("Ingresá el precio de lista");
+  return tx(async (c) => {
+    const k = normalizar(nombre);
+    const detectada = tipoDesdeNombre(nombre, await listarTipos(c));
+    const palabra = nombre.split(/\s+/)[0].replace(/[^\p{L}]/gu, "");
+    const tipo = (await resolverTipo(c, detectada?.nombre ?? (palabra.length >= 3 ? palabra : ""), true)).codigo;
+    const ex = await c.query<{ sku: string }>(
+      "select sku from productos where activo and precios_medio is null and tipo = $1 and nombre_norm = $2 and precio_lista = $3 for update", [tipo, k, a.precio]);
+    let sku = ex.rows[0]?.sku;
+    if (!sku) {
+      const n = await c.query<{ ultimo: number }>("update contadores_sku set ultimo = ultimo + 1 where tipo = $1 returning ultimo", [tipo]);
+      sku = tipo + String(n.rows[0].ultimo).padStart(empresa.skuDigitos, "0");
+      await c.query("insert into productos (sku, tipo, nombre, nombre_norm, precio_lista) values ($1, $2, $3, $4, $5)", [sku, tipo, nombre, k, a.precio]);
+      await auditar("producto_sin_cargar", { sku, nombre, precio: a.precio }, { db: c });
+    }
     return (await productoPorSku(sku, c))!;
   });
 }
@@ -425,13 +453,20 @@ function validarEspecial(e: Especial) {
 // totalEsperado: lo que la caja le dijo al cliente. Si el servidor calcula otro total (cambiaron las promos), no se registra nada.
 // origen: de que stock sale cada renglon. Solo el deposito puede vender con stock de San Lorenzo (estan en el mismo lugar); el resto sale siempre de su propio local.
 export const ORIGENES_DEPOSITO = [DEPOSITO, "sanlorenzo"];
-export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number) {
+// La prenda esta fisicamente en el local pero el sistema no la tiene (no se cargo, o figura en otra sucursal). La caja pregunta y,
+// en la misma venta, primero se corrige el stock (y queda registrado para la oficina) y despues se vende:
+//   traer      = el sistema la tiene en otra sucursal: se pasa de alla a este local.
+//   sin_cargar = no estaba cargada: se suma al stock de este local con un ajuste.
+export type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
+export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string; faltante?: Faltante | null }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const especial = especialPedido ? validarEspecial(especialPedido) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
   for (const i of itemsPedidos) {
     if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
     if (i.origen && i.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(i.origen))) falla("Ese local no puede vender con el stock de otra sucursal");
+    const f = i.faltante;
+    if (f && !(f.modo === "sin_cargar" || (f.modo === "traer" && esSucursal(f.desde) && f.desde !== (i.origen || sucursal)))) falla("Datos inválidos para vender sin stock");
   }
   // Siempre se bloquean las prendas en el mismo orden (por SKU y origen): dos ventas al mismo tiempo no se traban entre si.
   const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
@@ -452,7 +487,23 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     for (const i of items) {
       const p = await productoPorSku(i.sku, c);
       if (!p) return falla(`La prenda ${i.sku} ya no existe o fue dada de baja`);
-      const hay = await stockActual(c, p.sku, i.origen);
+      let hay = await stockActual(c, p.sku, i.origen);
+      if (hay < i.cant && i.faltante) {
+        const falta = i.cant - Math.max(0, hay);
+        const aca = nombreSucursal(i.origen);
+        if (i.faltante.modo === "traer") {
+          const desde = i.faltante.desde;
+          const hayAlla = await stockActual(c, p.sku, desde);
+          if (hayAlla < falta) falla(`En ${nombreSucursal(desde)} el sistema tiene ${Math.max(0, hayAlla)} de ${p.nombre}: no alcanza para pasar ${falta} a ${aca}`);
+          await sumarStock(c, p.sku, desde, -falta);
+          await sumarStock(c, p.sku, i.origen, falta);
+          await mov(c, p.sku, falta, desde, i.origen, "traslado", { motivo: `Venta sin stock: estaba en ${aca} y el sistema la tenía en ${nombreSucursal(desde)}` });
+        } else {
+          await sumarStock(c, p.sku, i.origen, falta);
+          await mov(c, p.sku, falta, null, i.origen, "ajuste", { motivo: `Venta sin stock: estaba en ${aca} sin cargar` });
+        }
+        hay = await stockActual(c, p.sku, i.origen);
+      }
       if (hay < i.cant) {
         falla(hay <= 0
           ? `${p.nombre} no tiene stock en ${nombreSucursal(i.origen)}`

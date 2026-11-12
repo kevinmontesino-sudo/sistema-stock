@@ -158,7 +158,7 @@ export async function controlDiario(dia: string, sucursal: string | null = null)
   const ajustes = await pool.query<{ hora: Date; sku: string; nombre: string; cantidad: number; sucursal: string | null; motivo: string | null; usuario: string | null }>(
     `select m.creado_en as hora, m.sku, p.nombre, m.cantidad, coalesce(m.desde, m.hasta) as sucursal, m.motivo, u.nombre as usuario
      from movimientos m join productos p on p.sku = m.sku left join usuarios u on u.id = m.usuario_id
-     where m.tipo = 'ajuste' and ${rango("m.creado_en", 1)} and ($2::text is null or coalesce(m.desde, m.hasta) = $2) order by m.creado_en`, [dia, sucursal]);
+     where (m.tipo = 'ajuste' or (m.tipo = 'traslado' and m.motivo like 'Venta sin stock%')) and ${rango("m.creado_en", 1)} and ($2::text is null or coalesce(m.desde, m.hasta) = $2) order by m.creado_en`, [dia, sucursal]);
   const camino = await pool.query<{ destino: string; envios: number; unidades: number; dias: number }>(
     `select hasta as destino, count(*)::int as envios, sum(cantidad - cantidad_recibida)::int as unidades,
        floor(extract(epoch from now() - min(creado_en)) / 86400)::int as dias

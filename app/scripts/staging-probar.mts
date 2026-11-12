@@ -454,6 +454,41 @@ try {
     igual("Anular: con la caja abierta, el admin si puede", b.codigo, vCierre.codigo);
   });
 
+  // ---- 8c. Vender lo que el sistema no tiene (la prenda esta en el local) y prendas sin cargar ----
+  await paso("Vender sin stock en el sistema", async () => {
+    const ZEL = "zelarrayan";
+    const pagoTr = [{ medioId: "transferencia", monto: null as number | null }];
+    const D = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Retrato ${sello}`, precio: 17500, cantidad: 3, reparto: { [ZEL]: 3 } })).sku;
+    for (const t of await repo.listarPendientes(ZEL)) if (t.sku === D) await repo.recibirTraslado(t.id, ZEL);
+    await debeFallar("Sin stock: sin respuesta, no vende", () => repo.registrarVenta(LOCAL, [{ sku: D, cant: 1 }], pagoTr), /no tiene stock/);
+    // El sistema la tiene en Zelarrayan pero esta aca: se pasa y se vende
+    const v1 = await repo.registrarVenta(LOCAL, [{ sku: D, cant: 1, faltante: { modo: "traer", desde: ZEL } }], pagoTr);
+    igual("Sin stock (traer): vende al precio de lista", v1.total, pc(17500, "transferencia"));
+    igual("Sin stock (traer): baja en Zelarrayan, queda 0 aca", [await stockDe(D, ZEL), await stockDe(D, LOCAL)], [2, 0]);
+    await debeFallar("Sin stock (traer): no pasa mas de lo que hay alla", () => repo.registrarVenta(LOCAL, [{ sku: D, cant: 5, faltante: { modo: "traer", desde: ZEL } }], pagoTr), /no alcanza/);
+    await debeFallar("Sin stock (traer): no desde el mismo local", () => repo.registrarVenta(LOCAL, [{ sku: D, cant: 1, faltante: { modo: "traer", desde: LOCAL } }], pagoTr), /inválidos/);
+    // No estaba cargada en ningun lado: se suma y se vende
+    const v2 = await repo.registrarVenta(LOCAL, [{ sku: D, cant: 2, faltante: { modo: "sin_cargar" } }], pagoTr);
+    igual("Sin cargar: vende 2", v2.items[0].cant, 2);
+    igual("Sin cargar: el stock queda en 0 (se sumo y se vendio)", await stockDe(D, LOCAL), 0);
+    const movs = await pool.query<{ tipo: string; n: number }>(
+      "select tipo::text as tipo, sum(cantidad)::int as n from movimientos where sku = $1 and motivo like 'Venta sin stock%' group by 1 order by 1", [D]);
+    igual("Sin stock: queda registrado (traslado 1, ajuste 2)", movs.rows, [{ tipo: "ajuste", n: 2 }, { tipo: "traslado", n: 1 }]);
+    const ctl = await (await import("../lib/cierre")).controlDiario(hoy, LOCAL);
+    check("Sin stock: aparece en el informe de control", ctl.ajustesDeStock.some((a) => a.sku === D && (a.motivo ?? "").startsWith("Venta sin stock")), JSON.stringify(ctl.ajustesDeStock.slice(-3)));
+    // Prenda que no existe en el sistema
+    const precio = 12000 + Number(sello.slice(-3));
+    const nueva = await repo.productoSinCargar({ nombre: `ZZ remera basquet ${sello}`, precio });
+    igual("Prenda sin cargar: se crea sin stock y con su categoria", [nueva.tipo, Object.values(nueva.stock).reduce((a, b) => a + b, 0)], ["REM", 0]);
+    const otra = await repo.productoSinCargar({ nombre: `ZZ remera basquet ${sello}`, precio });
+    igual("Prenda sin cargar: la segunda vez usa la misma", otra.sku, nueva.sku);
+    const v3 = await repo.registrarVenta(LOCAL, [{ sku: nueva.sku, cant: 1, faltante: { modo: "sin_cargar" } }], pagoTr);
+    igual("Prenda sin cargar: se vende con su precio", v3.total, pc(precio, "transferencia"));
+    await debeFallar("Prenda sin cargar: sin precio no", () => repo.productoSinCargar({ nombre: "ZZ algo", precio: 0 }), /precio/);
+    // Buscar por precio
+    check("Buscar por precio encuentra la prenda", (await repo.listar({ q: String(precio) })).some((x) => x.sku === nueva.sku), String(precio));
+  });
+
   // ---- 9. Controles sobre TODA la base (datos reales incluidos) ----
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;

@@ -64,6 +64,11 @@ export async function sugerirProductos(q: string) {
   return seguro("catalogo", async () => ({ productos: txt(q).trim().length < 2 ? [] : await repo.listar({ q: txt(q), limite: 6 }) }));
 }
 
+// Prenda que no esta cargada y se vende igual (la crea sin stock; el stock se corrige al cobrar). Ver repo.productoSinCargar.
+export async function productoSinCargar(nombre: string, precio: number) {
+  return seguro("vender", async () => ({ producto: await repo.productoSinCargar({ nombre: txt(nombre), precio: ent(precio) }) }));
+}
+
 export async function obtenerProducto(sku: string) {
   return seguro("catalogo", async () => {
     const producto = await repo.productoPorSku(txt(sku));
@@ -165,7 +170,7 @@ export async function resumenDeSucursal(sucursal: string) {
 // ---- Ventas, devoluciones y notas de credito ----
 export async function cobrarVenta(
   sucursal: string,
-  items: { sku: string; cant: number; origen?: string }[],
+  items: { sku: string; cant: number; origen?: string; faltante?: repo.Faltante | null }[],
   pagos: { medioId: string; monto: number | null }[],
   clave?: string,
   especial?: { pct: number; motivo: string; autorizo: string } | null,
@@ -175,7 +180,10 @@ export async function cobrarVenta(
     if (especial && !puede(u.rol, "descuento_especial")) throw new repo.ErrorNegocio("Tu usuario no puede hacer descuentos especiales.");
     const venta = await repo.registrarVenta(
       suc(u, txt(sucursal)),
-      (Array.isArray(items) ? items : []).map((i) => ({ sku: txt(i.sku), cant: ent(i.cant), origen: i.origen ? txt(i.origen) : undefined })),
+      (Array.isArray(items) ? items : []).map((i) => ({
+        sku: txt(i.sku), cant: ent(i.cant), origen: i.origen ? txt(i.origen) : undefined,
+        faltante: i.faltante?.modo === "traer" ? { modo: "traer" as const, desde: txt(i.faltante.desde) } : i.faltante?.modo === "sin_cargar" ? { modo: "sin_cargar" as const } : null,
+      })),
       (Array.isArray(pagos) ? pagos : []).map((p) => ({ medioId: txt(p.medioId), monto: p.monto === null ? null : ent(p.monto) })),
       txt(clave).slice(0, 80) || undefined,
       especial ? { pct: ent(especial.pct), motivo: txt(especial.motivo), autorizo: txt(especial.autorizo) } : undefined,
