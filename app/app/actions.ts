@@ -271,6 +271,15 @@ export async function ajustarStockProducto(sku: string, sucursal: string, nueva:
   });
 }
 
+export async function ajustarEnCaminoProducto(sku: string, hasta: string, nueva: number, motivo: string) {
+  return seguro("ajustar_stock", async () => {
+    const antes = await repo.productoPorSku(txt(sku));
+    const producto = await repo.ajustarEnCamino(txt(sku), txt(hasta), ent(nueva), txt(motivo));
+    await auditar("en_camino_ajustado", { sku: txt(sku), hasta: txt(hasta), antes: antes?.enCamino?.[txt(hasta)] ?? 0, despues: ent(nueva), motivo: txt(motivo) });
+    return { producto };
+  });
+}
+
 export async function eliminarProducto(sku: string) {
   return seguro("eliminar_producto", async () => {
     const antes = await repo.productoPorSku(txt(sku));

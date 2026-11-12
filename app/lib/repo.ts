@@ -717,11 +717,54 @@ export async function ajustarStock(sku: string, sucursal: string, nueva: number,
   });
 }
 
-// Baja logica: se oculta, pero las ventas y movimientos anteriores se conservan.
-export async function eliminar(sku: string) {
+// Saca prendas que figuran "en camino" a una sucursal (se mandaron de mas, por error, o no llegaron). Se descuentan de los envios
+// pendientes, empezando por el mas nuevo: esa parte vuelve al origen y ahi se da de baja con un ajuste (queda todo registrado).
+async function descontarEnCamino(c: PoolClient, sku: string, hasta: string, cuantas: number, motivo: string) {
+  const r = await c.query<{ id: number; desde: string; cantidad: number; cantidad_recibida: number }>(
+    `select id::int as id, desde, cantidad, cantidad_recibida from traslados
+      where sku = $1 and hasta = $2 and estado = 'en_camino' order by creado_en desc, id desc for update`, [sku, hasta]);
+  let resto = cuantas;
+  for (const t of r.rows) {
+    if (resto <= 0) break;
+    const quitar = Math.min(resto, t.cantidad - t.cantidad_recibida);
+    if (quitar <= 0) continue;
+    const queda = t.cantidad - quitar;
+    if (queda === 0) await c.query("update traslados set estado = 'devuelto', recibido_en = now() where id = $1", [t.id]);
+    else if (queda === t.cantidad_recibida) await c.query("update traslados set cantidad = $2, estado = 'recibido', recibido_en = now() where id = $1", [t.id, queda]);
+    else await c.query("update traslados set cantidad = $2 where id = $1", [t.id, queda]);
+    await mov(c, sku, quitar, hasta, t.desde, "deshacer", { motivo: `Envío #${t.id}: se descontaron ${quitar} que figuraban en camino a ${nombreSucursal(hasta)}` });
+    await mov(c, sku, quitar, t.desde, null, "ajuste", { motivo });
+    resto -= quitar;
+  }
+  return cuantas - resto;
+}
+
+export async function ajustarEnCamino(sku: string, hasta: string, nueva: number, motivo: string) {
+  if (!esSucursal(hasta)) falla("Sucursal inexistente");
+  if (!Number.isInteger(nueva) || nueva < 0) falla("La cantidad tiene que ser un entero desde 0");
+  if (!motivo.trim()) falla("Indicá el motivo del ajuste");
   return tx(async (c) => {
     const p = await productoPorSku(sku, c);
     if (!p) return falla("No existe el producto");
+    await c.query("select pg_advisory_xact_lock(hashtext($1))", [`camino:${p.sku}:${hasta}`]);
+    const r = await c.query<{ n: number }>(
+      "select coalesce(sum(cantidad - cantidad_recibida), 0)::int as n from traslados where sku = $1 and hasta = $2 and estado = 'en_camino'", [p.sku, hasta]);
+    const actual = r.rows[0].n;
+    if (nueva === actual) falla("La cantidad en camino es la misma que ya figura");
+    if (nueva > actual) falla(`En camino a ${nombreSucursal(hasta)} solo se puede bajar (figuran ${actual}). Para mandar más, usá Enviar.`);
+    await descontarEnCamino(c, p.sku, hasta, actual - nueva, `${motivo.trim()} (en camino a ${nombreSucursal(hasta)})`);
+    return (await productoPorSku(p.sku, c))!;
+  });
+}
+
+// Baja logica: se oculta, pero las ventas y movimientos anteriores se conservan. Lo que estaba en camino tambien se da de baja
+// (si no, el local lo seguiria viendo para recibir).
+export async function eliminar(sku: string) {
+  return tx(async (c) => {
+    const p0 = await productoPorSku(sku, c);
+    if (!p0) return falla("No existe el producto");
+    for (const [hasta, n] of Object.entries(p0.enCamino ?? {})) if (n > 0) await descontarEnCamino(c, p0.sku, hasta, n, "Producto eliminado (estaba en camino)");
+    const p = (await productoPorSku(p0.sku, c))!;
     for (const [suc, n] of Object.entries(p.stock)) {
       if (n === 0) continue;
       await sumarStock(c, p.sku, suc, -n);

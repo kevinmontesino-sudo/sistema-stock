@@ -207,6 +207,18 @@ try {
     check("Curva Plus: lo ve la oficina", (await promosAdmin.descuentosEspeciales(20)).some((x) => x.codigo === v.codigo && x.motivo === "Curva Plus"));
   });
 
+  await paso("Ajustar lo que esta en camino y eliminar con envios pendientes", async () => {
+    const ZEL = "zelarrayan";
+    const M = (await repo.cargar({ categoria: "Malla", nombre: `ZZ Malla ${sello}`, precio: 9000, cantidad: 14, reparto: { [LOCAL]: 10, [ZEL]: 4 } })).sku;
+    await debeFallar("En camino: no se puede subir", () => repo.ajustarEnCamino(M, LOCAL, 12, "ZZ prueba"), /solo se puede bajar/);
+    const p1 = await repo.ajustarEnCamino(M, LOCAL, 6, "ZZ se mandaron de mas");
+    igual("En camino: baja de 10 a 6 sin tocar el stock", [p1.enCamino[LOCAL], p1.stock["deposito"] ?? 0], [6, 0]);
+    const pend = (await repo.listarPendientes(LOCAL)).filter((t) => t.sku === M);
+    igual("En camino: el local ve 6 para recibir", pend.reduce((s, t) => s + (t.cantidad - t.recibidas), 0), 6);
+    await repo.eliminar(M);
+    igual("Eliminar: ya no queda nada en camino", (await repo.listarPendientes(ZEL)).filter((t) => t.sku === M).length, 0);
+  });
+
   // ---- 5. Devoluciones y notas de credito ----
   let nota1 = "", nota2 = "", ajuste2 = 0, monto2 = 0;
   await paso("Devolucion", async () => {
@@ -281,7 +293,7 @@ try {
     const st = await inf.stock(params);
     igual("Informe stock: unidades en White", st.totalUnidades - stockAntes.totalUnidades, (await stockDe(A, LOCAL)) + (await stockDe(B, LOCAL)));
     const ing = await inf.ingresos(params);
-    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 34); // 30 + 4 de la prueba de Curva Plus
+    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 48); // 30 + 4 (Curva Plus) + 14 (en camino)
     const env = (x: typeof ing) => x.enviosPorDestino.find((e) => e.destino === LOCAL) ?? { enviadas: 0, recibidas: 0 };
     igual("Informe ingresos: enviado y recibido", [env(ing).enviadas - env(ingresosAntes).enviadas, env(ing).recibidas - env(ingresosAntes).recibidas], [25, 25]);
     const nc = (await inf.notasCredito(params)).resumen;

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { usePuede } from "@/components/SesionContext";
-import { ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto, ingresosProducto, obtenerMediosPago, reimprimirEtiqueta, imprimirEtiquetasServidor } from "@/app/actions";
+import { ajustarEnCaminoProducto, ajustarStockProducto, buscarProductos, editarProducto, eliminarProducto, ingresosProducto, obtenerMediosPago, reimprimirEtiqueta, imprimirEtiquetasServidor } from "@/app/actions";
 import { Etiqueta } from "@/components/Etiqueta";
 import { empresa } from "@/lib/empresa.config";
 import { imprimirConAgente } from "@/lib/agenteImpresion";
@@ -29,6 +29,7 @@ export default function Buscar() {
   const [nombre, setNombre] = useState("");
   const [precio, setPrecio] = useState("");
   const [cant, setCant] = useState<Record<string, string>>({});
+  const [camino, setCamino] = useState<Record<string, string>>({});
   const [motivo, setMotivo] = useState("");
   const [mensaje, setMensaje] = useState<{ texto: string; mala: boolean } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -93,6 +94,7 @@ export default function Buscar() {
     setNombre(p.nombre);
     setPrecio(String(p.precio));
     setCant(Object.fromEntries(empresa.sucursales.map((s) => [s.id, String(p.stock[s.id] ?? 0)])));
+    setCamino(Object.fromEntries(Object.entries(p.enCamino ?? {}).filter(([, n]) => n > 0).map(([id, n]) => [id, String(n)])));
     setMotivo("");
     setMensaje(null);
   }
@@ -111,9 +113,17 @@ export default function Buscar() {
   async function guardarAjuste() {
     if (!elegido || ocupado) return;
     const cambios = empresa.sucursales.filter((s) => (parseInt(cant[s.id] ?? "") || 0) !== (elegido.stock[s.id] ?? 0));
-    if (cambios.length === 0) return setMensaje({ texto: "No cambiaste ninguna cantidad", mala: true });
+    const cambiosCamino = Object.keys(camino).filter((id) => (parseInt(camino[id]) || 0) !== (elegido.enCamino?.[id] ?? 0));
+    if (cambios.length === 0 && cambiosCamino.length === 0) return setMensaje({ texto: "No cambiaste ninguna cantidad", mala: true });
     if (!motivo.trim()) return setMensaje({ texto: "Indicá el motivo del ajuste", mala: true });
     setOcupado(true);
+    for (const id of cambiosCamino) {
+      const r = await ajustarEnCaminoProducto(elegido.sku, id, parseInt(camino[id]) || 0, motivo);
+      if (!r.ok) {
+        setOcupado(false);
+        return setMensaje({ texto: `En camino a ${nombreSucursal(id)}: ${r.motivo}`, mala: true });
+      }
+    }
     for (const s of cambios) {
       const r = await ajustarStockProducto(elegido.sku, s.id, parseInt(cant[s.id]) || 0, motivo);
       if (!r.ok) {
@@ -259,6 +269,18 @@ export default function Buscar() {
                 onChange={(e) => setCant((c) => ({ ...c, [s.id]: e.target.value }))} />
             </label>
           ))}
+          {Object.keys(camino).length > 0 && (
+            <>
+              <p className="aviso" style={{ marginBottom: 8 }}>En camino (enviadas y todavía sin recibir). Si alguna no existe o se mandó de más, bajá el número: se descuenta del envío y se da de baja.</p>
+              {Object.keys(camino).map((id) => (
+                <label key={id} className="fila" style={{ justifyContent: "space-between", marginBottom: 8, maxWidth: 320 }}>
+                  <span>En camino a {nombreSucursal(id)}</span>
+                  <input type="number" inputMode="numeric" min={0} max={elegido.enCamino?.[id] ?? 0} value={camino[id]} style={{ width: 100 }}
+                    onChange={(e) => setCamino((c) => ({ ...c, [id]: e.target.value }))} />
+                </label>
+              ))}
+            </>
+          )}
           <div className="campo"><span>Motivo (obligatorio)</span>
             <input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="conteo, merma, error de carga…" />
           </div>
