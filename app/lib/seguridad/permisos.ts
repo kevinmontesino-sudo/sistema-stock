@@ -24,8 +24,8 @@ export const PERMISOS: Record<Permiso, Rol[]> = {
   ver_totales: ["admin", "encargado", "deposito"],    // stock y totales de una sucursal
   remito: ["admin", "deposito", "encargado"],
   editar_producto: ["admin"],                         // cambiar nombre o precio
-  ajustar_stock: ["admin"],
-  eliminar_producto: ["admin"],
+  ajustar_stock: ["admin", "deposito"],               // corregir la cantidad de una sucursal (queda con motivo y usuario)
+  eliminar_producto: ["admin", "deposito"],           // dar de baja una prenda cargada por error (baja logica: las ventas viejas se conservan)
   descuento_especial: ["admin", "encargado", "deposito"], // descuento a mano en la caja, con motivo y quien lo autorizo (lo ve la oficina)
   anular_venta: ["admin", "encargado", "deposito"], // anular un ticket equivocado (los locales, solo de hoy; la oficina, cualquier dia con la caja abierta)
   admin: ["admin"],                                   // usuarios, auditoria, informes, promos
