@@ -2,7 +2,7 @@
 import * as repo from "@/lib/repo";
 import * as cierre from "@/lib/cierre";
 import { nombreSucursal, preciosDe, type Reparto } from "@/lib/util";
-import { empresa } from "@/lib/empresa.config";
+import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
 import { imprimirEtiquetasEnServidor } from "@/lib/impresoraServidor";
 import { auditar } from "@/lib/seguridad/auditoria";
@@ -176,11 +176,12 @@ export async function cobrarVenta(
   items: { sku: string; cant: number; origen?: string; faltante?: repo.Faltante | null }[],
   pagos: { medioId: string; monto: number | null }[],
   clave?: string,
-  especial?: { pct: number; motivo: string; autorizo: string } | null,
+  especial?: { pct: number; motivo: string; autorizo: string; curvaPlus?: boolean } | null,
   totalEsperado?: number,
 ) {
   return seguro("vender", async (u) => {
-    if (especial && !puede(u.rol, "descuento_especial")) throw new repo.ErrorNegocio("Tu usuario no puede hacer descuentos especiales.");
+    // Curva Plus: la puede aplicar cualquiera que cobre en Deposito (el servidor controla el local y el porcentaje).
+    if (especial && !especial.curvaPlus && !puede(u.rol, "descuento_especial")) throw new repo.ErrorNegocio("Tu usuario no puede hacer descuentos especiales.");
     const venta = await repo.registrarVenta(
       suc(u, txt(sucursal)),
       (Array.isArray(items) ? items : []).map((i) => ({
@@ -189,7 +190,8 @@ export async function cobrarVenta(
       })),
       (Array.isArray(pagos) ? pagos : []).map((p) => ({ medioId: txt(p.medioId), monto: p.monto === null ? null : ent(p.monto) })),
       txt(clave).slice(0, 80) || undefined,
-      especial ? { pct: ent(especial.pct), motivo: txt(especial.motivo), autorizo: txt(especial.autorizo) } : undefined,
+      especial?.curvaPlus ? { pct: 0, motivo: "", autorizo: u.nombre, curvaPlus: true }
+        : especial ? { pct: ent(especial.pct), motivo: txt(especial.motivo), autorizo: txt(especial.autorizo) } : undefined,
       typeof totalEsperado === "number" && Number.isInteger(totalEsperado) ? totalEsperado : undefined,
     );
     const { nueva: _nueva, ...datos } = venta;
@@ -200,7 +202,10 @@ export async function cobrarVenta(
 
 // Promos que valen hoy en el local (la caja las usa para mostrar el total antes de cobrar; al cobrar, el servidor recalcula).
 export async function promosDeHoy(sucursal: string) {
-  return seguro("vender", async (u) => ({ promos: await repo.promosVigentes(suc(u, txt(sucursal))), especial: puede(u.rol, "descuento_especial") }));
+  return seguro("vender", async (u) => {
+    const s = suc(u, txt(sucursal));
+    return { promos: await repo.promosVigentes(s), especial: puede(u.rol, "descuento_especial"), curvaPlus: s === DEPOSITO };
+  });
 }
 
 export async function cajaDeHoy(sucursal: string) {

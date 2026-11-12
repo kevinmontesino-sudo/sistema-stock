@@ -440,8 +440,14 @@ export async function promosVigentes(sucursal: string, db: Db = pool): Promise<P
 }
 
 // Descuento especial (lo hace un encargado y lo tiene que haber consultado): porcentaje, motivo y quien lo autorizo.
-export type Especial = { pct: number; motivo: string; autorizo: string };
-function validarEspecial(e: Especial) {
+// curvaPlus: el descuento mayorista de Deposito (porcentaje fijo de empresa.config; autorizo = el usuario que cobra).
+export type Especial = { pct: number; motivo: string; autorizo: string; curvaPlus?: boolean };
+function validarEspecial(e: Especial, sucursal: string): Especial {
+  if (e.curvaPlus) {
+    if (sucursal !== DEPOSITO) falla(`${empresa.curvaPlus.nombre} solo se aplica en ${nombreSucursal(DEPOSITO)}`);
+    const quien = (e.autorizo ?? "").trim().replace(/\s+/g, " ").slice(0, 60);
+    return { pct: empresa.curvaPlus.pct, motivo: empresa.curvaPlus.nombre, autorizo: quien.length >= 2 ? quien : nombreSucursal(DEPOSITO), curvaPlus: true };
+  }
   if (!Number.isFinite(e.pct) || e.pct < 1 || e.pct > TOPE_PCT || Math.round(e.pct * 2) !== e.pct * 2) falla(`El descuento especial tiene que ser de 1% a ${TOPE_PCT}%`);
   const motivo = e.motivo.trim().replace(/\s+/g, " ");
   const autorizo = e.autorizo.trim().replace(/\s+/g, " ");
@@ -460,7 +466,7 @@ export const ORIGENES_DEPOSITO = [DEPOSITO, "sanlorenzo"];
 export type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
 export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string; faltante?: Faltante | null }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
-  const especial = especialPedido ? validarEspecial(especialPedido) : null;
+  const especial = especialPedido ? validarEspecial(especialPedido, sucursal) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
   for (const i of itemsPedidos) {
     if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
@@ -515,7 +521,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     // Promo: la elige el servidor con las promos de la base (lo que diga la pantalla no cuenta). El descuento especial la reemplaza.
     const auto = especial ? { promo: null, descuento: 0, detalle: null } : mejorPromo(await promosVigentes(sucursal, c), prods.map((p, i) => ({ tipo: p.tipo, precio: p.precio, cant: items[i].cant })));
     const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
-    const promoNombre = especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : null;
+    const promoNombre = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : null;
     // Lo que se paga a "precio de lista" despues de la promo: sobre eso se aplican los medios de pago.
     const neto = subtotal - descuento;
     // Pagos con nota de credito ("nota:N000001"): se bloquea la nota, se valida y entra como un medio mas con su propio ajuste.
@@ -584,7 +590,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     }
     // En la misma transaccion: si la venta se registra, el descuento especial queda auditado (y un reintento no lo duplica).
     if (especial) {
-      await auditar("descuento_especial", { venta: v.rows[0].codigo, sucursal, pct: especial.pct, monto: descuento, motivo: especial.motivo, autorizo: especial.autorizo }, { db: c });
+      await auditar(especial.curvaPlus ? "curva_plus" : "descuento_especial", { venta: v.rows[0].codigo, sucursal, pct: especial.pct, monto: descuento, motivo: especial.motivo, autorizo: especial.autorizo }, { db: c });
     }
     return {
       nueva: true,

@@ -66,9 +66,11 @@ export default function VentaPage() {
   const [version, setVersion] = useState(0);
   const [sugeridas, setSugeridas] = useState<Producto[]>([]);
   // Promos de hoy en este local (se aplican solas) y descuento especial (a mano, con motivo y quien lo autorizo).
-  const [promosHoy, setPromosHoy] = useState<{ suc: string; promos: Promo[]; especial: boolean }>({ suc: "", promos: [], especial: false });
+  const [promosHoy, setPromosHoy] = useState<{ suc: string; promos: Promo[]; especial: boolean; curvaPlus: boolean }>({ suc: "", promos: [], especial: false, curvaPlus: false });
   const [formEsp, setFormEsp] = useState({ pct: "", motivo: "", autorizo: "" });
-  const [especial, setEspecial] = useState<{ pct: number; motivo: string; autorizo: string } | null>(null);
+  const [especialSel, setEspecial] = useState<{ pct: number; motivo: string; autorizo: string; curvaPlus?: boolean } | null>(null);
+  // Curva Plus es solo de Deposito: si se cambia de local, no cuenta.
+  const especial = especialSel?.curvaPlus && sucursal !== DEPOSITO ? null : especialSel;
   const [verEsp, setVerEsp] = useState(false);
   const [errEsp, setErrEsp] = useState("");
   const [recargaPromos, setRecargaPromos] = useState(0);
@@ -87,7 +89,7 @@ export default function VentaPage() {
 
   useEffect(() => {
     let vivo = true;
-    const cargar = () => promosDeHoy(sucursal).then((r) => vivo && r.ok && setPromosHoy({ suc: sucursal, promos: r.promos, especial: r.especial }));
+    const cargar = () => promosDeHoy(sucursal).then((r) => vivo && r.ok && setPromosHoy({ suc: sucursal, promos: r.promos, especial: r.especial, curvaPlus: r.curvaPlus }));
     cargar();
     // Las promos pueden cambiar durante el dia (la oficina las crea o las saca): se vuelven a pedir cada 2 minutos y al volver a la pestaña.
     const t = setInterval(cargar, 120_000);
@@ -270,7 +272,7 @@ export default function VentaPage() {
   const itemsPromo = lineas.map((l) => ({ tipo: l.producto.tipo, precio: l.producto.precio, cant: l.cant }));
   const auto = mejorPromo(promos, itemsPromo);
   const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
-  const nombrePromo = especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
+  const nombrePromo = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
   const neto = subtotal - descuento;
   const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promos, itemsPromo, auto.descuento) : null;
   // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), los medios con descuento pasan a 0%: se paga el precio de la promo.
@@ -485,7 +487,8 @@ export default function VentaPage() {
             <div className="fila" style={{ justifyContent: "space-between" }}>
               <span style={{ fontSize: 16 }}>
                 <strong>{nombrePromo}</strong>{promoAplicada && <> · {descripcionPromo(promoAplicada)}</>}
-                {especial && <> · <span className="interno">Motivo: {especial.motivo} · Autorizó: {especial.autorizo}</span> <button className="chico" onClick={() => setEspecial(null)}>Quitar</button></>}
+                {especial?.curvaPlus && <> · descuento mayorista <button className="chico" onClick={() => setEspecial(null)}>Quitar</button></>}
+                {especial && !especial.curvaPlus && <> · <span className="interno">Motivo: {especial.motivo} · Autorizó: {especial.autorizo}</span> <button className="chico" onClick={() => setEspecial(null)}>Quitar</button></>}
               </span>
               <span className="total-venta">{pesos(neto)}</span>
             </div>
@@ -601,6 +604,15 @@ export default function VentaPage() {
                 <strong className={vuelto < 0 ? "sin-stock" : "vuelto-monto"}>{pesos(Math.abs(vuelto))}</strong>
               </div>
             )}
+          </div>
+        )}
+
+        {promosHoy.curvaPlus && promosHoy.suc === sucursal && lineas.length > 0 && !especial && (
+          <div style={{ marginTop: 12 }}>
+            <button type="button" onClick={() => { setEspecial({ pct: empresa.curvaPlus.pct, motivo: empresa.curvaPlus.nombre, autorizo: "", curvaPlus: true }); setVerEsp(false); setErrEsp(""); }}>
+              Aplicar {empresa.curvaPlus.nombre.toUpperCase()} ({empresa.curvaPlus.pct}%)
+            </button>
+            <span className="aviso" style={{ marginLeft: 8 }}>Compra mayorista que cumple los requisitos. Reemplaza a la promo del día.</span>
           </div>
         )}
 

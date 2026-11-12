@@ -192,6 +192,21 @@ try {
     check("Descuento especial: lo ve la oficina", (await promosAdmin.descuentosEspeciales(20)).some((x) => x.codigo === v.codigo));
   });
 
+  await paso("Curva Plus (solo Deposito)", async () => {
+    const cp = { pct: 0, motivo: "", autorizo: "ZZ Staging", curvaPlus: true };
+    await debeFallar("Curva Plus: fuera de Deposito no", () => repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "transferencia", monto: null }], undefined, cp), /solo se aplica/);
+    const DEPO = "deposito";
+    const C = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Curva ${sello}`, precio: 20000, cantidad: 4, reparto: {} })).sku;
+    const v = await repo.registrarVenta(DEPO, [{ sku: C, cant: 2 }], [{ medioId: "transferencia", monto: null }], undefined, { ...cp, pct: 50 });
+    igual("Curva Plus: 25% fijo sobre la lista (el % que mande la pantalla no cuenta)", v.total, pc(30000, "transferencia"));
+    igual("Curva Plus: nombre en el ticket", v.promo?.nombre, "Curva Plus (25%)");
+    const ve = await repo.registrarVenta(DEPO, [{ sku: C, cant: 1 }], [{ medioId: "efectivo", monto: null }], undefined, cp);
+    igual("Curva Plus: con efectivo se suma el descuento del medio", ve.total, pc(15000, "efectivo"));
+    const a = await pool.query("select 1 from auditoria where accion = 'curva_plus' and detalle->>'venta' = $1", [v.codigo]);
+    igual("Curva Plus: auditado", a.rowCount, 1);
+    check("Curva Plus: lo ve la oficina", (await promosAdmin.descuentosEspeciales(20)).some((x) => x.codigo === v.codigo && x.motivo === "Curva Plus"));
+  });
+
   // ---- 5. Devoluciones y notas de credito ----
   let nota1 = "", nota2 = "", ajuste2 = 0, monto2 = 0;
   await paso("Devolucion", async () => {
@@ -266,7 +281,7 @@ try {
     const st = await inf.stock(params);
     igual("Informe stock: unidades en White", st.totalUnidades - stockAntes.totalUnidades, (await stockDe(A, LOCAL)) + (await stockDe(B, LOCAL)));
     const ing = await inf.ingresos(params);
-    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 30);
+    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 34); // 30 + 4 de la prueba de Curva Plus
     const env = (x: typeof ing) => x.enviosPorDestino.find((e) => e.destino === LOCAL) ?? { enviadas: 0, recibidas: 0 };
     igual("Informe ingresos: enviado y recibido", [env(ing).enviadas - env(ingresosAntes).enviadas, env(ing).recibidas - env(ingresosAntes).recibidas], [25, 25]);
     const nc = (await inf.notasCredito(params)).resumen;
