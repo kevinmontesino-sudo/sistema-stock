@@ -2,6 +2,7 @@ import { pool } from "./db";
 import { empresa } from "./empresa.config";
 import { descripcionPromo, textoPromo, TOPE_PCT, type Promo } from "./promos";
 import { ErrorNegocio } from "./repo";
+import { NO_ANULADA } from "./util";
 
 // Alta, listado y baja de promos. Lo usan la pantalla Oficina > Promos (administradores) y la API /api/promos (llave de alcance "promos").
 const falla = (m: string): never => { throw new ErrorNegocio(m); };
@@ -32,8 +33,8 @@ export async function listarPromos(f: { soloVigentes?: boolean } = {}): Promise<
        p.descuento_efectivo as "descuentoEfectivo", p.sin_cambio as "sinCambio",
        (select coalesce(array_agg(t.nombre order by t.nombre), '{}') from tipos t where t.codigo = any(p.tipos)) as categorias,
        p.activa, p.origen, p.creado_en as creada,
-       (select count(*)::int from ventas v where v.promo_id = p.id) as ventas,
-       (select coalesce(sum(v.descuento_promo), 0)::int from ventas v where v.promo_id = p.id) as descontado
+       (select count(*)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) as ventas,
+       (select coalesce(sum(v.descuento_promo), 0)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) as descontado
      from promos p
      where ($1::boolean is not true or (p.activa and p.hasta >= (now() at time zone 'America/Argentina/Buenos_Aires')::date))
      order by (p.activa and p.hasta >= (now() at time zone 'America/Argentina/Buenos_Aires')::date) desc, p.desde desc, p.id desc limit 300`,
@@ -105,7 +106,7 @@ export async function descuentosEspeciales(limite = 100) {
     `select v.codigo, v.creado_en as fecha, v.sucursal_id as sucursal, u.nombre as usuario, v.especial_pct::float8 as pct,
        v.descuento_promo as descuento, v.total, v.especial_motivo as motivo, v.especial_autorizo as autorizo
      from ventas v left join usuarios u on u.id = v.usuario_id
-     where v.especial_pct is not null order by v.creado_en desc limit $1`,
+     where v.especial_pct is not null and ${NO_ANULADA} order by v.creado_en desc limit $1`,
     [Math.min(Math.max(1, limite), 500)],
   );
   return r.rows.map((x) => ({ ...x, fecha: new Date(x.fecha).toISOString() }));

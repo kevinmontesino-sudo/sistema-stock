@@ -165,7 +165,7 @@ export async function resumenDeSucursal(sucursal: string) {
 // ---- Ventas, devoluciones y notas de credito ----
 export async function cobrarVenta(
   sucursal: string,
-  items: { sku: string; cant: number }[],
+  items: { sku: string; cant: number; origen?: string }[],
   pagos: { medioId: string; monto: number | null }[],
   clave?: string,
   especial?: { pct: number; motivo: string; autorizo: string } | null,
@@ -175,7 +175,7 @@ export async function cobrarVenta(
     if (especial && !puede(u.rol, "descuento_especial")) throw new repo.ErrorNegocio("Tu usuario no puede hacer descuentos especiales.");
     const venta = await repo.registrarVenta(
       suc(u, txt(sucursal)),
-      (Array.isArray(items) ? items : []).map((i) => ({ sku: txt(i.sku), cant: ent(i.cant) })),
+      (Array.isArray(items) ? items : []).map((i) => ({ sku: txt(i.sku), cant: ent(i.cant), origen: i.origen ? txt(i.origen) : undefined })),
       (Array.isArray(pagos) ? pagos : []).map((p) => ({ medioId: txt(p.medioId), monto: p.monto === null ? null : ent(p.monto) })),
       txt(clave).slice(0, 80) || undefined,
       especial ? { pct: ent(especial.pct), motivo: txt(especial.motivo), autorizo: txt(especial.autorizo) } : undefined,
@@ -211,6 +211,13 @@ export async function reimprimirTicketVenta(codigo: string) {
     await auditar("ticket_reimpreso", { venta: venta.codigo, sucursal: venta.sucursal });
     return { venta };
   });
+}
+
+// Anula un ticket de venta equivocado (queda registrado con el motivo; el stock vuelve). Ver repo.anularVenta para las reglas.
+export async function anularVentaAccion(codigo: string, motivo: string) {
+  return seguro("anular_venta", async (u) => ({
+    anulacion: await repo.anularVenta(txt(codigo), txt(motivo), { soloSucursal: sucursalFija(u.rol, u.sucursalId), admin: u.rol === "admin" }),
+  }));
 }
 
 export async function emitirNotaCredito(sucursal: string, ventaCodigo: string, items: { itemId: number; cant: number; falladas: number }[]) {

@@ -379,6 +379,81 @@ try {
     check("Texto de la vista previa", textoPrecioEtiqueta(preciosDe(36900, mediosBase)[0]).startsWith("Transferencia: $"), textoPrecioEtiqueta(preciosDe(36900, mediosBase)[0]));
   });
 
+  // ---- 8b. Deposito vendiendo con stock de San Lorenzo + anular ventas (migracion 018) ----
+  await paso("Origen del stock y anulaciones", async () => {
+    const DEP = "deposito", SL = "sanlorenzo";
+    const C = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Origen ${sello}`, precio: 10000, cantidad: 10, reparto: { [SL]: 6 } })).sku;
+    for (const t of await repo.listarPendientes(SL)) if (t.sku === C) await repo.recibirTraslado(t.id, SL);
+    igual("Origen: stock inicial deposito / San Lorenzo", [await stockDe(C, DEP), await stockDe(C, SL)], [4, 6]);
+    const pagoTr = [{ medioId: "transferencia", monto: null as number | null }];
+    const origenDe = async (codigo: string) => (await pool.query<{ d: string | null; m: string }>(
+      `select vi.stock_de as d, (select m.desde from movimientos m where m.venta_id = v.id limit 1) as m from ventas v join venta_items vi on vi.venta_id = v.id where v.codigo = $1 limit 1`, [codigo])).rows[0];
+
+    // El deposito vende con ropa de San Lorenzo
+    const vSL = await repo.registrarVenta(DEP, [{ sku: C, cant: 2, origen: SL }], pagoTr);
+    igual("Origen: baja el stock de San Lorenzo, no el del deposito", [await stockDe(C, DEP), await stockDe(C, SL)], [4, 4]);
+    igual("Origen: queda anotado de donde salio", await origenDe(vSL.codigo), { d: SL, m: SL });
+    const vDep = await repo.registrarVenta(DEP, [{ sku: C, cant: 1 }], pagoTr);
+    igual("Origen: sin indicar, sale del deposito", [await stockDe(C, DEP), await stockDe(C, SL), (await origenDe(vDep.codigo)).d], [3, 4, null]);
+    const vMix = await repo.registrarVenta(DEP, [{ sku: C, cant: 1, origen: DEP }, { sku: C, cant: 1, origen: SL }], pagoTr);
+    // Foto de la caja y los informes con la venta ya hecha (para ver que al anularla deje de contar).
+    const antesMix = { caja: (await repo.ventasDeHoy(DEP)), inf: (await inf.resumen(await inf.validarParams({ desde: hoy, hasta: hoy, sucursal: DEP }))).total };
+    igual("Origen: un mismo producto de los dos stocks", [await stockDe(C, DEP), await stockDe(C, SL)], [2, 3]);
+    await debeFallar("Origen: otro local no puede usar stock ajeno", () => repo.registrarVenta(LOCAL, [{ sku: C, cant: 1, origen: SL }], pagoTr), /otra sucursal/);
+    await debeFallar("Origen: no vende mas de lo que hay en ese stock", () => repo.registrarVenta(DEP, [{ sku: C, cant: 5, origen: DEP }], pagoTr), /solo hay/);
+    await debeFallar("Origen: renglon repetido", () => repo.registrarVenta(DEP, [{ sku: C, cant: 1, origen: DEP }, { sku: C, cant: 1, origen: DEP }], pagoTr), /repetida/);
+
+    // Devolucion: vuelve a San Lorenzo, que es de donde salio
+    const dvSL = await repo.ventaParaDevolucion(vSL.codigo, DEP);
+    await repo.emitirNota(DEP, vSL.codigo, [{ itemId: dvSL.items[0].id, cant: 1, falladas: 0 }], DEP);
+    igual("Devolucion de venta con stock de San Lorenzo: vuelve a San Lorenzo", [await stockDe(C, DEP), await stockDe(C, SL)], [2, 4]);
+
+    // Anular
+    await debeFallar("Anular: motivo corto", () => repo.anularVenta(vMix.codigo, "no", { soloSucursal: null, admin: true }), /motivo/);
+    await debeFallar("Anular: otro local no puede", () => repo.anularVenta(vDep.codigo, "ticket equivocado", { soloSucursal: LOCAL, admin: false }), /se hizo en/);
+    await debeFallar("Anular: ticket inexistente", () => repo.anularVenta("V00000000", "ticket equivocado", { soloSucursal: null, admin: true }), /No existe/);
+    await debeFallar("Anular: con devolucion no se puede", () => repo.anularVenta(vSL.codigo, "ticket equivocado", { soloSucursal: DEP, admin: false }), /devolución/);
+    const a = await repo.anularVenta(vMix.codigo, "se cobro la prenda equivocada", { soloSucursal: DEP, admin: false });
+    igual("Anular: unidades y total", [a.unidades, a.total], [2, vMix.total]);
+    igual("Anular: el stock vuelve de donde salio", [await stockDe(C, DEP), await stockDe(C, SL)], [3, 5]);
+    const despCaja = await repo.ventasDeHoy(DEP);
+    igual("Anular: deja de contar en la caja del dia", [antesMix.caja.ventas - despCaja.ventas, Math.round(antesMix.caja.filas.reduce((t, f) => t + f.total, 0) - despCaja.filas.reduce((t, f) => t + f.total, 0))], [1, vMix.total]);
+    const infDesp = (await inf.resumen(await inf.validarParams({ desde: hoy, hasta: hoy, sucursal: DEP }))).total;
+    igual("Anular: deja de contar en los informes", [infDesp.ventas - antesMix.inf.ventas, infDesp.totalPagado - antesMix.inf.totalPagado], [-1, -vMix.total]);
+    const res = await (await import("../lib/cierre")).resumenDia(DEP, hoy);
+    igual("Anular: el resumen del cierre no la cuenta", res.ventas, despCaja.ventas);
+    const lst = (await repo.ventasListado(DEP, hoy, hoy)).find((x) => x.codigo === vMix.codigo);
+    igual("Anular: el listado la muestra como anulada", lst?.anulada, true);
+    await debeFallar("Anular: dos veces no", () => repo.anularVenta(vMix.codigo, "ticket equivocado", { soloSucursal: null, admin: true }), /ya estaba anulada/);
+    await debeFallar("Anular: una anulada no se devuelve", () => repo.ventaParaDevolucion(vMix.codigo, DEP), /anulada/);
+    await debeFallar("Anular: ni se emite nota de una anulada", () => repo.emitirNota(DEP, vMix.codigo, [{ itemId: 1, cant: 1, falladas: 0 }], DEP), /anulada/);
+    const reg = await pool.query<{ n: number }>("select count(*)::int as n from movimientos m join ventas v on v.id = m.venta_id where v.codigo = $1 and m.tipo = 'anulacion'", [vMix.codigo]);
+    igual("Anular: queda el movimiento de anulacion por cada renglon", reg.rows[0].n, 2);
+    // Una anulacion no se puede borrar ni cambiar
+    let borro = false;
+    try { await pool.query("delete from ventas_anuladas where venta_id = (select id from ventas where codigo = $1)", [vMix.codigo]); borro = true; } catch { /* esperado: la base lo impide */ }
+    check("Anular: el registro de la anulacion no se puede borrar", !borro, "se pudo borrar");
+
+    // Venta pagada con nota de credito: no se anula desde el local
+    const vBase = await repo.registrarVenta(DEP, [{ sku: C, cant: 1 }], pagoTr);
+    const nBase = await repo.emitirNota(DEP, vBase.codigo, [{ itemId: (await repo.ventaParaDevolucion(vBase.codigo, DEP)).items[0].id, cant: 1, falladas: 0 }], DEP);
+    const vNota = await repo.registrarVenta(DEP, [{ sku: C, cant: 1 }], [{ medioId: `nota:${nBase.codigo}`, monto: Math.min(nBase.saldo, vBase.total) }, { medioId: "transferencia", monto: null }]);
+    await debeFallar("Anular: pagada con nota de credito no se anula", () => repo.anularVenta(vNota.codigo, "ticket equivocado", { soloSucursal: DEP, admin: false }), /nota de crédito/);
+
+    // Caja cerrada: no se anula. (Se cierra a mano y se deshace al final para poder repetir la prueba el mismo dia.)
+    const vCierre = await repo.registrarVenta(DEP, [{ sku: C, cant: 1 }], pagoTr);
+    await pool.query(`insert into cierres_caja (sucursal_id, dia, cerrado_por, ventas, unidades, esperado, contado, efectivo_esperado, efectivo_contado, diferencia)
+      values ($1, $2::date, 'ZZ Staging', 0, 0, '{}', '{}', 0, 0, 0)`, [DEP, hoy]);
+    try {
+      await debeFallar("Anular: con la caja del dia cerrada no se puede", () => repo.anularVenta(vCierre.codigo, "ticket equivocado", { soloSucursal: DEP, admin: true }), /cerrada/);
+    } finally {
+      const c = await pool.connect();
+      try { await c.query("begin"); await c.query("set local app.mantenimiento = 'on'"); await c.query("delete from cierres_caja where cerrado_por = 'ZZ Staging'"); await c.query("commit"); } finally { c.release(); }
+    }
+    const b = await repo.anularVenta(vCierre.codigo, "ticket equivocado", { soloSucursal: DEP, admin: true });
+    igual("Anular: con la caja abierta, el admin si puede", b.codigo, vCierre.codigo);
+  });
+
   // ---- 9. Controles sobre TODA la base (datos reales incluidos) ----
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;

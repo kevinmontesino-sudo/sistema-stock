@@ -1,7 +1,7 @@
 import { empresa } from "./empresa.config";
 import { pool } from "./db";
 import { ErrorNegocio } from "./repo";
-import { nombreSucursal } from "./util";
+import { NO_ANULADA, nombreSucursal } from "./util";
 
 // Cierre de caja diario por local y informe de control. Todos los dias son de Argentina.
 const TZ = "America/Argentina/Buenos_Aires";
@@ -51,20 +51,20 @@ export async function resumenDia(sucursal: string, dia: string): Promise<Resumen
   if (!FECHA.test(dia)) throw new ErrorNegocio("Fecha inválida.");
   const v = await pool.query<{ ventas: number; unidades: number }>(
     `select count(*)::int as ventas, coalesce(sum((select sum(cantidad) from venta_items vi where vi.venta_id = v.id)), 0)::int as unidades
-     from ventas v where v.sucursal_id = $1 and ${rango("v.creado_en")}`, [sucursal, dia]);
+     from ventas v where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA}`, [sucursal, dia]);
   const m = await pool.query<MedioDia>(
     `select pg.medio_pago_id as id, m.nombre, count(distinct pg.venta_id)::int as ventas, sum(pg.monto)::float8 as monto
      from venta_pagos pg join ventas v on v.id = pg.venta_id join medios_pago m on m.id = pg.medio_pago_id
-     where v.sucursal_id = $1 and ${rango("v.creado_en")} and pg.nota_credito_id is null group by 1, 2 order by m.nombre`, [sucursal, dia]);
+     where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and pg.nota_credito_id is null group by 1, 2 order by m.nombre`, [sucursal, dia]);
   const n = await pool.query<{ monto: number }>(
     `select coalesce(sum(pg.monto), 0)::float8 as monto from venta_pagos pg join ventas v on v.id = pg.venta_id
-     where v.sucursal_id = $1 and ${rango("v.creado_en")} and pg.nota_credito_id is not null`, [sucursal, dia]);
+     where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and pg.nota_credito_id is not null`, [sucursal, dia]);
   const e = await pool.query<{ n: number; monto: number }>(
     `select count(*)::int as n, coalesce(sum(monto_inicial), 0)::int as monto from notas_credito where sucursal_id = $1 and ${rango("creado_en")}`, [sucursal, dia]);
   const c = await pool.query<FilaCierre>(`select ${COLS} from cierres_caja where sucursal_id = $1 and dia = $2::date`, [sucursal, dia]);
   const cierre = c.rows[0] ? aCierre(c.rows[0]) : null;
   const despues = cierre
-    ? (await pool.query<{ n: number }>(`select count(*)::int as n from ventas v where v.sucursal_id = $1 and ${rango("v.creado_en")} and v.creado_en > $3`, [sucursal, dia, cierre.creado])).rows[0].n
+    ? (await pool.query<{ n: number }>(`select count(*)::int as n from ventas v where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and v.creado_en > $3`, [sucursal, dia, cierre.creado])).rows[0].n
     : 0;
   return {
     sucursal, dia, ventas: v.rows[0].ventas, unidades: v.rows[0].unidades, medios: m.rows, totalCobrado: m.rows.reduce((s, x) => s + x.monto, 0),
@@ -80,9 +80,23 @@ const monto = (v: unknown, que: string, obligatorio = true) => {
   return Math.round(n);
 };
 
+// Mientras se cierra la caja de un local y un dia, nadie puede anular una venta de ese dia (repo.anularVenta toma el mismo candado):
+// si no, el cierre podia guardar un esperado que incluye una venta que se anula justo en el medio, y los cierres no se editan.
 export async function cerrarCaja(sucursal: string, dia: string, d: DatosCierre, usuario: { id: number; nombre: string }) {
   sucOk(sucursal);
   await diaOk(dia);
+  const clave = `caja:${sucursal}:${dia}`;
+  const c = await pool.connect();
+  try {
+    await c.query("select pg_advisory_lock(hashtext($1))", [clave]);
+    return await cerrarCajaConCandado(sucursal, dia, d, usuario);
+  } finally {
+    await c.query("select pg_advisory_unlock(hashtext($1))", [clave]).catch(() => {});
+    c.release();
+  }
+}
+
+async function cerrarCajaConCandado(sucursal: string, dia: string, d: DatosCierre, usuario: { id: number; nombre: string }) {
   const fondo = monto(d.fondoInicial, "el efectivo con el que abrió la caja", false);
   const retiros = monto(d.retiros, "el monto retirado", false);
   const contado = monto(d.efectivoContado, "el efectivo contado");
@@ -132,10 +146,15 @@ export async function controlDiario(dia: string, sucursal: string | null = null)
     `select v.sucursal_id as sucursal, v.codigo, v.creado_en as hora, v.especial_pct::float8 as pct, v.especial_motivo as motivo, v.especial_autorizo as autorizo,
        v.descuento_promo as descuento, v.total, u.nombre as vendedor
      from ventas v left join usuarios u on u.id = v.usuario_id
-     where v.especial_pct is not null and ${rango("v.creado_en", 1)} and ($2::text is null or v.sucursal_id = $2) order by v.creado_en`, [dia, sucursal]);
+     where v.especial_pct is not null and ${rango("v.creado_en", 1)} and ${NO_ANULADA} and ($2::text is null or v.sucursal_id = $2) order by v.creado_en`, [dia, sucursal]);
   const promos = await pool.query<{ sucursal: string; ahorro: number; ventas: number }>(
     `select v.sucursal_id as sucursal, coalesce(sum(v.descuento_promo), 0)::float8 as ahorro, count(*)::int as ventas from ventas v
-     where v.especial_pct is null and v.descuento_promo > 0 and ${rango("v.creado_en", 1)} and ($2::text is null or v.sucursal_id = $2) group by 1`, [dia, sucursal]);
+     where v.especial_pct is null and v.descuento_promo > 0 and ${rango("v.creado_en", 1)} and ${NO_ANULADA} and ($2::text is null or v.sucursal_id = $2) group by 1`, [dia, sucursal]);
+  // Ventas anuladas ESE dia (por la fecha en que se anularon, no la de la venta): la oficina tiene que enterarse de cada una.
+  const anul = await pool.query<{ sucursal: string; codigo: string; hora: Date; total: number; motivo: string; usuario: string | null; vendida: Date }>(
+    `select v.sucursal_id as sucursal, v.codigo, va.creado_en as hora, v.total, va.motivo, u.nombre as usuario, v.creado_en as vendida
+     from ventas_anuladas va join ventas v on v.id = va.venta_id left join usuarios u on u.id = va.usuario_id
+     where ${rango("va.creado_en", 1)} and ($2::text is null or v.sucursal_id = $2) order by va.creado_en`, [dia, sucursal]);
   const ajustes = await pool.query<{ hora: Date; sku: string; nombre: string; cantidad: number; sucursal: string | null; motivo: string | null; usuario: string | null }>(
     `select m.creado_en as hora, m.sku, p.nombre, m.cantidad, coalesce(m.desde, m.hasta) as sucursal, m.motivo, u.nombre as usuario
      from movimientos m join productos p on p.sku = m.sku left join usuarios u on u.id = m.usuario_id
@@ -153,6 +172,7 @@ export async function controlDiario(dia: string, sucursal: string | null = null)
     if (l.ventasDespuesDelCierre > 0) alertas.push(`${n}: ${l.ventasDespuesDelCierre} venta(s) hechas DESPUÉS de cerrar la caja.`);
   }
   for (const e of esp.rows) alertas.push(`${nombreSucursal(e.sucursal)}: descuento especial ${e.pct}% en ${e.codigo} (${e.motivo ?? "sin motivo"}, autorizó ${e.autorizo ?? "?"}).`);
+  for (const a of anul.rows) alertas.push(`${nombreSucursal(a.sucursal)}: ANULÓ la venta ${a.codigo} de $${a.total.toLocaleString("es-AR")} (${a.motivo}, por ${a.usuario ?? "?"}).`);
   for (const a of ajustes.rows) alertas.push(`Ajuste de stock: ${a.sku} ${a.nombre} (${a.cantidad} u.) en ${a.sucursal ? nombreSucursal(a.sucursal) : "?"} — ${a.motivo ?? "sin motivo"}.`);
   for (const c of camino.rows.filter((x) => x.dias >= 2)) alertas.push(`${nombreSucursal(c.destino)}: ${c.unidades} prendas enviadas hace ${c.dias} días siguen sin recibirse.`);
 
@@ -162,6 +182,7 @@ export async function controlDiario(dia: string, sucursal: string | null = null)
     total: { ventas: total((l) => l.ventas), unidades: total((l) => l.unidades), cobrado: total((l) => l.totalCobrado), pagadoConNotas: total((l) => l.pagadoConNotas), notasEmitidas: total((l) => l.notasEmitidas), notasMonto: total((l) => l.notasMonto), diferenciaEfectivo: locales.reduce((s, l) => s + (l.cierre?.diferencia ?? 0), 0) },
     locales: locales.map((l) => ({ ...l, ahorroPromos: promos.rows.find((p) => p.sucursal === l.sucursal)?.ahorro ?? 0, ventasConPromo: promos.rows.find((p) => p.sucursal === l.sucursal)?.ventas ?? 0 })),
     descuentosEspeciales: esp.rows.map((e) => ({ sucursal: e.sucursal, ticket: e.codigo, hora: e.hora.toISOString(), pct: e.pct, motivo: e.motivo, autorizo: e.autorizo, descuento: e.descuento, total: e.total, cajero: e.vendedor })),
+    ventasAnuladas: anul.rows.map((a) => ({ sucursal: a.sucursal, ticket: a.codigo, hora: a.hora.toISOString(), vendida: a.vendida.toISOString(), total: a.total, motivo: a.motivo, usuario: a.usuario })),
     ajustesDeStock: ajustes.rows.map((a) => ({ hora: a.hora.toISOString(), sku: a.sku, prenda: a.nombre, cantidad: a.cantidad, sucursal: a.sucursal, motivo: a.motivo, usuario: a.usuario })),
     enviosEnCamino: camino.rows.map((c) => ({ destino: c.destino, envios: c.envios, unidades: c.unidades, diasElMasViejo: c.dias })),
     alertas,

@@ -13,7 +13,7 @@ await c.connect();
 try {
   await c.query("begin");
   await c.query("set local app.mantenimiento = 'on'");
-  for (const t of ["movimientos", "venta_pagos", "nota_credito_items", "notas_credito", "venta_items", "ventas", "traslados", "stock", "cargas", "productos", "auditoria", "intentos_login", "sesiones", "tokens_api"])
+  for (const t of ["movimientos", "venta_pagos", "nota_credito_items", "notas_credito", "ventas_anuladas", "venta_items", "ventas", "traslados", "stock", "cargas", "productos", "auditoria", "intentos_login", "sesiones", "tokens_api"])
     await c.query(`delete from ${t}`);
   await c.query("update contadores_sku set ultimo = 0");
   for (const t of ["traslados", "movimientos", "venta_items", "ventas", "cargas", "notas_credito"]) await c.query(`alter table ${t} alter column id restart with 1`).catch(() => {});

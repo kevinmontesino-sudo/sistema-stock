@@ -21,6 +21,7 @@ try {
   const ventas = await c.query("select distinct venta_id from venta_items where sku = any($1)", [skus]);
   const ids = ventas.rows.map((r) => r.venta_id);
   await c.query("delete from movimientos where sku = any($1) or venta_id = any($2)", [skus, ids]);
+  await c.query("delete from ventas_anuladas where venta_id = any($1)", [ids]);
   await c.query("delete from venta_pagos where venta_id = any($1)", [ids]);
   await c.query("delete from venta_items where venta_id = any($1)", [ids]);
   await c.query("delete from ventas where id = any($1)", [ids]);

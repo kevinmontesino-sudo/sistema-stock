@@ -13,7 +13,7 @@ if (!url) {
 // Todas las tablas de negocio. De "usuarios" NO se copian las contrasenas (hash) ni los secretos de la doble verificacion, y
 // no se copian las sesiones ni los intentos de login: el respaldo no debe servir para entrar al sistema.
 const TABLAS = ["sucursales", "tipos", "usuarios", "productos", "contadores_sku", "stock", "cargas", "movimientos", "traslados", "medios_pago",
-  "ventas", "venta_items", "venta_pagos", "notas_credito", "nota_credito_items", "auditoria"];
+  "ventas", "venta_items", "venta_pagos", "notas_credito", "nota_credito_items", "ventas_anuladas", "cierres_caja", "promos", "auditoria"];
 const COLUMNAS_SECRETAS = { usuarios: ["password_hash", "totp_secreto", "totp_ultimo_paso"] };
 const carpeta = join(process.cwd(), "..", "respaldos");
 mkdirSync(carpeta, { recursive: true });

@@ -11,7 +11,7 @@ const u = new URL(url);
 const c = new pg.Client({ connectionString: url });
 await c.connect();
 
-const BORRAR = ["cierres_caja", "movimientos", "venta_pagos", "nota_credito_items", "notas_credito", "venta_items", "ventas", "traslados", "stock", "cargas", "productos", "auditoria", "intentos_login"];
+const BORRAR = ["cierres_caja", "movimientos", "venta_pagos", "nota_credito_items", "notas_credito", "ventas_anuladas", "venta_items", "ventas", "traslados", "stock", "cargas", "productos", "auditoria", "intentos_login"];
 console.log(`Base: ${u.hostname}:${u.port}${u.pathname}\n`);
 for (const t of BORRAR) console.log(`  ${t.padEnd(20)} ${(await c.query(`select count(*)::int n from ${t}`)).rows[0].n} filas`);
 const us = await c.query("select email, rol, activo from usuarios order by id");

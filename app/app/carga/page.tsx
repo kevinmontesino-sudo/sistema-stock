@@ -54,7 +54,8 @@ export default function Carga() {
   const ajusteEfectivo = medios.find((m) => m.id === "efectivo")?.ajustePct;
   const escrito = parseInt(precio) || 0;
   const efvoUnicoNum = parseInt(efvoUnico) || 0;
-  const fijos = unico ? Object.fromEntries(medios.map((m) => [m.id, m.id === "efectivo" ? efvoUnicoNum : escrito])) : null;
+  // (Solo para la vista previa: mientras no se escribe el efectivo, se muestra igual a la lista en vez de $ 0.)
+  const fijos = unico ? Object.fromEntries(medios.map((m) => [m.id, m.id === "efectivo" ? efvoUnicoNum || escrito : escrito])) : null;
   const precioNum = !unico && escribeEfectivo && ajusteEfectivo !== undefined ? Math.round(escrito / (1 + ajusteEfectivo / 100)) : escrito;
   const efectivoResultante = ajusteEfectivo === undefined ? 0 : precioMedio(precioNum, ajusteEfectivo);
   const dNombre = useDebounced(nombre);

@@ -103,6 +103,16 @@ export default function ControlPage() {
             </>
           )}
 
+          {c.ventasAnuladas.length > 0 && (
+            <>
+              <h2>Ventas anuladas</h2>
+              <table>
+                <thead><tr><th>Local</th><th>Ticket</th><th>Anulada</th><th className="der">Total</th><th>Motivo</th><th>Quién</th></tr></thead>
+                <tbody>{c.ventasAnuladas.map((a) => <tr key={a.ticket}><td>{nombreSucursal(a.sucursal)}</td><td>{a.ticket}</td><td>{hora(a.hora)}</td><td className="der">{pesos(a.total)}</td><td>{a.motivo}</td><td>{a.usuario ?? ""}</td></tr>)}</tbody>
+              </table>
+            </>
+          )}
+
           {c.ajustesDeStock.length > 0 && (
             <>
               <h2>Ajustes de stock</h2>

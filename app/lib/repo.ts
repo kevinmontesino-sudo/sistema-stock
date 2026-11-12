@@ -6,7 +6,7 @@ import { descuentoEspecial, mediosParaPromo, mejorPromo, TOPE_PCT, type Promo } 
 import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, totalReparto,
-  calcularPagos, mediosDelCarrito, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
+  calcularPagos, mediosDelCarrito, NO_ANULADA, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
 // Error esperado: se le muestra el mensaje al usuario.
@@ -46,8 +46,9 @@ export async function listar(
     cond.push(`(p.nombre_norm like $${params.length} or lower(p.sku) like $${params.length})`);
   }
   if (f.sucursalConStock) {
-    params.push(f.sucursalConStock);
-    cond.push(`exists (select 1 from stock x where x.sku = p.sku and x.sucursal_id = $${params.length} and x.cantidad > 0)`);
+    // Puede ser una sola sucursal o varias separadas por coma (el deposito vende tambien con el stock de San Lorenzo).
+    params.push(f.sucursalConStock.split(",").map((x) => x.trim()).filter(Boolean));
+    cond.push(`exists (select 1 from stock x where x.sku = p.sku and x.sucursal_id = any($${params.length}::text[]) and x.cantidad > 0)`);
   }
   params.push(f.limite ?? 100);
   const r = await db.query<Fila>(
@@ -422,30 +423,40 @@ function validarEspecial(e: Especial) {
 }
 
 // totalEsperado: lo que la caja le dijo al cliente. Si el servidor calcula otro total (cambiaron las promos), no se registra nada.
-export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number) {
+// origen: de que stock sale cada renglon. Solo el deposito puede vender con stock de San Lorenzo (estan en el mismo lugar); el resto sale siempre de su propio local.
+export const ORIGENES_DEPOSITO = [DEPOSITO, "sanlorenzo"];
+export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const especial = especialPedido ? validarEspecial(especialPedido) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
-  for (const i of itemsPedidos) if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
-  // Siempre se bloquean las prendas en el mismo orden (por SKU): dos ventas al mismo tiempo no se traban entre si.
-  const items = [...itemsPedidos].sort((a, b) => a.sku.localeCompare(b.sku));
+  for (const i of itemsPedidos) {
+    if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
+    if (i.origen && i.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(i.origen))) falla("Ese local no puede vender con el stock de otra sucursal");
+  }
+  // Siempre se bloquean las prendas en el mismo orden (por SKU y origen): dos ventas al mismo tiempo no se traban entre si.
+  const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
+  // Un mismo SKU de un mismo origen no puede aparecer dos veces (se controla el stock sobre el total).
+  if (new Set(items.map((i) => `${i.sku}|${i.origen}`)).size !== items.length) falla("Hay una prenda repetida en la venta");
   return tx(async (c) => {
     // Un reintento del mismo cobro (misma clave) devuelve la venta ya registrada en vez de duplicarla.
     if (clave) {
       await c.query("select pg_advisory_xact_lock(hashtext($1))", [clave]);
       const previa = await c.query<{ id: number }>("select id::int as id from ventas where clave = $1", [clave]);
-      if (previa.rows[0]) return { ...(await ticketDeVenta(c, previa.rows[0].id)), nueva: false };
+      if (previa.rows[0]) {
+        if ((await c.query("select 1 from ventas_anuladas where venta_id = $1", [previa.rows[0].id])).rowCount) return falla("Esa venta ya se registró y después fue anulada. Volvé a armarla desde cero.");
+        return { ...(await ticketDeVenta(c, previa.rows[0].id)), nueva: false };
+      }
     }
     const mr = await c.query<MedioPago>('select id, nombre, ajuste_pct::float8 as "ajustePct" from medios_pago where activo');
     const prods: Producto[] = [];
     for (const i of items) {
       const p = await productoPorSku(i.sku, c);
       if (!p) return falla(`La prenda ${i.sku} ya no existe o fue dada de baja`);
-      const hay = await stockActual(c, p.sku, sucursal);
+      const hay = await stockActual(c, p.sku, i.origen);
       if (hay < i.cant) {
         falla(hay <= 0
-          ? `${p.nombre} no tiene stock en ${nombreSucursal(sucursal)}`
-          : `De ${p.nombre} solo hay ${hay} en ${nombreSucursal(sucursal)}`);
+          ? `${p.nombre} no tiene stock en ${nombreSucursal(i.origen)}`
+          : `De ${p.nombre} solo hay ${hay} en ${nombreSucursal(i.origen)}`);
       }
       prods.push(p);
     }
@@ -514,11 +525,11 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     for (const [idx, p] of prods.entries()) {
       const cant = items[idx].cant;
       await c.query(
-        "insert into venta_items (venta_id, sku, nombre, precio_lista, cantidad, sin_cambio) values ($1, $2, $3, $4, $5, $6)",
-        [ventaId, p.sku, p.nombre, p.precio, cant, sinCambio[idx]],
+        "insert into venta_items (venta_id, sku, nombre, precio_lista, cantidad, sin_cambio, stock_de) values ($1, $2, $3, $4, $5, $6, $7)",
+        [ventaId, p.sku, p.nombre, p.precio, cant, sinCambio[idx], items[idx].origen === sucursal ? null : items[idx].origen],
       );
-      await sumarStock(c, p.sku, sucursal, -cant);
-      await mov(c, p.sku, cant, sucursal, null, "venta", { ventaId });
+      await sumarStock(c, p.sku, items[idx].origen, -cant);
+      await mov(c, p.sku, cant, items[idx].origen, null, "venta", { ventaId, ...(items[idx].origen !== sucursal ? { motivo: `Vendido desde ${nombreSucursal(sucursal)} con stock de ${nombreSucursal(items[idx].origen)}` } : {}) });
     }
     // En la misma transaccion: si la venta se registra, el descuento especial queda auditado (y un reintento no lo duplica).
     if (especial) {
@@ -566,12 +577,13 @@ export async function ventasListado(sucursal: string, desde: string, hasta: stri
   if (!fecha.test(desde) || !fecha.test(hasta) || desde > hasta) falla("Fechas inválidas");
   const dias = (Date.parse(hasta) - Date.parse(desde)) / 86_400_000;
   if (!(dias >= 0 && dias <= 62)) falla("Elegí un período de hasta 2 meses");
-  const r = await pool.query<{ codigo: string; fecha: Date; total: number; unidades: number; medios: string | null; devuelta: boolean; items: { nombre: string; cantidad: number }[] }>(
+  const r = await pool.query<{ codigo: string; fecha: Date; total: number; unidades: number; medios: string | null; devuelta: boolean; anulada: boolean; items: { nombre: string; cantidad: number }[] }>(
     `select v.codigo, v.creado_en as fecha, v.total, v.id,
        (select coalesce(sum(vi.cantidad), 0)::int from venta_items vi where vi.venta_id = v.id) as unidades,
        (select string_agg(distinct case when p.nota_credito_id is null then m.nombre else 'Nota de crédito' end, ' + ')
           from venta_pagos p join medios_pago m on m.id = p.medio_pago_id where p.venta_id = v.id) as medios,
        exists (select 1 from notas_credito n where n.venta_id = v.id) as devuelta,
+       exists (select 1 from ventas_anuladas va where va.venta_id = v.id) as anulada,
        (select coalesce(json_agg(json_build_object('nombre', vi.nombre, 'cantidad', vi.cantidad) order by vi.id), '[]'::json)
           from venta_items vi where vi.venta_id = v.id) as items
      from ventas v
@@ -581,7 +593,7 @@ export async function ventasListado(sucursal: string, desde: string, hasta: stri
      order by v.creado_en, v.id limit 2000`,
     [sucursal, desde, hasta],
   );
-  return r.rows.map((x) => ({ codigo: x.codigo, fecha: x.fecha.toISOString(), total: x.total, unidades: x.unidades, medios: x.medios ?? "", devuelta: x.devuelta, items: x.items }));
+  return r.rows.map((x) => ({ codigo: x.codigo, fecha: x.fecha.toISOString(), total: x.total, unidades: x.unidades, medios: x.medios ?? "", devuelta: x.devuelta, anulada: x.anulada, items: x.items }));
 }
 
 // Ticket de una venta ya cobrada, para reimprimirlo (el cliente lo perdio o salio mal). Un local solo reimprime los suyos.
@@ -591,6 +603,7 @@ export async function ticketPorCodigo(codigo: string, soloSucursal: string | nul
   const v = await pool.query<{ id: number; sucursal_id: string }>("select id::int as id, sucursal_id from ventas where codigo = $1", [cod]);
   if (!v.rows[0]) return falla(`No existe la venta ${cod}`);
   if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}.`);
+  if ((await pool.query("select 1 from ventas_anuladas where venta_id = $1", [v.rows[0].id])).rowCount) return falla(`La venta ${cod} fue anulada: no se reimprime.`);
   const c = await pool.connect();
   try {
     return { ...(await ticketDeVenta(c, v.rows[0].id)), sucursal: v.rows[0].sucursal_id };
@@ -607,10 +620,10 @@ export async function ventasDeHoy(sucursal: string) {
   const r = await pool.query<{ id: string; nombre: string; ventas: number; total: number }>(
     `select pg.medio_pago_id as id, m.nombre, count(distinct pg.venta_id)::int as ventas, coalesce(sum(pg.monto), 0)::float8 as total
      from venta_pagos pg join ventas v on v.id = pg.venta_id join medios_pago m on m.id = pg.medio_pago_id
-     where v.sucursal_id = $1 and ${hoy} group by pg.medio_pago_id, m.nombre order by m.nombre`,
+     where v.sucursal_id = $1 and ${hoy} and ${NO_ANULADA} group by pg.medio_pago_id, m.nombre order by m.nombre`,
     [sucursal],
   );
-  const n = await pool.query<{ n: number }>(`select count(*)::int as n from ventas v where v.sucursal_id = $1 and ${hoy}`, [sucursal]);
+  const n = await pool.query<{ n: number }>(`select count(*)::int as n from ventas v where v.sucursal_id = $1 and ${hoy} and ${NO_ANULADA}`, [sucursal]);
   return { filas: r.rows, ventas: n.rows[0].n };
 }
 
@@ -764,6 +777,7 @@ export async function ventaParaDevolucion(codigo: string, soloSucursal: string |
   );
   const venta = v.rows[0];
   if (!venta) return falla(`No existe la venta ${cod}`);
+  if ((await pool.query("select 1 from ventas_anuladas where venta_id = $1", [venta.id])).rowCount) return falla(`La venta ${cod} fue anulada: no se puede devolver`);
   if (soloSucursal && venta.sucursal_id !== soloSucursal) {
     return falla(`Esa compra se hizo en ${nombreSucursal(venta.sucursal_id)}: la devolución se hace en ese local.`);
   }
@@ -780,6 +794,55 @@ export async function ventaParaDevolucion(codigo: string, soloSucursal: string |
     codigo: venta.codigo, fecha: venta.creado_en.toISOString(), sucursal: venta.sucursal_id, total: venta.total,
     items: it.rows.map((x) => ({ ...x, valor: Math.round(x.precio * f) })),
   };
+}
+
+// Anula una venta (ticket equivocado): el stock vuelve de donde salio y la venta deja de contar en caja, cierre e informes.
+// La venta NO se borra ni se edita: queda registrada junto con el motivo y quien la anulo (la anulacion tampoco se deshace; si fue
+// un error, se vuelve a vender). Los locales solo anulan ventas de HOY y de su propio local; la oficina (admin) puede anular dias
+// anteriores. Nunca se anula si ya se cerro la caja de ese dia, si hubo devoluciones, o si se pago con una nota de credito
+// (para esos casos corresponde una devolucion o hablar con la oficina).
+export async function anularVenta(ventaCodigo: string, motivoPedido: string, o: { soloSucursal: string | null; admin: boolean }) {
+  const cod = String(ventaCodigo).trim().toUpperCase();
+  if (!ES_CODIGO_VENTA.test(cod)) falla("Escaneá o escribí el código del ticket de venta (empieza con V).");
+  const motivo = String(motivoPedido ?? "").trim().replace(/\s+/g, " ");
+  if (motivo.length < 5 || motivo.length > 200) falla("Escribí el motivo de la anulación (de 5 a 200 letras).");
+  const TZ = "America/Argentina/Buenos_Aires";
+  return tx(async (c) => {
+    // Mismo candado que las devoluciones: anular y devolver la misma compra a la vez se hacen una despues de la otra.
+    await c.query("select pg_advisory_xact_lock(hashtext($1))", [`devolucion:${cod}`]);
+    const v = await c.query<{ id: number; sucursal_id: string; total: number; dia: string; es_hoy: boolean; muy_vieja: boolean }>(
+      `select id::int as id, sucursal_id, total, (creado_en at time zone '${TZ}')::date::text as dia,
+         (creado_en at time zone '${TZ}')::date = (now() at time zone '${TZ}')::date as es_hoy,
+         creado_en < now() - interval '${DIAS_DEVOLUCION} days' as muy_vieja
+       from ventas where codigo = $1`, [cod]);
+    const venta = v.rows[0];
+    if (!venta) return falla(`No existe la venta ${cod}`);
+    // Mismo candado que usa cerrarCaja para ese local y dia: anular y cerrar la caja no pasan a la vez.
+    await c.query("select pg_advisory_xact_lock(hashtext($1))", [`caja:${venta.sucursal_id}:${venta.dia}`]);
+    if (o.soloSucursal && venta.sucursal_id !== o.soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(venta.sucursal_id)}: se anula en ese local.`);
+    if (!o.admin && !venta.es_hoy) return falla("Solo se pueden anular ventas de hoy. Para una anterior, consultá a la oficina.");
+    if (venta.muy_vieja) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde esa venta: ya no se puede anular.`);
+    if ((await c.query("select 1 from ventas_anuladas where venta_id = $1", [venta.id])).rowCount) return falla(`La venta ${cod} ya estaba anulada.`);
+    if ((await c.query("select 1 from notas_credito where venta_id = $1", [venta.id])).rowCount) return falla("Esa venta ya tiene una devolución (nota de crédito): no se puede anular.");
+    if ((await c.query("select 1 from venta_pagos where venta_id = $1 and nota_credito_id is not null", [venta.id])).rowCount) {
+      return falla("Esa venta se pagó con una nota de crédito: no se puede anular desde acá. Consultá a la oficina.");
+    }
+    if ((await c.query("select 1 from cierres_caja where sucursal_id = $1 and dia = $2::date", [venta.sucursal_id, venta.dia])).rowCount) {
+      return falla(`La caja de ${nombreSucursal(venta.sucursal_id)} del ${venta.dia.split("-").reverse().join("/")} ya está cerrada: esa venta no se puede anular.`);
+    }
+    const it = await c.query<{ sku: string; cantidad: number; stock_de: string | null }>(
+      "select sku, cantidad, stock_de from venta_items where venta_id = $1 order by sku, id", [venta.id]);
+    await c.query("insert into ventas_anuladas (venta_id, usuario_id, motivo) values ($1, $2, $3)", [venta.id, usuarioEnCurso()?.id ?? null, motivo]);
+    let unidades = 0;
+    for (const x of it.rows) {
+      const destino = x.stock_de ?? venta.sucursal_id;
+      await sumarStock(c, x.sku, destino, x.cantidad);
+      await mov(c, x.sku, x.cantidad, null, destino, "anulacion", { ventaId: venta.id, motivo: `Venta ${cod} anulada: ${motivo}` });
+      unidades += x.cantidad;
+    }
+    await auditar("venta_anulada", { venta: cod, sucursal: venta.sucursal_id, total: venta.total, unidades, motivo }, { db: c });
+    return { codigo: cod, total: venta.total, unidades };
+  });
 }
 
 // Emite una nota de credito: devuelve las prendas elegidas al stock de la sucursal y deja un saldo a favor por 15 dias.
@@ -803,12 +866,13 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     );
     if (!v.rows[0]) return falla("No existe esa venta");
     const ventaId = v.rows[0].id;
+    if ((await c.query("select 1 from ventas_anuladas where venta_id = $1", [ventaId])).rowCount) return falla("Esa venta fue anulada: no se puede devolver");
     // Un local solo devuelve compras de su propio local: si no, se podria "crear" stock y vales con ventas ajenas.
     if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}: la devolución se hace en ese local.`);
     if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra: ya no se acepta la devolución`);
     const f = factorDeVenta(v.rows[0]);
-    const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; sin_cambio: boolean }>(
-      `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas, vi.sin_cambio,
+    const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; sin_cambio: boolean; stock_de: string | null }>(
+      `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas, vi.sin_cambio, vi.stock_de,
          coalesce((select sum(ni.cantidad) from nota_credito_items ni where ni.venta_item_id = vi.id), 0)::int as devueltas
        from venta_items vi where vi.venta_id = $1`, [ventaId],
     );
@@ -839,8 +903,11 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
       // Las falladas no vuelven al stock: solo se reponen las que estan bien.
       const buenas = x.cant - x.falladas;
       if (buenas > 0) {
-        await sumarStock(c, x.item.sku, sucursal, buenas);
-        await mov(c, x.item.sku, buenas, null, sucursal, "devolucion", { ventaId, motivo: `Nota de crédito ${n.rows[0].codigo}` });
+        // Vuelve al stock de donde salio (una venta del deposito con ropa de San Lorenzo devuelve a San Lorenzo).
+        // (Solo si la devolucion se hace en el mismo local de la venta; si la oficina la hace en otro local, la prenda vuelve a ese local.)
+        const destinoStock = sucursal === v.rows[0].sucursal_id ? x.item.stock_de ?? sucursal : sucursal;
+        await sumarStock(c, x.item.sku, destinoStock, buenas);
+        await mov(c, x.item.sku, buenas, null, destinoStock, "devolucion", { ventaId, motivo: `Nota de crédito ${n.rows[0].codigo}` });
       }
     }
     const r = await c.query<FilaNota>(`${SELECT_NOTA} where n.id = $1`, [n.rows[0].id]);

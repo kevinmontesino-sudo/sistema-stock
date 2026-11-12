@@ -1,7 +1,7 @@
 import { empresa } from "./empresa.config";
 import { pool } from "./db";
 import { ErrorNegocio } from "./repo";
-import { nombreSucursal } from "./util";
+import { NO_ANULADA, nombreSucursal } from "./util";
 import { cierresEntre, controlDiario } from "./cierre";
 
 // Informes de SOLO LECTURA (solo SELECT). Los usan la pantalla de administracion y la API de informes, asi los numeros coinciden.
@@ -48,13 +48,13 @@ export async function resumen(p: ParamsInforme) {
     `select v.sucursal_id as sucursal, count(*)::int as ventas, coalesce(sum(it.u), 0)::int as unidades,
        sum(v.subtotal_lista)::float8 as lista, sum(v.total)::float8 as total_pagado, sum(v.descuento_promo)::float8 as promos
      from ventas v left join (select venta_id, sum(cantidad) u from venta_items group by venta_id) it on it.venta_id = v.id
-     where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")} group by v.sucursal_id order by v.sucursal_id`,
+     where ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")} group by v.sucursal_id order by v.sucursal_id`,
     base(p),
   );
   const medios = await pool.query<{ sucursal: string; medio: string; nombre: string; monto: number; ventas: number }>(
     `select v.sucursal_id as sucursal, pg.medio_pago_id as medio, m.nombre, sum(pg.monto)::float8 as monto, count(distinct pg.venta_id)::int as ventas
      from venta_pagos pg join ventas v on v.id = pg.venta_id join medios_pago m on m.id = pg.medio_pago_id
-     where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")} group by 1, 2, 3 order by 1, 2`,
+     where ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")} group by 1, 2, 3 order by 1, 2`,
     base(p),
   );
   const filas = ventas.rows.map((v) => {
@@ -91,7 +91,7 @@ export async function periodo(p: ParamsInforme) {
     `select date_trunc($4::text, v.creado_en at time zone '${TZ}')::date::text as periodo, v.sucursal_id as sucursal, count(*)::int as ventas,
        coalesce(sum(it.u), 0)::int as unidades, sum(v.subtotal_lista)::float8 as lista, sum(v.total)::float8 as total_pagado
      from ventas v left join (select venta_id, sum(cantidad) u from venta_items group by venta_id) it on it.venta_id = v.id
-     where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")} group by 1, 2 order by 1, 2`,
+     where ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")} group by 1, 2 order by 1, 2`,
     [...base(p), p.agrupar === "dia" ? "day" : p.agrupar === "semana" ? "week" : "month"],
   );
   const porPeriodo = new Map<string, { periodo: string; ventas: number; unidades: number; lista: number; totalPagado: number; porSucursal: Record<string, number> }>();
@@ -110,7 +110,7 @@ export async function prendasMasVendidas(p: ParamsInforme) {
        sum(vi.cantidad * vi.precio_lista)::float8 as importe_lista
      from venta_items vi join ventas v on v.id = vi.venta_id
      left join (select venta_item_id, sum(cantidad) c from nota_credito_items group by venta_item_id) d on d.venta_item_id = vi.id
-     where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")}
+     where ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")}
      group by vi.sku order by (sum(vi.cantidad) - coalesce(sum(d.c), 0)) desc, sum(vi.cantidad) desc, vi.sku limit $4`,
     [...base(p), p.limite],
   );
@@ -118,7 +118,7 @@ export async function prendasMasVendidas(p: ParamsInforme) {
   const por = skus.length
     ? await pool.query<{ sku: string; sucursal: string; u: number }>(
         `select vi.sku, v.sucursal_id as sucursal, sum(vi.cantidad)::int as u from venta_items vi join ventas v on v.id = vi.venta_id
-         where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")} and vi.sku = any($4) group by 1, 2`,
+         where ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")} and vi.sku = any($4) group by 1, 2`,
         [...base(p), skus],
       )
     : { rows: [] as { sku: string; sucursal: string; u: number }[] };
@@ -138,7 +138,7 @@ export async function prendasMenosVendidas(p: ParamsInforme) {
      from productos p
      left join (select sku, sum(cantidad) t from stock where ${filtroSuc("sucursal_id")} group by sku) st on st.sku = p.sku
      left join (select vi.sku, sum(vi.cantidad) u from venta_items vi join ventas v on v.id = vi.venta_id
-                where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")} group by vi.sku) vv on vv.sku = p.sku
+                where ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("coalesce(vi.stock_de, v.sucursal_id)")} group by vi.sku) vv on vv.sku = p.sku
      where p.activo and coalesce(st.t, 0) > 0 order by coalesce(vv.u, 0) asc, st.t desc, p.sku limit $4`,
     [...base(p), p.limite],
   );
@@ -163,7 +163,7 @@ export async function notasCredito(p: ParamsInforme) {
   const usado = await pool.query<{ monto: number; ventas: number }>(
     `select coalesce(sum(pg.monto), 0)::float8 as monto, count(distinct pg.venta_id)::int as ventas
      from venta_pagos pg join ventas v on v.id = pg.venta_id
-     where pg.nota_credito_id is not null and ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")}`,
+     where pg.nota_credito_id is not null and ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")}`,
     base(p),
   );
   const pendiente = await pool.query<{ monto: number; notas: number }>(
@@ -210,7 +210,7 @@ export async function horarios(p: ParamsInforme) {
   const r = await pool.query<{ dia: number; hora: number; ventas: number; total: number }>(
     `select extract(isodow from v.creado_en at time zone '${TZ}')::int as dia, extract(hour from v.creado_en at time zone '${TZ}')::int as hora,
        count(*)::int as ventas, sum(v.total)::float8 as total
-     from ventas v where ${rango("v.creado_en")} and ${filtroSuc("v.sucursal_id")} group by 1, 2 order by 1, 2`,
+     from ventas v where ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")} group by 1, 2 order by 1, 2`,
     base(p),
   );
   const dias = ["", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];

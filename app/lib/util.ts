@@ -23,6 +23,9 @@ export type MedioPago = { id: string; nombre: string; ajustePct: number };
 export type Reparto = Record<string, number>;
 export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; motivo: string };
 
+// Condicion SQL para dejar afuera las ventas anuladas (la tabla de ventas se llama v).
+export const NO_ANULADA = "not exists (select 1 from ventas_anuladas va where va.venta_id = v.id)";
+
 export const normalizar = (s: string) =>
   s.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
 
@@ -140,7 +143,7 @@ export type NotaCredito = {
   items: { nombre: string; cantidad: number; monto: number; falladas: number }[];
 };
 export type VentaListada = {
-  codigo: string; fecha: string; total: number; unidades: number; medios: string; devuelta: boolean;
+  codigo: string; fecha: string; total: number; unidades: number; medios: string; devuelta: boolean; anulada: boolean;
   items: { nombre: string; cantidad: number }[];
 };
 export type VentaDevolvible = {
