@@ -248,3 +248,7 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 .regalo-tilde { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; padding: 10px 14px; border: 1px dashed var(--borde); border-radius: 10px; cursor: pointer; font-size: 16px; }
 .regalo-tilde input { width: 20px; height: 20px; }
 .regalo-tilde.activo { border-style: solid; border-color: #e0567a; background: rgba(224, 86, 122, 0.12); }
+
+/* Link con forma de boton (ej. "Cambio o devolución" en Ventas). */
+a.boton { display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta); color: var(--texto); text-decoration: none; font-weight: 600; white-space: nowrap; }
+a.boton.principal { background: var(--acento); border-color: var(--acento); color: #fff; }
