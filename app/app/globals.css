@@ -61,7 +61,7 @@ a { color: var(--acento); }
 .sucursal { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--suave); }
 
 input, select, button { font: inherit; color: inherit; }
-input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="password"], input[type="date"], select {
+input:not([type]), input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="password"], input[type="date"], select {
   height: 44px; padding: 0 12px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta);
 }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
