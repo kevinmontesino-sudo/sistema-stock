@@ -99,7 +99,7 @@ export default function VentasPage() {
     <>
       <h1>Ventas · {nombreSucursal(sucursal)}</h1>
       <p className="aviso no-print" style={{ marginTop: -8 }}>
-        Para cuando el cliente perdió el ticket: encontrá su compra por fecha y, desde acá, la devolvés o reimprimís el ticket. Van de la más vieja a la más nueva.
+        Para cuando el cliente perdió el ticket: encontrá su compra por fecha y, desde acá, tocás <strong>Cambio o devolución</strong> (se abre con el ticket ya cargado, sin escribir el código) o reimprimís el ticket. Van de la más vieja a la más nueva.
       </p>
       <div className="fila no-print" style={{ gap: 12, flexWrap: "wrap", margin: "8px 0 12px" }}>
         <span className="fila" style={{ gap: 6 }}>
@@ -135,7 +135,7 @@ export default function VentasPage() {
                     <td style={{ minWidth: 190, textDecoration: "none" }}>
                       {!v.anulada && (
                         <span className="fila" style={{ gap: 6, flexWrap: "wrap" }}>
-                          <Link className="boton" href={`/devolucion?codigo=${v.codigo}`}>Devolver</Link>
+                          <Link className="boton principal" href={`/devolucion?codigo=${v.codigo}`} title="Abre la nota de crédito con este ticket ya cargado">Cambio o devolución</Link>
                           <button className="chico" onClick={() => reimprimir(v.codigo)} disabled={!!imprimiendo}>{imprimiendo === `${v.codigo}:ticket` ? "Imprimiendo…" : "Reimprimir"}</button>
                           <button className="chico" onClick={() => reimprimir(v.codigo, "regalo")} disabled={!!imprimiendo} title="Sin precios: el importe dice INVALUABLE">{imprimiendo === `${v.codigo}:regalo` ? "Imprimiendo…" : "🎁 Regalo"}</button>
                           {puedePdf && <button className="chico" onClick={() => reimprimir(v.codigo, "pdf")} disabled={!!imprimiendo}>{imprimiendo === `${v.codigo}:pdf` ? "Armando…" : "PDF"}</button>}
