@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy } from "@/app/actions";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
-import { ticketVentaEscpos } from "@/lib/escpos";
+import { ticketsVentaEscpos } from "@/lib/escpos";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { compartirTicketPdf } from "@/lib/ticketPdf";
 import { usePuede } from "@/components/SesionContext";
@@ -56,7 +56,9 @@ export default function VentaPage() {
   const [ultima, setUltima] = useState<DatosTicket | null>(null);
   const [cobrando, setCobrando] = useState(false);
   const [aImprimir, setAImprimir] = useState(false);
-  const [regalo, setRegalo] = useState(false); // el proximo ticket que se imprime es de regalo (sin precios)
+  // Regalo: tildado antes de cobrar, se imprimen DOS tickets cortados (el del que compro y el de regalo, sin precios).
+  const [esRegalo, setEsRegalo] = useState(false);
+  const [imprimirComo, setImprimirComo] = useState<"normal" | "ambos" | "regalo">("normal");
   const [verTicket, setVerTicket] = useState(false);
   const [medios, setMedios] = useState<MedioPago[]>([]);
   const [medioSel, setMedioSel] = useState<string | null>(null);
@@ -327,6 +329,8 @@ export default function VentaPage() {
     if (nota && notaMonto > 0 && nota.saldo - notaMonto > 0) setSaldoNota({ codigo: nota.codigo, saldo: nota.saldo - notaMonto });
     setNota(null);
     setUltima({ ...r.venta, sucursal, recibido: pagoEfectivo && recibidoNum >= pagoEfectivo.monto ? recibidoNum : undefined });
+    setImprimirComo(esRegalo ? "ambos" : "normal");
+    setEsRegalo(false);
     if (autoTicket) setAImprimir(true);
     setAviso("");
     setLineas(() => []);
@@ -344,10 +348,13 @@ export default function VentaPage() {
     if (!aImprimir) return;
     const t = setTimeout(() => {
       setAImprimir(false);
-      if (ultima) imprimirTicketPreferido(() => ticketVentaEscpos({ ...ultima, regalo })).then((m) => m && setAviso(m));
+      if (ultima) {
+        const construir = imprimirComo === "regalo" ? () => ticketsVentaEscpos({ ...ultima, regalo: true, recibido: undefined }, false) : () => ticketsVentaEscpos(ultima, imprimirComo === "ambos");
+        imprimirTicketPreferido(construir).then((m) => m && setAviso(m));
+      }
     }, 100);
     return () => clearTimeout(t);
-  }, [aImprimir, ultima, regalo]);
+  }, [aImprimir, ultima, imprimirComo]);
 
   // Las notas de credito no son plata que entra a la caja: se muestran aparte y no suman al total cobrado.
   const filasCaja = caja.filas.filter((c) => c.id !== "nota_credito");
@@ -646,6 +653,10 @@ export default function VentaPage() {
           </div>
         )}
 
+        <label className={`regalo-tilde${esRegalo ? " activo" : ""}`}>
+          <input type="checkbox" checked={esRegalo} onChange={(e) => setEsRegalo(e.target.checked)} />
+          <span>🎁 <strong>Es regalo</strong> <span className="aviso">· salen dos tickets: el del cliente con el importe y uno de regalo sin precios ❤</span></span>
+        </label>
         <button className="principal boton-cobrar" onClick={cobrar}
           disabled={lineas.length === 0 || !calc || !calc.ok || cobrando}>
           {cobrando ? "Registrando…" : textoCobrar}
@@ -683,8 +694,9 @@ export default function VentaPage() {
           {saldoNota && <p className="alerta">A la nota {saldoNota.codigo} le quedan {pesos(saldoNota.saldo)}: el cliente puede usarla de nuevo cuando quiera.</p>}
           <p className="aviso">Ticket interno · No válido como factura.</p>
           <div className="fila" style={{ gap: 8, marginTop: 8 }}>
-            <button onClick={() => { setRegalo(false); setAImprimir(true); }}>Imprimir ticket</button>
-            <button onClick={() => { setRegalo(true); setAImprimir(true); }} title="Sin precios: el importe dice INVALUABLE">🎁 Ticket de regalo</button>
+            <button onClick={() => { setImprimirComo("normal"); setAImprimir(true); }}>Imprimir ticket</button>
+            <button onClick={() => { setImprimirComo("regalo"); setAImprimir(true); }} title="Sin precios: el importe dice INVALUABLE">🎁 Ticket de regalo</button>
+            <button onClick={() => { setImprimirComo("ambos"); setAImprimir(true); }}>Imprimir los dos</button>
             {(sucursal === DEPOSITO || esAdmin) && <button onClick={() => compartirTicketPdf(ultima).catch(() => setAviso("No se pudo armar el PDF del ticket."))}>PDF para WhatsApp</button>}
             <button onClick={() => setVerTicket((v) => !v)}>{verTicket ? "Ocultar ticket" : "Ver ticket en pantalla"}</button>
           </div>
@@ -693,7 +705,8 @@ export default function VentaPage() {
       )}
       {ultima && (
         <div className="solo-ticket" aria-hidden="true">
-          <Ticket venta={{ ...ultima, regalo }} />
+          {imprimirComo !== "regalo" && <Ticket venta={ultima} />}
+          {imprimirComo !== "normal" && <div style={{ breakBefore: "page" }}><Ticket venta={{ ...ultima, regalo: true, recibido: undefined }} /></div>}
         </div>
       )}
 

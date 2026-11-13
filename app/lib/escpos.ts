@@ -1,5 +1,5 @@
 import { empresa } from "./empresa.config";
-import { envolver, renglonesVenta } from "./ticketRenglones";
+import { CORAZON_SVG, envolver, renglonesVenta } from "./ticketRenglones";
 import { nombreSucursal, pesos, type NotaCredito } from "./util";
 import type { DatosTicket } from "@/components/Ticket";
 import type { CierreCaja, MedioDia } from "./cierre";
@@ -54,20 +54,17 @@ class Rollo {
   bytes() { return Uint8Array.from(this.b); }
 }
 
-// El logo se dibuja en blanco y negro: la impresora no tiene escala de grises.
-async function logoRaster(anchoPuntos: number) {
-  const img = new Image();
-  img.src = "/logo-negro.png";
-  await img.decode();
+// Dibujos (logo, corazon) en blanco y negro: la impresora no tiene escala de grises.
+function raster(anchoPuntos: number, alto: number, dibujar: (ctx: CanvasRenderingContext2D, w: number, h: number) => void) {
   const w = Math.floor(anchoPuntos / 8) * 8;
-  const h = Math.round((img.naturalHeight * w) / img.naturalWidth);
+  const h = Math.max(1, Math.round(alto));
   const lienzo = document.createElement("canvas");
   lienzo.width = w;
   lienzo.height = h;
   const ctx = lienzo.getContext("2d")!;
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, w, h);
+  dibujar(ctx, w, h);
   const px = ctx.getImageData(0, 0, w, h).data;
   const fila = w / 8;
   const out: number[] = [GS, 0x76, 0x30, 0, fila & 255, fila >> 8, h & 255, h >> 8];
@@ -84,6 +81,25 @@ async function logoRaster(anchoPuntos: number) {
   return out;
 }
 
+async function logoRaster(anchoPuntos: number) {
+  const img = new Image();
+  img.src = "/logo-negro.png";
+  await img.decode();
+  const w = Math.floor(anchoPuntos / 8) * 8;
+  return raster(w, (img.naturalHeight * w) / img.naturalWidth, (ctx, ww, hh) => ctx.drawImage(img, 0, 0, ww, hh));
+}
+
+// Corazon centrado, de `mm` milimetros de ancho (203 dpi: 8 puntos por mm).
+function corazonRaster(anchoPapelPuntos: number, mm: number) {
+  const lado = mm * 8;
+  return raster(anchoPapelPuntos, lado * 0.9, (ctx, w) => {
+    ctx.translate((w - lado) / 2, 0);
+    ctx.scale(lado / 100, lado / 100);
+    ctx.fillStyle = "#000";
+    ctx.fill(new Path2D(CORAZON_SVG));
+  });
+}
+
 const dos = (n: number) => String(n).padStart(2, "0");
 
 async function nuevo() {
@@ -94,6 +110,17 @@ async function nuevo() {
   return r;
 }
 
+// Venta marcada como regalo: dos tickets cortados, uno para el que compro (con importe) y otro de regalo (sin precios).
+export async function ticketsVentaEscpos(venta: DatosTicket, conRegalo: boolean) {
+  const a = await ticketVentaEscpos({ ...venta, regalo: false });
+  if (!conRegalo) return a;
+  const b = await ticketVentaEscpos({ ...venta, regalo: true, recibido: undefined });
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a);
+  out.set(b, a.length);
+  return out;
+}
+
 export async function ticketVentaEscpos(venta: DatosTicket) {
   const r = await nuevo();
   for (const x of renglonesVenta(venta)) {
@@ -101,6 +128,7 @@ export async function ticketVentaEscpos(venta: DatosTicket) {
     else if (x.t === "izqDer") r.izqDer(x.izq, x.der, x.destacado);
     else if (x.t === "linea") { if (x.s) for (const l of envolver(x.s, r.cols)) r.linea(l); else r.linea(); }
     else if (x.t === "regla") r.regla();
+    else if (x.t === "corazon") r.raw(...corazonRaster(r.cols >= 48 ? 448 : 320, x.mm));
     else r.barras(x.valor);
   }
   r.cortar();

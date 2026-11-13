@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
 import JsBarcode from "jsbarcode";
-import { envolver, renglonesVenta } from "./ticketRenglones";
+import { CORAZON_SVG, envolver, renglonesVenta } from "./ticketRenglones";
 import type { DatosTicket } from "@/components/Ticket";
 
 // Ticket de venta en PDF (para mandar por WhatsApp). Se arma en el momento en la PC o el celular y NO se guarda en ningun lado:
@@ -59,6 +59,9 @@ export async function ticketVentaPdf(venta: DatosTicket) {
           if (fin) texto(r.der, ANCHO - MARGEN - f.widthOfTextAtSize(limpiar(r.der), tam), f, tam)(page, y);
         } });
       });
+    } else if (r.t === "corazon") {
+      const lado = r.mm * MM;
+      pasos.push({ alto: lado * 0.9 + 1.5 * MM, dibujar: (page, y) => page.drawSvgPath(CORAZON_SVG, { x: (ANCHO - lado) / 2, y, scale: lado / 100, color: rgb(0, 0, 0) }) });
     } else if (r.t === "barras") {
       const bits = barras(r.valor);
       const modulo = Math.min(1.2, (ANCHO - 2 * MARGEN) / bits.length);

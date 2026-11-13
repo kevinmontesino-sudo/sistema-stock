@@ -2,7 +2,7 @@
 import { empresa } from "@/lib/empresa.config";
 import { CodigoBarras } from "@/components/CodigoBarras";
 import { lineasTicket } from "@/lib/ticketLineas";
-import { TEXTO_REGALO } from "@/lib/ticketRenglones";
+import { CORAZON_SVG, TEXTO_REGALO } from "@/lib/ticketRenglones";
 import { DIAS_DEVOLUCION, nombreSucursal, pesos, type PagoCalculado } from "@/lib/util";
 
 export type DatosTicket = {
@@ -41,7 +41,13 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       <img src="/logo-negro.png" alt={empresa.nombre} className="ticket-logo" />
       <div className="centro">{nombreSucursal(venta.sucursal)}</div>
       <div className="centro">Ticket {venta.codigo} · {fecha}</div>
-      {venta.regalo && <div className="centro"><strong>{TEXTO_REGALO.titulo}</strong></div>}
+      {venta.regalo && (
+        <div className="centro" style={{ margin: "2mm 0" }}>
+          <svg viewBox="0 0 100 90" width="16mm" height="14.4mm" aria-hidden="true"><path d={CORAZON_SVG} fill="#000" /></svg>
+          <div><strong>{TEXTO_REGALO.titulo}</strong></div>
+          <div>{TEXTO_REGALO.dedicatoria}</div>
+        </div>
+      )}
       <hr />
       {items.map((i, k) => (
         <div key={k} className="linea">
@@ -94,7 +100,12 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
           {sinCambio && <div className="centro">Las prendas marcadas SIN CAMBIO no tienen cambio.</div>}
         </>
       )}
-      <div className="centro" style={{ margin: "2mm 0" }}><strong>¡Gracias por tu compra!<br />Te esperamos pronto</strong></div>
+      {venta.regalo ? (
+        <div className="centro" style={{ margin: "2mm 0" }}><strong>{TEXTO_REGALO.despedida}</strong><br />
+          <svg viewBox="0 0 100 90" width="6mm" height="5.4mm" aria-hidden="true"><path d={CORAZON_SVG} fill="#000" /></svg></div>
+      ) : (
+        <div className="centro" style={{ margin: "2mm 0" }}><strong>¡Gracias por tu compra!<br />Te esperamos pronto</strong></div>
+      )}
       <div className="centro">Ticket interno</div>
       <div className="centro">No válido como factura</div>
     </div>

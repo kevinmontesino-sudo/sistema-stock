@@ -11,7 +11,8 @@ export type Renglon =
   | { t: "izqDer"; izq: string; der: string; destacado?: boolean }
   | { t: "linea"; s: string }
   | { t: "regla" }
-  | { t: "barras"; valor: string };
+  | { t: "barras"; valor: string }
+  | { t: "corazon"; mm: number }; // dibujo de un corazon centrado (ticket de regalo), de `mm` milimetros de ancho
 
 const dos = (n: number) => String(n).padStart(2, "0");
 export const fechaTicket = (iso: string) => {
@@ -22,7 +23,12 @@ export const limiteCambio = (iso: string) => {
   const t = new Date(new Date(iso).getTime() + DIAS_DEVOLUCION * 86_400_000);
   return `${dos(t.getDate())}/${dos(t.getMonth() + 1)}/${t.getFullYear()}`;
 };
-export const TEXTO_REGALO = { titulo: "TICKET DE REGALO", importe: "IMPORTE", valor: "INVALUABLE" };
+export const TEXTO_REGALO = {
+  titulo: "TICKET DE REGALO", dedicatoria: "Alguien pensó en vos y te eligió esto con mucho cariño",
+  importe: "IMPORTE", valor: "INVALUABLE", despedida: "¡Que lo disfrutes!",
+};
+// Corazon en una caja de 100 x 90 (el mismo dibujo en la impresora, el PDF y la pantalla).
+export const CORAZON_SVG = "M50 88 C20 66 4 49 4 30 C4 15 15 4 29 4 C39 4 46 10 50 19 C54 10 61 4 71 4 C85 4 96 15 96 30 C96 49 80 66 50 88 Z";
 
 export function renglonesVenta(venta: DatosTicket): Renglon[] {
   const r: Renglon[] = [];
@@ -31,7 +37,9 @@ export function renglonesVenta(venta: DatosTicket): Renglon[] {
   const efectivo = venta.pagos.find((p) => p.medioId === "efectivo");
   const { items, recargo, textoPct, promo, ahorro, sinCambio, todoSinCambio } = lineasTicket(venta);
   r.push({ t: "centro", s: nombreSucursal(venta.sucursal) }, { t: "centro", s: `Ticket ${venta.codigo} · ${fechaTicket(venta.fecha)}` });
-  if (venta.regalo) r.push({ t: "centro", s: TEXTO_REGALO.titulo, negrita: true });
+  if (venta.regalo) {
+    r.push({ t: "linea", s: "" }, { t: "corazon", mm: 16 }, { t: "centro", s: TEXTO_REGALO.titulo, negrita: true }, { t: "centro", s: TEXTO_REGALO.dedicatoria });
+  }
   r.push({ t: "regla" });
   for (const i of items) {
     const nombre = `${i.cant} x ${i.nombre}${i.sinCambio && !todoSinCambio ? " (SIN CAMBIO)" : ""}`;
@@ -63,7 +71,9 @@ export function renglonesVenta(venta: DatosTicket): Renglon[] {
     r.push({ t: "centro", s: `Cambios por ${DIAS_DEVOLUCION} días`, negrita: true }, { t: "centro", s: `Hasta el ${limiteCambio(venta.fecha)} presentando este ticket.` });
     if (sinCambio) r.push({ t: "centro", s: "Las prendas marcadas SIN CAMBIO no tienen cambio." });
   }
-  r.push({ t: "linea", s: "" }, { t: "centro", s: "¡Gracias por tu compra!", negrita: true }, { t: "centro", s: "Te esperamos pronto", negrita: true }, { t: "linea", s: "" },
+  if (venta.regalo) r.push({ t: "linea", s: "" }, { t: "centro", s: TEXTO_REGALO.despedida, negrita: true }, { t: "corazon", mm: 6 }, { t: "linea", s: "" });
+  else r.push({ t: "linea", s: "" }, { t: "centro", s: "¡Gracias por tu compra!", negrita: true }, { t: "centro", s: "Te esperamos pronto", negrita: true }, { t: "linea", s: "" });
+  r.push(
     { t: "centro", s: "Ticket interno" }, { t: "centro", s: "No válido como factura" });
   return r;
 }
