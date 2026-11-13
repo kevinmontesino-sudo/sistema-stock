@@ -233,14 +233,16 @@ export async function cargar(a: {
   });
 }
 
-// Retiro de la empresa: prendas que salen del stock SIN cobrar porque la empresa las regala (a un cliente, una clienta mayorista,
-// un canje...). No es una venta (no toca la caja ni los informes de ventas): es una inversion. Queda como movimiento de stock con
-// el motivo (empieza con PREFIJO_RETIRO) y la oficina lo ve en Oficina > Promos con lo que vale a precio de lista.
-export const PREFIJO_RETIRO = "Regalo de la empresa: ";
+// Cortesia empresarial: prendas que salen del stock SIN cobrar porque la empresa decide darlas (a un cliente, una clienta
+// mayorista, un canje...). No es una venta (no toca la caja ni los informes de ventas): es una inversion. Queda como movimiento de
+// stock con el motivo (empieza con PREFIJO_RETIRO) y la oficina lo ve en Oficina > Promos con lo que vale a precio de lista.
+// "Regalo de la empresa: " es el nombre viejo (se sigue leyendo).
+export const PREFIJO_RETIRO = "Cortesía empresarial: ";
+const SQL_ES_CORTESIA = "(m.motivo like 'Cortesía empresarial: %' or m.motivo like 'Regalo de la empresa: %')";
 export async function retiroEmpresa(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string }[], motivoPedido: string) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const motivo = motivoPedido.trim().replace(/\s+/g, " ");
-  if (motivo.length < 5 || motivo.length > 200) falla("Escribí para quién es el regalo y por qué");
+  if (motivo.length < 3 || motivo.length > 200) falla("Escribí para quién es la cortesía");
   if (itemsPedidos.length === 0) falla("No hay prendas");
   for (const i of itemsPedidos) {
     if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
@@ -263,18 +265,19 @@ export async function retiroEmpresa(sucursal: string, itemsPedidos: { sku: strin
       detalle.push({ sku: p.sku, nombre: p.nombre, cant: i.cant, precio: p.precio, sucursal: i.origen });
     }
     await auditar("retiro_empresa", { sucursal, motivo, unidades, valorLista, items: detalle }, { db: c });
-    return { unidades, valorLista };
+    const ahora = await c.query<{ t: Date }>("select now() as t");
+    return { unidades, valorLista, fecha: ahora.rows[0].t.toISOString(), sucursal, para: motivo, items: detalle.map((d) => ({ sku: d.sku, nombre: d.nombre, cant: d.cant })) };
   });
 }
 
-// Lo que la empresa regalo (para la oficina): cada retiro con su valor a precio de lista de hoy.
+// Cortesias empresariales (para la oficina): cada una con su valor a precio de lista de hoy.
 export async function retirosEmpresa(limite = 100) {
   const r = await pool.query<{ fecha: Date; sucursal: string; usuario: string | null; sku: string; nombre: string; cantidad: number; valor: number; motivo: string }>(
     `select m.creado_en as fecha, m.desde as sucursal, u.nombre as usuario, m.sku, p.nombre, m.cantidad,
-            (m.cantidad * p.precio_lista)::float8 as valor, substr(m.motivo, $2) as motivo
+            (m.cantidad * p.precio_lista)::float8 as valor, regexp_replace(m.motivo, '^(Cortesía empresarial|Regalo de la empresa): ', '') as motivo
        from movimientos m join productos p on p.sku = m.sku left join usuarios u on u.id = m.usuario_id
-      where m.tipo = 'ajuste' and m.motivo like $3 order by m.creado_en desc, m.id desc limit $1`,
-    [Math.min(Math.max(1, limite), 500), PREFIJO_RETIRO.length + 1, PREFIJO_RETIRO + "%"]);
+      where m.tipo = 'ajuste' and ${SQL_ES_CORTESIA} order by m.creado_en desc, m.id desc limit $1`,
+    [Math.min(Math.max(1, limite), 500)]);
   return r.rows.map((x) => ({ ...x, fecha: new Date(x.fecha).toISOString() }));
 }
 
@@ -527,11 +530,11 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
   // Un mismo SKU de un mismo origen no puede aparecer dos veces (se controla el stock sobre el total).
   if (new Set(items.map((i) => `${i.sku}|${i.origen}`)).size !== items.length) falla("Hay una prenda repetida en la venta");
   for (const g of regalosPedidos) {
-    if (!Number.isInteger(g.cant) || g.cant < 1) falla("Cantidad de regalo inválida");
+    if (!Number.isInteger(g.cant) || g.cant < 1) falla("Cantidad de cortesía inválida");
     if (g.origen && g.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(g.origen))) falla("Ese local no puede regalar stock de otra sucursal");
   }
   const regalos = regalosPedidos.map((g) => ({ ...g, origen: g.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
-  if (new Set(regalos.map((g) => `${g.sku}|${g.origen}`)).size !== regalos.length) falla("Hay un regalo repetido");
+  if (new Set(regalos.map((g) => `${g.sku}|${g.origen}`)).size !== regalos.length) falla("Hay una cortesía repetida");
   return tx(async (c) => {
     // Un reintento del mismo cobro (misma clave) devuelve la venta ya registrada en vez de duplicarla.
     if (clave) {
@@ -648,7 +651,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       const p = await productoPorSku(g.sku, c);
       if (!p) return falla(`La prenda ${g.sku} ya no existe o fue dada de baja`);
       const hay = await stockActual(c, p.sku, g.origen);
-      if (hay < g.cant) falla(`Para regalar ${g.cant} de ${p.nombre} no alcanza el stock de ${nombreSucursal(g.origen)} (quedan ${Math.max(0, hay)} después de lo vendido)`);
+      if (hay < g.cant) falla(`Para dar ${g.cant} de ${p.nombre} como cortesía no alcanza el stock de ${nombreSucursal(g.origen)} (quedan ${Math.max(0, hay)} después de lo vendido)`);
       await sumarStock(c, p.sku, g.origen, -g.cant);
       await mov(c, p.sku, g.cant, g.origen, null, "ajuste", { ventaId, motivo: `${PREFIJO_RETIRO}con la compra del ticket ${v.rows[0].codigo}` });
       regalosTicket.push({ sku: p.sku, nombre: p.nombre, cant: g.cant });
@@ -679,7 +682,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
 async function regalosDeVenta(c: PoolClient, ventaId: number) {
   const r = await c.query<{ sku: string; nombre: string; cant: number; desde: string }>(
     `select m.sku, p.nombre, m.cantidad as cant, m.desde from movimientos m join productos p on p.sku = m.sku
-      where m.venta_id = $1 and m.tipo = 'ajuste' and m.motivo like $2 order by m.id`, [ventaId, PREFIJO_RETIRO + "%"]);
+      where m.venta_id = $1 and m.tipo = 'ajuste' and ${SQL_ES_CORTESIA} order by m.id`, [ventaId]);
   return r.rows;
 }
 
@@ -1021,7 +1024,7 @@ export async function anularVenta(ventaCodigo: string, motivoPedido: string, o: 
     // Lo que se regalo con esa compra tambien vuelve al stock.
     for (const g of await regalosDeVenta(c, venta.id)) {
       await sumarStock(c, g.sku, g.desde, g.cant);
-      await mov(c, g.sku, g.cant, null, g.desde, "anulacion", { ventaId: venta.id, motivo: `Venta ${cod} anulada (era regalo): ${motivo}` });
+      await mov(c, g.sku, g.cant, null, g.desde, "anulacion", { ventaId: venta.id, motivo: `Venta ${cod} anulada (era cortesía): ${motivo}` });
       unidades += g.cant;
     }
     await auditar("venta_anulada", { venta: cod, sucursal: venta.sucursal_id, total: venta.total, unidades, motivo }, { db: c });

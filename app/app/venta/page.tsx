@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion } from "@/app/actions";
-import { Ticket, type DatosTicket } from "@/components/Ticket";
+import { Ticket, TicketCortesia, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
-import { ticketsVentaEscpos } from "@/lib/escpos";
+import { ticketCortesiaEscpos, ticketsVentaEscpos } from "@/lib/escpos";
+import type { DatosCortesia } from "@/lib/ticketRenglones";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { compartirTicketPdf } from "@/lib/ticketPdf";
 import { usePuede } from "@/components/SesionContext";
@@ -17,7 +18,7 @@ import {
 // origen: de que stock sale la prenda. Casi siempre es el propio local; el deposito tambien puede vender con el stock de San Lorenzo.
 // faltante: la prenda esta en el local pero el sistema no la tiene; al cobrar se corrige el stock (traer de otra sucursal o sumarla).
 type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
-// regalo: cuantas unidades de este renglon van de regalo de la empresa (sin cobrar). Las demas se cobran.
+// regalo: cuantas unidades de este renglon van como cortesia empresarial (sin cobrar). Las demas se cobran.
 type Linea = { producto: Producto; cant: number; origen: string; faltante?: Faltante; regalo?: number };
 // Cuantas se pueden vender en una linea: lo que hay en su stock, mas lo que se puede pasar de la otra sucursal (o sin tope si no estaba cargada).
 const topeLinea = (l: Linea) => (l.faltante?.modo === "sin_cargar" ? 999 : (l.producto.stock[l.origen] ?? 0) + (l.faltante?.modo === "traer" ? l.producto.stock[l.faltante.desde] ?? 0 : 0));
@@ -38,9 +39,11 @@ const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0
 export default function VentaPage() {
   const [sucursal] = useSucursal();
   const esAdmin = usePuede("admin");
-  // Retiro de la empresa (regalo sin cobrar): boton chico, con motivo y confirmacion. No es una venta.
+  // Cortesia empresarial: prendas que no se cobran (algunas de una compra, o todas: ahi no hay venta y sale un comprobante).
   const puedeRetiro = usePuede("retiro_empresa");
-  const [retiro, setRetiro] = useState<{ abierto: boolean; motivo: string; confirmo: boolean; ocupado: boolean }>({ abierto: false, motivo: "", confirmo: false, ocupado: false });
+  const [cortesiaPara, setCortesiaPara] = useState("");
+  const [registrandoCortesia, setRegistrandoCortesia] = useState(false);
+  const [ultimaCortesia, setUltimaCortesia] = useState<DatosCortesia | null>(null);
   const [autoTicket, setAutoTicket] = useAutoTicket();
   // El carrito pertenece a una sucursal: si se cambia de local, no queda nada del otro.
   const [carrito, setCarrito] = useState<{ suc: string; items: Linea[] }>({ suc: sucursal, items: [] });
@@ -279,6 +282,7 @@ export default function VentaPage() {
   const pagas = useMemo(() => lineas.map((l) => ({ ...l, cant: l.cant - Math.min(l.regalo ?? 0, l.cant) })), [lineas]);
   const regalosCarrito = lineas.filter((l) => (l.regalo ?? 0) > 0).map((l) => ({ sku: l.producto.sku, cant: Math.min(l.regalo!, l.cant), origen: l.origen }));
   const unidadesRegalo = regalosCarrito.reduce((s, g) => s + g.cant, 0);
+  const soloCortesia = lineas.length > 0 && unidadesRegalo > 0 && pagas.every((l) => l.cant === 0);
   const subtotal = pagas.reduce((s, f) => s + f.producto.precio * f.cant, 0);
   const cantidadTotal = pagas.reduce((s, f) => s + f.cant, 0);
   // Promo: la mejor de las de hoy (no se acumulan). El descuento especial la reemplaza. Al cobrar, el servidor recalcula todo.
@@ -325,11 +329,28 @@ export default function VentaPage() {
     ? [...new Set([1000, 5000, 10000, 20000].map((u) => Math.ceil(pagoEfectivo.monto / u) * u))].filter((x) => x > pagoEfectivo.monto).slice(0, 4)
     : [];
 
+  // Todo el carrito como cortesia: no es una venta (no toca la caja); sale del stock y se imprime un comprobante.
+  async function registrarCortesia() {
+    if (registrandoCortesia || cortesiaPara.trim().length < 3) return;
+    setRegistrandoCortesia(true);
+    const r = await retiroEmpresaAccion(sucursal, regalosCarrito, cortesiaPara);
+    setRegistrandoCortesia(false);
+    if (!r.ok) return setAviso(r.motivo);
+    const datos: DatosCortesia = { fecha: r.retiro.fecha, sucursal, items: r.retiro.items };
+    setUltima(null);
+    setUltimaCortesia(datos);
+    setLineas(() => []);
+    setCortesiaPara("");
+    setEspecial(null);
+    setAviso(`Cortesía empresarial registrada: ${r.retiro.unidades} ${r.retiro.unidades === 1 ? "prenda" : "prendas"} (${pesos(r.retiro.valorLista)} a precio de lista). No se cobró nada y no cuenta como venta.`);
+    setVersion((v) => v + 1);
+    imprimirTicketPreferido(() => ticketCortesiaEscpos(datos)).then((m) => m && setAviso(m));
+  }
+
   async function cobrar() {
     if (cobrando || !calc || !calc.ok) return;
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
-    if (cantidadTotal === 0) return setAviso("No se puede regalar todo: tiene que haber al menos una prenda que se cobre.");
     const cobradas = pagas.filter((l) => l.cant > 0);
     const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null]), pagos, especial, calc.total, regalosCarrito]))}`, especial, calc.total, regalosCarrito);
     setCobrando(false);
@@ -338,6 +359,7 @@ export default function VentaPage() {
     claveCobro.current = crypto.randomUUID();
     if (nota && notaMonto > 0 && nota.saldo - notaMonto > 0) setSaldoNota({ codigo: nota.codigo, saldo: nota.saldo - notaMonto });
     setNota(null);
+    setUltimaCortesia(null);
     setUltima({ ...r.venta, sucursal, recibido: pagoEfectivo && recibidoNum >= pagoEfectivo.monto ? recibidoNum : undefined });
     setImprimirComo(esRegalo ? "ambos" : "normal");
     setEsRegalo(false);
@@ -493,7 +515,7 @@ export default function VentaPage() {
                   </td>
                   <td className="der">
                     <strong>{pesos(f.producto.precio * (f.cant - Math.min(f.regalo ?? 0, f.cant)))}</strong>
-                    {(f.regalo ?? 0) > 0 && <div style={{ marginTop: 4 }}><span className="tag-empresa">{Math.min(f.regalo!, f.cant)} SIN CARGO · empresa</span></div>}
+                    {(f.regalo ?? 0) > 0 && <div style={{ marginTop: 4 }}><span className="tag-empresa">{Math.min(f.regalo!, f.cant)} CORTESÍA EMPRESARIAL</span></div>}
                   </td>
                   <td className="der"><button className="chico" onClick={() => setLineas((l) => l.filter((x) => claveLinea(x) !== claveLinea(f)))}>Quitar</button></td>
                 </tr>
@@ -503,7 +525,7 @@ export default function VentaPage() {
           </div>
         )}
         <div className="fila" style={{ justifyContent: "space-between", marginTop: 16 }}>
-          <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"}{unidadesRegalo > 0 ? ` (+ ${unidadesRegalo} sin cargo por la empresa)` : ""} · total a precio de lista</span>
+          <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"}{unidadesRegalo > 0 ? ` (+ ${unidadesRegalo} de cortesía empresarial)` : ""} · total a precio de lista</span>
           <span className={descuento > 0 ? "aviso" : "total-venta"} style={descuento > 0 ? { fontSize: 18, textDecoration: "line-through" } : undefined}>{pesos(subtotal)}</span>
         </div>
         {descuento > 0 && (
@@ -522,6 +544,7 @@ export default function VentaPage() {
         )}
         {sugerencia && <p className="alerta" style={{ margin: "8px 0 0" }}>💡 {sugerencia.texto}</p>}
 
+        {!soloCortesia && (<>
         {nota && (
           <div className="vuelto" style={{ marginTop: 12 }}>
             <div className="fila" style={{ justifyContent: "space-between" }}>
@@ -631,7 +654,9 @@ export default function VentaPage() {
           </div>
         )}
 
-        {promosHoy.curvaPlus && promosHoy.suc === sucursal && lineas.length > 0 && !especial && (
+        </>)}
+
+        {!soloCortesia && promosHoy.curvaPlus && promosHoy.suc === sucursal && lineas.length > 0 && !especial && (
           <div style={{ marginTop: 12 }}>
             <button type="button" onClick={() => { setEspecial({ pct: empresa.curvaPlus.pct, motivo: empresa.curvaPlus.nombre, autorizo: "", curvaPlus: true }); setVerEsp(false); setErrEsp(""); }}>
               Aplicar {empresa.curvaPlus.nombre.toUpperCase()} ({empresa.curvaPlus.pct}%)
@@ -640,7 +665,7 @@ export default function VentaPage() {
           </div>
         )}
 
-        {promosHoy.especial && lineas.length > 0 && !especial && (
+        {!soloCortesia && promosHoy.especial && lineas.length > 0 && !especial && (
           <div style={{ marginTop: 12 }}>
             {!verEsp ? (
               <button className="chico" onClick={() => setVerEsp(true)} style={{ opacity: 0.7 }}>Descuento especial (solo si lo consultaste)</button>
@@ -666,6 +691,17 @@ export default function VentaPage() {
           </div>
         )}
 
+        {soloCortesia ? (
+          <div className="empresa-opciones" style={{ padding: 14, display: "grid", gap: 10 }}>
+            <strong style={{ fontSize: 18 }}>Todo es cortesía empresarial · no se cobra nada</strong>
+            <span className="aviso">No es una venta: las prendas salen del stock, no tocan la caja y se imprime un comprobante «Cortesía de la casa». Lo ve la oficina.</span>
+            <input placeholder="¿Para quién es la cortesía? (ej. clienta Laura, mayorista)" value={cortesiaPara} maxLength={200}
+              onChange={(e) => setCortesiaPara(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") registrarCortesia(); }} />
+            <button className="principal boton-cobrar" onClick={registrarCortesia} disabled={registrandoCortesia || cortesiaPara.trim().length < 3}>
+              {registrandoCortesia ? "Registrando…" : `Registrar cortesía (${unidadesRegalo} ${unidadesRegalo === 1 ? "prenda" : "prendas"}) e imprimir`}
+            </button>
+          </div>
+        ) : (<>
         <label className={`regalo-tilde${esRegalo ? " activo" : ""}`}>
           <input type="checkbox" checked={esRegalo} onChange={(e) => setEsRegalo(e.target.checked)} />
           <span>🎁 <strong>Es regalo</strong> <span className="aviso">· salen dos tickets: el del cliente con el importe y uno de regalo sin precios ❤</span></span>
@@ -674,65 +710,48 @@ export default function VentaPage() {
           disabled={lineas.length === 0 || !calc || !calc.ok || cobrando}>
           {cobrando ? "Registrando…" : textoCobrar}
         </button>
+        </>)}
         <label className="fila" style={{ gap: 8, marginTop: 8, fontSize: 14 }}>
           <input type="checkbox" checked={autoTicket} onChange={(e) => setAutoTicket(e.target.checked)} />
           <span>Imprimir el ticket automáticamente al cobrar (en esta PC)</span>
         </label>
         {puedeRetiro && lineas.length > 0 && (
-          <details className="empresa-opciones">
-            <summary>Opciones de la empresa · sin cargo <span className="aviso">(solo si la empresa lo decidió)</span></summary>
+          <details className="empresa-opciones" open={unidadesRegalo > 0 || undefined}>
+            <summary>Cortesía empresarial <span className="aviso">· prendas que no se cobran (solo si la empresa lo decidió)</span></summary>
             <div className="empresa-cuerpo">
-              <strong>Prendas sin cargo en esta compra</strong>
-              <span className="aviso">Elegí cuáles y cuántas no se cobran. En el ticket del cliente salen como REGALO. Tiene que quedar al menos una prenda que se cobre.</span>
+              <span className="aviso">Elegí cuáles y cuántas no se cobran. Pueden ser algunas de la compra o todas (ahí no se cobra nada y sale un comprobante). En el ticket salen como «Cortesía de la casa».</span>
               {lineas.filter((f) => !f.faltante).map((f) => (
                 <div key={claveLinea(f)} className="fila" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <span>{f.producto.nombre} <span className="interno">({f.cant} en la compra)</span></span>
+                  <span>{f.producto.nombre} <span className="interno">({f.cant} en el carrito)</span></span>
                   <span className="fila" style={{ gap: 4, whiteSpace: "nowrap" }}>
-                    <span>Sin cargo:</span>
-                    <button className="chico" disabled={(f.regalo ?? 0) <= 0} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.max(0, (x.regalo ?? 0) - 1) } : x))} aria-label="Una menos sin cargo">−</button>
+                    <span>Cortesía:</span>
+                    <button className="chico" disabled={(f.regalo ?? 0) <= 0} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.max(0, (x.regalo ?? 0) - 1) } : x))} aria-label="Una menos de cortesía">−</button>
                     <strong style={{ minWidth: 20, textAlign: "center" }}>{Math.min(f.regalo ?? 0, f.cant)}</strong>
-                    <button className="chico" disabled={(f.regalo ?? 0) >= f.cant} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.min(x.cant, (x.regalo ?? 0) + 1) } : x))} aria-label="Una más sin cargo">+</button>
+                    <button className="chico" disabled={(f.regalo ?? 0) >= f.cant} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.min(x.cant, (x.regalo ?? 0) + 1) } : x))} aria-label="Una más de cortesía">+</button>
                   </span>
                 </div>
               ))}
-              <hr />
-              <strong>Retirar todo sin vender</strong>
-            {!retiro.abierto ? (
-              <button type="button" className="chico" style={{ justifySelf: "start" }} onClick={() => setRetiro({ abierto: true, motivo: "", confirmo: false, ocupado: false })}>
-                Retirar estas prendas sin cobrar (no es una venta)
-              </button>
-            ) : (
-              <form style={{ display: "grid", gap: 8 }} onSubmit={async (e) => {
-                e.preventDefault();
-                if (retiro.ocupado || !retiro.confirmo || retiro.motivo.trim().length < 5) return;
-                setRetiro((r) => ({ ...r, ocupado: true }));
-                const r = await retiroEmpresaAccion(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen })), retiro.motivo);
-                if (!r.ok) { setRetiro((x) => ({ ...x, ocupado: false })); return setAviso(r.motivo); }
-                setRetiro({ abierto: false, motivo: "", confirmo: false, ocupado: false });
-                setLineas(() => []);
-                setEspecial(null);
-                setUltima(null);
-                setAviso(`Retiro de la empresa registrado: ${r.retiro.unidades} ${r.retiro.unidades === 1 ? "prenda" : "prendas"} (${pesos(r.retiro.valorLista)} a precio de lista) salieron del stock como regalo. No se cobró nada y no cuenta como venta.`);
-                setVersion((v) => v + 1);
-              }}>
-                <strong>Retiro sin venta · {lineas.reduce((s, l) => s + l.cant, 0)} prendas del carrito · {pesos(lineas.reduce((s, l) => s + l.producto.precio * l.cant, 0))} a precio de lista</strong>
-                <span className="aviso">Solo si la empresa decidió regalarlas (a un cliente, un canje…). Salen del stock SIN COBRAR, no es una venta y no hay ticket. Queda registrado con tu usuario y lo ve la oficina.</span>
-                <input placeholder="¿Para quién y por qué? (ej. regalo a clienta mayorista Laura por su compra)" value={retiro.motivo} maxLength={200} autoFocus
-                  onChange={(e) => setRetiro((r) => ({ ...r, motivo: e.target.value }))} required />
-                <label className="fila" style={{ gap: 8 }}>
-                  <input type="checkbox" checked={retiro.confirmo} onChange={(e) => setRetiro((r) => ({ ...r, confirmo: e.target.checked }))} />
-                  <span>Confirmo que estas prendas salen sin cobrar, como regalo de la empresa</span>
-                </label>
-                <div className="fila" style={{ gap: 8 }}>
-                  <button type="submit" disabled={retiro.ocupado || !retiro.confirmo || retiro.motivo.trim().length < 5}>{retiro.ocupado ? "Registrando…" : "Retirar sin cobrar"}</button>
-                  <button type="button" className="chico" onClick={() => setRetiro({ abierto: false, motivo: "", confirmo: false, ocupado: false })}>Cancelar</button>
-                </div>
-              </form>
-            )}
+              <div className="fila" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (x.faltante ? x : { ...x, regalo: x.cant })))}>Todo el carrito como cortesía</button>
+                {unidadesRegalo > 0 && <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => ({ ...x, regalo: 0 })))}>Quitar las cortesías</button>}
+              </div>
             </div>
           </details>
         )}
       </div>
+
+      {ultimaCortesia && (
+        <div className="tarjeta no-print" style={{ marginTop: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Cortesía empresarial registrada</h2>
+          <div className="fila" style={{ gap: 8, marginBottom: 12 }}>
+            <button onClick={() => imprimirTicketPreferido(() => ticketCortesiaEscpos(ultimaCortesia)).then((m) => m && setAviso(m))}>Imprimir comprobante otra vez</button>
+          </div>
+          <div style={{ boxShadow: "0 0 0 1px var(--borde)", width: "fit-content" }}><TicketCortesia datos={ultimaCortesia} /></div>
+        </div>
+      )}
+      {ultimaCortesia && !ultima && (
+        <div className="solo-ticket" aria-hidden="true"><TicketCortesia datos={ultimaCortesia} /></div>
+      )}
 
       {ultima && (
         <div className="tarjeta no-print" style={{ marginTop: 16 }}>
@@ -743,7 +762,7 @@ export default function VentaPage() {
                 <tr key={i.sku}><td>{i.cant} × {i.nombre}</td><td className="der">{pesos(i.precio * i.cant)}</td></tr>
               ))}
               {ultima.regalos?.map((g) => (
-                <tr key={`regalo-${g.sku}`}><td>{g.cant} × {g.nombre} <span className="tag-empresa">SIN CARGO · empresa</span></td><td className="der"><strong>$ 0</strong></td></tr>
+                <tr key={`regalo-${g.sku}`}><td>{g.cant} × {g.nombre} <span className="tag-empresa">CORTESÍA</span></td><td className="der"><strong>$ 0</strong></td></tr>
               ))}
               <tr><td className="aviso">Subtotal a precio de lista</td><td className="der">{pesos(ultima.subtotal)}</td></tr>
               {ultima.promo && <tr><td className="aviso">{ultima.promo.nombre}</td><td className="der">−{pesos(ultima.promo.monto)}</td></tr>}

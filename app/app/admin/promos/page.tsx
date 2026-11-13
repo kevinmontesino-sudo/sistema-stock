@@ -229,9 +229,9 @@ export default function Promos() {
         </table>
       </div>
 
-      <h2>Regalos de la empresa (retiros sin cobrar)</h2>
+      <h2>Cortesías empresariales</h2>
       <p className="aviso" style={{ marginTop: -8 }}>
-        Prendas que salieron del stock sin cobrar porque la empresa decidió regalarlas. No son ventas ni pérdidas: es lo invertido, a precio de lista de hoy.
+        Prendas que salieron del stock sin cobrar porque la empresa decidió darlas (solas o con una compra). No son ventas ni pérdidas: es lo invertido, a precio de lista de hoy.
         {regalos.length > 0 && <> Total de estos {regalos.length} registros: <strong>{regalos.reduce((s, x) => s + x.cantidad, 0)} prendas · {pesos(regalos.reduce((s, x) => s + x.valor, 0))}</strong>.</>}
       </p>
       <div className="tarjeta" style={{ overflowX: "auto" }}>
@@ -245,7 +245,7 @@ export default function Promos() {
                 <td className="der">{x.cantidad}</td><td className="der">{pesos(x.valor)}</td><td>{x.motivo}</td>
               </tr>
             ))}
-            {regalos.length === 0 && <tr><td colSpan={7} className="aviso">Todavía no hubo regalos de la empresa.</td></tr>}
+            {regalos.length === 0 && <tr><td colSpan={7} className="aviso">Todavía no hubo cortesías empresariales.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -30,6 +30,24 @@ export const TEXTO_REGALO = {
 // Corazon en una caja de 100 x 90 (el mismo dibujo en la impresora, el PDF y la pantalla).
 export const CORAZON_SVG = "M50 88 C20 66 4 49 4 30 C4 15 15 4 29 4 C39 4 46 10 50 19 C54 10 61 4 71 4 C85 4 96 15 96 30 C96 49 80 66 50 88 Z";
 
+// Cortesia de la casa: prendas que la empresa da sin cobrar (con una compra o solas).
+export const TEXTO_CORTESIA = { titulo: "CORTESÍA DE LA CASA" };
+
+// Comprobante de una cortesia sin compra (no hay venta ni codigo: no se cambia por nota de credito).
+export type DatosCortesia = { fecha: string; sucursal: string; items: { sku: string; nombre: string; cant: number }[] };
+export function renglonesCortesia(d: DatosCortesia): Renglon[] {
+  const cant = d.items.reduce((s, i) => s + i.cant, 0);
+  const r: Renglon[] = [
+    { t: "centro", s: nombreSucursal(d.sucursal) }, { t: "centro", s: fechaTicket(d.fecha) },
+    { t: "linea", s: "" }, { t: "centro", s: TEXTO_CORTESIA.titulo, negrita: true }, { t: "regla" },
+  ];
+  for (const i of d.items) r.push({ t: "izqDer", izq: `${i.cant} x ${i.nombre}`, der: "$ 0" });
+  r.push({ t: "regla" }, { t: "izqDer", izq: `${cant} ${cant === 1 ? "prenda" : "prendas"}`, der: "$ 0", destacado: true }, { t: "regla" },
+    { t: "linea", s: "" }, { t: "centro", s: "¡Gracias por elegirnos!", negrita: true }, { t: "centro", s: "Te esperamos pronto", negrita: true }, { t: "linea", s: "" },
+    { t: "centro", s: "Comprobante interno" }, { t: "centro", s: "Sin valor comercial" });
+  return r;
+}
+
 export function renglonesVenta(venta: DatosTicket): Renglon[] {
   const r: Renglon[] = [];
   const cantidad = venta.items.reduce((s, i) => s + i.cant, 0);
@@ -46,8 +64,8 @@ export function renglonesVenta(venta: DatosTicket): Renglon[] {
     r.push(venta.regalo ? { t: "linea", s: nombre } : { t: "izqDer", izq: nombre, der: pesos(i.monto) });
   }
   if (venta.regalos?.length) {
-    r.push({ t: "centro", s: "TE REGALAMOS", negrita: true });
-    for (const g of venta.regalos) r.push({ t: "izqDer", izq: `${g.cant} x ${g.nombre}`, der: "REGALO" });
+    r.push({ t: "centro", s: TEXTO_CORTESIA.titulo, negrita: true });
+    for (const g of venta.regalos) r.push({ t: "izqDer", izq: `${g.cant} x ${g.nombre}`, der: venta.regalo ? "" : "$ 0" });
   }
   r.push({ t: "regla" });
   if (venta.regalo) {

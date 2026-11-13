@@ -1,5 +1,5 @@
 import { empresa } from "./empresa.config";
-import { CORAZON_SVG, envolver, renglonesVenta } from "./ticketRenglones";
+import { CORAZON_SVG, envolver, renglonesCortesia, renglonesVenta, type DatosCortesia, type Renglon } from "./ticketRenglones";
 import { nombreSucursal, pesos, type NotaCredito } from "./util";
 import type { DatosTicket } from "@/components/Ticket";
 import type { CierreCaja, MedioDia } from "./cierre";
@@ -121,9 +121,9 @@ export async function ticketsVentaEscpos(venta: DatosTicket, conRegalo: boolean)
   return out;
 }
 
-export async function ticketVentaEscpos(venta: DatosTicket) {
+async function imprimirRenglones(renglones: Renglon[]) {
   const r = await nuevo();
-  for (const x of renglonesVenta(venta)) {
+  for (const x of renglones) {
     if (x.t === "centro") r.centro(x.s, x.negrita);
     else if (x.t === "izqDer") r.izqDer(x.izq, x.der, x.destacado);
     else if (x.t === "linea") { if (x.s) for (const l of envolver(x.s, r.cols)) r.linea(l); else r.linea(); }
@@ -134,6 +134,9 @@ export async function ticketVentaEscpos(venta: DatosTicket) {
   r.cortar();
   return r.bytes();
 }
+
+export const ticketVentaEscpos = (venta: DatosTicket) => imprimirRenglones(renglonesVenta(venta));
+export const ticketCortesiaEscpos = (d: DatosCortesia) => imprimirRenglones(renglonesCortesia(d));
 
 export async function ticketNotaEscpos(nota: NotaCredito) {
   const r = await nuevo();

@@ -2,7 +2,7 @@
 import { empresa } from "@/lib/empresa.config";
 import { CodigoBarras } from "@/components/CodigoBarras";
 import { lineasTicket } from "@/lib/ticketLineas";
-import { CORAZON_SVG, TEXTO_REGALO } from "@/lib/ticketRenglones";
+import { CORAZON_SVG, renglonesCortesia, TEXTO_CORTESIA, TEXTO_REGALO, type DatosCortesia } from "@/lib/ticketRenglones";
 import { DIAS_DEVOLUCION, nombreSucursal, pesos, type PagoCalculado } from "@/lib/util";
 
 export type DatosTicket = {
@@ -59,8 +59,8 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       ))}
       {venta.regalos?.length ? (
         <>
-          <div className="centro"><strong>TE REGALAMOS</strong></div>
-          {venta.regalos.map((g, k) => <div key={k} className="linea"><span>{g.cant} x {g.nombre}</span><span>REGALO</span></div>)}
+          <div className="centro"><strong>{TEXTO_CORTESIA.titulo}</strong></div>
+          {venta.regalos.map((g, k) => <div key={k} className="linea"><span>{g.cant} x {g.nombre}</span>{!venta.regalo && <span>$ 0</span>}</div>)}
         </>
       ) : null}
       <hr />
@@ -116,6 +116,21 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       )}
       <div className="centro">Ticket interno</div>
       <div className="centro">No válido como factura</div>
+    </div>
+  );
+}
+
+// Comprobante de una cortesia de la casa sin compra (en pantalla y para la impresion del navegador).
+export function TicketCortesia({ datos }: { datos: DatosCortesia }) {
+  return (
+    <div className="ticket">
+      <img src="/logo-negro.png" alt={empresa.nombre} className="ticket-logo" />
+      {renglonesCortesia(datos).map((r, k) =>
+        r.t === "centro" ? <div key={k} className="centro">{r.negrita ? <strong>{r.s}</strong> : r.s}</div>
+        : r.t === "izqDer" ? <div key={k} className="linea"><span className={r.destacado ? "total-t" : undefined}>{r.izq}</span><span className={r.destacado ? "total-t" : undefined}>{r.der}</span></div>
+        : r.t === "regla" ? <hr key={k} />
+        : r.t === "linea" ? <div key={k}>{r.s || "\u00a0"}</div>
+        : null)}
     </div>
   );
 }
