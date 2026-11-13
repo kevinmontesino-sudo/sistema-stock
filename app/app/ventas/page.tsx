@@ -6,6 +6,9 @@ import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { ticketVentaEscpos } from "@/lib/escpos";
 import { useSucursal } from "@/lib/hooks";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
+import { compartirTicketPdf } from "@/lib/ticketPdf";
+import { usePuede } from "@/components/SesionContext";
+import { DEPOSITO } from "@/lib/empresa.config";
 import { nombreSucursal, pesos, type VentaListada } from "@/lib/util";
 
 const dos = (n: number) => String(n).padStart(2, "0");
@@ -19,6 +22,9 @@ function rangoMes(mes: string) {
 
 export default function VentasPage() {
   const [sucursal] = useSucursal();
+  // PDF del ticket (para WhatsApp): Deposito y la oficina. Se arma en el momento, no se guarda.
+  const esAdmin = usePuede("admin");
+  const puedePdf = sucursal === DEPOSITO || esAdmin;
   const [modo, setModo] = useState<"dia" | "mes">("dia");
   const [dia, setDia] = useState(hoy);
   const [mes, setMes] = useState(() => hoy().slice(0, 7));
@@ -69,14 +75,21 @@ export default function VentasPage() {
     setVersion((n) => n + 1);
   }
 
-  async function reimprimir(codigo: string) {
-    setImprimiendo(codigo);
+  async function reimprimir(codigo: string, como: "ticket" | "regalo" | "pdf" = "ticket") {
+    setImprimiendo(`${codigo}:${como}`);
     setAviso("");
     const r = await reimprimirTicketVenta(codigo);
     if (!r.ok) { setImprimiendo(""); return setAviso(r.motivo); }
-    setReimpreso(r.venta);
-    const m = await imprimirTicketPreferido(() => ticketVentaEscpos(r.venta));
-    setAviso(m || `Ticket ${codigo} reimpreso.`);
+    const venta = { ...r.venta, regalo: como === "regalo" };
+    if (como === "pdf") {
+      try { await compartirTicketPdf(venta); setAviso(`PDF del ticket ${codigo} listo.`); }
+      catch { setAviso("No se pudo armar el PDF del ticket."); }
+      setImprimiendo("");
+      return;
+    }
+    setReimpreso(venta);
+    const m = await imprimirTicketPreferido(() => ticketVentaEscpos(venta));
+    setAviso(m || (como === "regalo" ? `Ticket de regalo ${codigo} impreso.` : `Ticket ${codigo} reimpreso.`));
     setImprimiendo("");
     // Se deja un rato en pantalla por si hubo que caer a la ventana del navegador.
     setTimeout(() => setReimpreso(null), 2000);
@@ -123,7 +136,9 @@ export default function VentasPage() {
                       {!v.anulada && (
                         <span className="fila" style={{ gap: 6, flexWrap: "wrap" }}>
                           <Link className="boton" href={`/devolucion?codigo=${v.codigo}`}>Devolver</Link>
-                          <button className="chico" onClick={() => reimprimir(v.codigo)} disabled={imprimiendo === v.codigo}>{imprimiendo === v.codigo ? "Imprimiendo…" : "Reimprimir"}</button>
+                          <button className="chico" onClick={() => reimprimir(v.codigo)} disabled={!!imprimiendo}>{imprimiendo === `${v.codigo}:ticket` ? "Imprimiendo…" : "Reimprimir"}</button>
+                          <button className="chico" onClick={() => reimprimir(v.codigo, "regalo")} disabled={!!imprimiendo} title="Sin precios: el importe dice INVALUABLE">{imprimiendo === `${v.codigo}:regalo` ? "Imprimiendo…" : "🎁 Regalo"}</button>
+                          {puedePdf && <button className="chico" onClick={() => reimprimir(v.codigo, "pdf")} disabled={!!imprimiendo}>{imprimiendo === `${v.codigo}:pdf` ? "Armando…" : "PDF"}</button>}
                           {!v.devuelta && <button className="chico" onClick={() => { setAnulando(anulando === v.codigo ? null : v.codigo); setMotivo(""); setAviso(""); }}>Anular</button>}
                         </span>
                       )}

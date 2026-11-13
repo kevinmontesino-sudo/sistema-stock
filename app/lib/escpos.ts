@@ -1,6 +1,6 @@
 import { empresa } from "./empresa.config";
-import { lineasTicket } from "./ticketLineas";
-import { DIAS_DEVOLUCION, nombreSucursal, pesos, type NotaCredito } from "./util";
+import { envolver, renglonesVenta } from "./ticketRenglones";
+import { nombreSucursal, pesos, type NotaCredito } from "./util";
 import type { DatosTicket } from "@/components/Ticket";
 import type { CierreCaja, MedioDia } from "./cierre";
 
@@ -21,23 +21,6 @@ function codificar(s: string) {
     out.push(c < 128 ? c : CP858[ch] ?? 0x3f);
   }
   return out;
-}
-
-// Parte un texto en renglones de hasta `ancho` letras, cortando por palabras.
-function envolver(texto: string, ancho: number) {
-  const lineas: string[] = [];
-  let actual = "";
-  for (let palabra of texto.split(/\s+/).filter(Boolean)) {
-    while (palabra.length > ancho) {
-      if (actual) { lineas.push(actual); actual = ""; }
-      lineas.push(palabra.slice(0, ancho));
-      palabra = palabra.slice(ancho);
-    }
-    const prueba = actual ? `${actual} ${palabra}` : palabra;
-    if (prueba.length > ancho) { lineas.push(actual); actual = palabra; } else actual = prueba;
-  }
-  if (actual) lineas.push(actual);
-  return lineas.length ? lineas : [""];
 }
 
 class Rollo {
@@ -113,39 +96,14 @@ async function nuevo() {
 
 export async function ticketVentaEscpos(venta: DatosTicket) {
   const r = await nuevo();
-  const f = new Date(venta.fecha);
-  const fecha = `${dos(f.getDate())}/${dos(f.getMonth() + 1)}/${f.getFullYear()} ${dos(f.getHours())}:${dos(f.getMinutes())}`;
-  const tope = new Date(f.getTime() + DIAS_DEVOLUCION * 86_400_000);
-  const limite = `${dos(tope.getDate())}/${dos(tope.getMonth() + 1)}/${tope.getFullYear()}`;
-  const cantidad = venta.items.reduce((s, i) => s + i.cant, 0);
-  const unico = venta.pagos.length === 1 ? venta.pagos[0] : null;
-  const efectivo = venta.pagos.find((p) => p.medioId === "efectivo");
-  const { items, recargo, textoPct, promo, ahorro, sinCambio, todoSinCambio } = lineasTicket(venta);
-  r.centro(nombreSucursal(venta.sucursal)).centro(`Ticket ${venta.codigo} · ${fecha}`).regla();
-  for (const i of items) r.izqDer(`${i.cant} x ${i.nombre}${i.sinCambio && !todoSinCambio ? " (SIN CAMBIO)" : ""}`, pesos(i.monto));
-  r.regla();
-  if (recargo) r.linea(`${cantidad} prendas`);
-  else r.izqDer(`${cantidad} prendas · subtotal lista`, pesos(venta.subtotal));
-  if (venta.promo) r.izqDer(venta.promo.nombre, `-${pesos(promo)}`);
-  if (venta.ajuste < 0) {
-    r.izqDer(unico ? `${unico.nombre}${textoPct(unico.pct, unico.medioId)}` : "Descuento por medios de pago", `-${pesos(Math.abs(venta.ajuste))}`);
+  for (const x of renglonesVenta(venta)) {
+    if (x.t === "centro") r.centro(x.s, x.negrita);
+    else if (x.t === "izqDer") r.izqDer(x.izq, x.der, x.destacado);
+    else if (x.t === "linea") { if (x.s) for (const l of envolver(x.s, r.cols)) r.linea(l); else r.linea(); }
+    else if (x.t === "regla") r.regla();
+    else r.barras(x.valor);
   }
-  r.izqDer("TOTAL", pesos(venta.total), true);
-  if (ahorro > 0) r.izqDer("AHORRASTE", pesos(ahorro));
-  r.regla();
-  for (const p of venta.pagos) r.izqDer(`Paga ${p.nombre}${textoPct(p.pct, p.medioId)}`, pesos(p.monto));
-  if (venta.recibido !== undefined && efectivo) {
-    r.izqDer("Efectivo recibido", pesos(venta.recibido)).izqDer("VUELTO", pesos(venta.recibido - efectivo.monto), true);
-  }
-  r.regla().barras(venta.codigo);
-  if (todoSinCambio) r.centro("VENTA SIN CAMBIO", true);
-  else {
-    r.centro(`Cambios por ${DIAS_DEVOLUCION} días`, true).centro(`Hasta el ${limite} presentando este ticket.`);
-    if (sinCambio) r.centro("Las prendas marcadas SIN CAMBIO no tienen cambio.");
-  }
-  r.linea().centro("¡Gracias por tu compra!", true).centro("Te esperamos pronto", true).linea()
-    .centro("Ticket interno").centro("No válido como factura")
-    .cortar();
+  r.cortar();
   return r.bytes();
 }
 

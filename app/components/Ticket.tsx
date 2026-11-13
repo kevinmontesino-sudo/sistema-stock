@@ -2,6 +2,7 @@
 import { empresa } from "@/lib/empresa.config";
 import { CodigoBarras } from "@/components/CodigoBarras";
 import { lineasTicket } from "@/lib/ticketLineas";
+import { TEXTO_REGALO } from "@/lib/ticketRenglones";
 import { DIAS_DEVOLUCION, nombreSucursal, pesos, type PagoCalculado } from "@/lib/util";
 
 export type DatosTicket = {
@@ -18,6 +19,8 @@ export type DatosTicket = {
   items: { sku: string; nombre: string; precio: number; cant: number; sinCambio?: boolean }[];
   // Solo para mostrar en el ticket (no se guarda): plata en efectivo que entrego el cliente.
   recibido?: number;
+  // Solo para imprimir (no se guarda): ticket de regalo, sin precios.
+  regalo?: boolean;
 };
 
 const signo = (n: number) => (n > 0 ? "+" : n < 0 ? "-" : "");
@@ -38,14 +41,21 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       <img src="/logo-negro.png" alt={empresa.nombre} className="ticket-logo" />
       <div className="centro">{nombreSucursal(venta.sucursal)}</div>
       <div className="centro">Ticket {venta.codigo} · {fecha}</div>
+      {venta.regalo && <div className="centro"><strong>{TEXTO_REGALO.titulo}</strong></div>}
       <hr />
       {items.map((i, k) => (
         <div key={k} className="linea">
           <span>{i.cant} x {i.nombre}{i.sinCambio && !todoSinCambio ? " (SIN CAMBIO)" : ""}</span>
-          <span>{pesos(i.monto)}</span>
+          {!venta.regalo && <span>{pesos(i.monto)}</span>}
         </div>
       ))}
       <hr />
+      {venta.regalo ? (
+        <>
+          <div className="linea"><span>{cantidad} {cantidad === 1 ? "prenda" : "prendas"}</span></div>
+          <div className="linea"><span className="total-t">{TEXTO_REGALO.importe}</span><span className="total-t">{TEXTO_REGALO.valor}</span></div>
+        </>
+      ) : (<>
       {recargo ? (
         <div className="linea"><span>{cantidad} prendas</span></div>
       ) : (
@@ -72,6 +82,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
           <div className="linea"><span className="total-t">VUELTO</span><span className="total-t">{pesos(venta.recibido - efectivo.monto)}</span></div>
         </>
       )}
+      </>)}
       <hr />
       <CodigoBarras valor={venta.codigo} />
       {todoSinCambio ? (

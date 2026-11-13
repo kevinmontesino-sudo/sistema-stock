@@ -5,6 +5,8 @@ import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import { ticketVentaEscpos } from "@/lib/escpos";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
+import { compartirTicketPdf } from "@/lib/ticketPdf";
+import { usePuede } from "@/components/SesionContext";
 import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, sugerenciaPromo, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
@@ -34,6 +36,7 @@ const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0
 
 export default function VentaPage() {
   const [sucursal] = useSucursal();
+  const esAdmin = usePuede("admin");
   const [autoTicket, setAutoTicket] = useAutoTicket();
   // El carrito pertenece a una sucursal: si se cambia de local, no queda nada del otro.
   const [carrito, setCarrito] = useState<{ suc: string; items: Linea[] }>({ suc: sucursal, items: [] });
@@ -53,6 +56,7 @@ export default function VentaPage() {
   const [ultima, setUltima] = useState<DatosTicket | null>(null);
   const [cobrando, setCobrando] = useState(false);
   const [aImprimir, setAImprimir] = useState(false);
+  const [regalo, setRegalo] = useState(false); // el proximo ticket que se imprime es de regalo (sin precios)
   const [verTicket, setVerTicket] = useState(false);
   const [medios, setMedios] = useState<MedioPago[]>([]);
   const [medioSel, setMedioSel] = useState<string | null>(null);
@@ -340,10 +344,10 @@ export default function VentaPage() {
     if (!aImprimir) return;
     const t = setTimeout(() => {
       setAImprimir(false);
-      if (ultima) imprimirTicketPreferido(() => ticketVentaEscpos(ultima)).then((m) => m && setAviso(m));
+      if (ultima) imprimirTicketPreferido(() => ticketVentaEscpos({ ...ultima, regalo })).then((m) => m && setAviso(m));
     }, 100);
     return () => clearTimeout(t);
-  }, [aImprimir, ultima]);
+  }, [aImprimir, ultima, regalo]);
 
   // Las notas de credito no son plata que entra a la caja: se muestran aparte y no suman al total cobrado.
   const filasCaja = caja.filas.filter((c) => c.id !== "nota_credito");
@@ -679,7 +683,9 @@ export default function VentaPage() {
           {saldoNota && <p className="alerta">A la nota {saldoNota.codigo} le quedan {pesos(saldoNota.saldo)}: el cliente puede usarla de nuevo cuando quiera.</p>}
           <p className="aviso">Ticket interno · No válido como factura.</p>
           <div className="fila" style={{ gap: 8, marginTop: 8 }}>
-            <button onClick={() => setAImprimir(true)}>Imprimir ticket</button>
+            <button onClick={() => { setRegalo(false); setAImprimir(true); }}>Imprimir ticket</button>
+            <button onClick={() => { setRegalo(true); setAImprimir(true); }} title="Sin precios: el importe dice INVALUABLE">🎁 Ticket de regalo</button>
+            {(sucursal === DEPOSITO || esAdmin) && <button onClick={() => compartirTicketPdf(ultima).catch(() => setAviso("No se pudo armar el PDF del ticket."))}>PDF para WhatsApp</button>}
             <button onClick={() => setVerTicket((v) => !v)}>{verTicket ? "Ocultar ticket" : "Ver ticket en pantalla"}</button>
           </div>
           {verTicket && <div style={{ marginTop: 12, boxShadow: "0 0 0 1px var(--borde)", width: "fit-content" }}><Ticket venta={ultima} /></div>}
@@ -687,7 +693,7 @@ export default function VentaPage() {
       )}
       {ultima && (
         <div className="solo-ticket" aria-hidden="true">
-          <Ticket venta={ultima} />
+          <Ticket venta={{ ...ultima, regalo }} />
         </div>
       )}
 
