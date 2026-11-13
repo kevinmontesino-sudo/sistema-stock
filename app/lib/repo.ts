@@ -509,7 +509,10 @@ export const ORIGENES_DEPOSITO = [DEPOSITO, "sanlorenzo"];
 //   traer      = el sistema la tiene en otra sucursal: se pasa de alla a este local.
 //   sin_cargar = no estaba cargada: se suma al stock de este local con un ajuste.
 export type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
-export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string; faltante?: Faltante | null }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number) {
+// regalosPedidos: prendas que la empresa le regala al cliente CON esta compra (salen sin cobrar, como retiro de la empresa ligado a la
+// venta; salen en el ticket como REGALO). Tiene que haber al menos una prenda paga: no se puede regalar todo.
+export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string; faltante?: Faltante | null }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number,
+  regalosPedidos: { sku: string; cant: number; origen?: string }[] = []) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const especial = especialPedido ? validarEspecial(especialPedido, sucursal) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
@@ -523,6 +526,12 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
   const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
   // Un mismo SKU de un mismo origen no puede aparecer dos veces (se controla el stock sobre el total).
   if (new Set(items.map((i) => `${i.sku}|${i.origen}`)).size !== items.length) falla("Hay una prenda repetida en la venta");
+  for (const g of regalosPedidos) {
+    if (!Number.isInteger(g.cant) || g.cant < 1) falla("Cantidad de regalo inválida");
+    if (g.origen && g.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(g.origen))) falla("Ese local no puede regalar stock de otra sucursal");
+  }
+  const regalos = regalosPedidos.map((g) => ({ ...g, origen: g.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
+  if (new Set(regalos.map((g) => `${g.sku}|${g.origen}`)).size !== regalos.length) falla("Hay un regalo repetido");
   return tx(async (c) => {
     // Un reintento del mismo cobro (misma clave) devuelve la venta ya registrada en vez de duplicarla.
     if (clave) {
@@ -633,6 +642,20 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       await sumarStock(c, p.sku, items[idx].origen, -cant);
       await mov(c, p.sku, cant, items[idx].origen, null, "venta", { ventaId, ...(items[idx].origen !== sucursal ? { motivo: `Vendido desde ${nombreSucursal(sucursal)} con stock de ${nombreSucursal(items[idx].origen)}` } : {}) });
     }
+    // Regalos de la empresa con esta compra: salen del stock sin cobrar (despues de lo vendido, asi el stock alcanza para las dos cosas).
+    const regalosTicket: { sku: string; nombre: string; cant: number }[] = [];
+    for (const g of regalos) {
+      const p = await productoPorSku(g.sku, c);
+      if (!p) return falla(`La prenda ${g.sku} ya no existe o fue dada de baja`);
+      const hay = await stockActual(c, p.sku, g.origen);
+      if (hay < g.cant) falla(`Para regalar ${g.cant} de ${p.nombre} no alcanza el stock de ${nombreSucursal(g.origen)} (quedan ${Math.max(0, hay)} después de lo vendido)`);
+      await sumarStock(c, p.sku, g.origen, -g.cant);
+      await mov(c, p.sku, g.cant, g.origen, null, "ajuste", { ventaId, motivo: `${PREFIJO_RETIRO}con la compra del ticket ${v.rows[0].codigo}` });
+      regalosTicket.push({ sku: p.sku, nombre: p.nombre, cant: g.cant });
+    }
+    if (regalosTicket.length) {
+      await auditar("retiro_empresa", { sucursal, venta: v.rows[0].codigo, unidades: regalosTicket.reduce((s, g) => s + g.cant, 0), items: regalosTicket }, { db: c });
+    }
     // En la misma transaccion: si la venta se registra, el descuento especial queda auditado (y un reintento no lo duplica).
     if (especial) {
       await auditar(especial.curvaPlus ? "curva_plus" : "descuento_especial", { venta: v.rows[0].codigo, sucursal, pct: especial.pct, monto: descuento, motivo: especial.motivo, autorizo: especial.autorizo }, { db: c });
@@ -647,8 +670,17 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       total,
       pagos: calc.pagos,
       items: prods.map((p, i) => ({ sku: p.sku, nombre: p.nombre, precio: p.precio, cant: items[i].cant, sinCambio: sinCambio[i] || undefined })),
+      regalos: regalosTicket.length ? regalosTicket : undefined,
     };
   });
+}
+
+// Regalos de la empresa que se dieron con una venta (para el ticket y para anularla).
+async function regalosDeVenta(c: PoolClient, ventaId: number) {
+  const r = await c.query<{ sku: string; nombre: string; cant: number; desde: string }>(
+    `select m.sku, p.nombre, m.cantidad as cant, m.desde from movimientos m join productos p on p.sku = m.sku
+      where m.venta_id = $1 and m.tipo = 'ajuste' and m.motivo like $2 order by m.id`, [ventaId, PREFIJO_RETIRO + "%"]);
+  return r.rows;
 }
 
 // Arma de nuevo el ticket de una venta ya registrada (para devolverlo si el cobro se reintenta).
@@ -668,6 +700,7 @@ async function ticketDeVenta(c: PoolClient, id: number) {
     codigo: v.rows[0].codigo, fecha: v.rows[0].creado_en.toISOString(), subtotal: v.rows[0].subtotal_lista,
     promo: desc > 0 ? { nombre: v.rows[0].promo_nombre ?? "Promo", monto: desc } : undefined, ajuste: v.rows[0].total - (v.rows[0].subtotal_lista - desc),
     total: v.rows[0].total, pagos: pg.rows.map((p) => ({ medioId: p.medioId, nombre: p.nombre, pct: p.pct, monto: p.monto, valorLista: p.valorLista })), items: it.rows.map((x) => ({ ...x, sinCambio: x.sinCambio ?? undefined })),
+    regalos: await regalosDeVenta(c, id).then((g) => (g.length ? g.map((x) => ({ sku: x.sku, nombre: x.nombre, cant: x.cant })) : undefined)),
   };
 }
 
@@ -984,6 +1017,12 @@ export async function anularVenta(ventaCodigo: string, motivoPedido: string, o: 
       await sumarStock(c, x.sku, destino, x.cantidad);
       await mov(c, x.sku, x.cantidad, null, destino, "anulacion", { ventaId: venta.id, motivo: `Venta ${cod} anulada: ${motivo}` });
       unidades += x.cantidad;
+    }
+    // Lo que se regalo con esa compra tambien vuelve al stock.
+    for (const g of await regalosDeVenta(c, venta.id)) {
+      await sumarStock(c, g.sku, g.desde, g.cant);
+      await mov(c, g.sku, g.cant, null, g.desde, "anulacion", { ventaId: venta.id, motivo: `Venta ${cod} anulada (era regalo): ${motivo}` });
+      unidades += g.cant;
     }
     await auditar("venta_anulada", { venta: cod, sucursal: venta.sucursal_id, total: venta.total, unidades, motivo }, { db: c });
     return { codigo: cod, total: venta.total, unidades };

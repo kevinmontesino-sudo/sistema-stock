@@ -17,7 +17,8 @@ import {
 // origen: de que stock sale la prenda. Casi siempre es el propio local; el deposito tambien puede vender con el stock de San Lorenzo.
 // faltante: la prenda esta en el local pero el sistema no la tiene; al cobrar se corrige el stock (traer de otra sucursal o sumarla).
 type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
-type Linea = { producto: Producto; cant: number; origen: string; faltante?: Faltante };
+// regalo: cuantas unidades de este renglon van de regalo de la empresa (sin cobrar). Las demas se cobran.
+type Linea = { producto: Producto; cant: number; origen: string; faltante?: Faltante; regalo?: number };
 // Cuantas se pueden vender en una linea: lo que hay en su stock, mas lo que se puede pasar de la otra sucursal (o sin tope si no estaba cargada).
 const topeLinea = (l: Linea) => (l.faltante?.modo === "sin_cargar" ? 999 : (l.producto.stock[l.origen] ?? 0) + (l.faltante?.modo === "traer" ? l.producto.stock[l.faltante.desde] ?? 0 : 0));
 const ORIGEN_SL = "sanlorenzo";
@@ -39,6 +40,7 @@ export default function VentaPage() {
   const esAdmin = usePuede("admin");
   // Retiro de la empresa (regalo sin cobrar): boton chico, con motivo y confirmacion. No es una venta.
   const puedeRetiro = usePuede("retiro_empresa");
+  const [conRegalos, setConRegalos] = useState(false); // muestra en cada renglon cuantas van de regalo de la empresa
   const [retiro, setRetiro] = useState<{ abierto: boolean; motivo: string; confirmo: boolean; ocupado: boolean }>({ abierto: false, motivo: "", confirmo: false, ocupado: false });
   const [autoTicket, setAutoTicket] = useAutoTicket();
   // El carrito pertenece a una sucursal: si se cambia de local, no queda nada del otro.
@@ -274,11 +276,15 @@ export default function VentaPage() {
 
   useEscaner(agregar);
 
-  const subtotal = lineas.reduce((s, f) => s + f.producto.precio * f.cant, 0);
-  const cantidadTotal = lineas.reduce((s, f) => s + f.cant, 0);
+  // Lo que se cobra: cada renglon menos lo que va de regalo (mismo orden que `lineas`, puede quedar en 0).
+  const pagas = useMemo(() => lineas.map((l) => ({ ...l, cant: l.cant - Math.min(l.regalo ?? 0, l.cant) })), [lineas]);
+  const regalosCarrito = lineas.filter((l) => (l.regalo ?? 0) > 0).map((l) => ({ sku: l.producto.sku, cant: Math.min(l.regalo!, l.cant), origen: l.origen }));
+  const unidadesRegalo = regalosCarrito.reduce((s, g) => s + g.cant, 0);
+  const subtotal = pagas.reduce((s, f) => s + f.producto.precio * f.cant, 0);
+  const cantidadTotal = pagas.reduce((s, f) => s + f.cant, 0);
   // Promo: la mejor de las de hoy (no se acumulan). El descuento especial la reemplaza. Al cobrar, el servidor recalcula todo.
   const promos = promosHoy.suc === sucursal ? promosHoy.promos : [];
-  const itemsPromo = lineas.map((l) => ({ tipo: l.producto.tipo, precio: l.producto.precio, cant: l.cant }));
+  const itemsPromo = pagas.map((l) => ({ tipo: l.producto.tipo, precio: l.producto.precio, cant: l.cant }));
   const auto = mejorPromo(promos, itemsPromo);
   const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
   const nombrePromo = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
@@ -288,7 +294,7 @@ export default function VentaPage() {
   // Productos unicos (efectivo cargado a mano): cada medio toma el % que da el carrito, igual que en el servidor.
   const sinDescEfvo = !especial && !!auto.promo && !auto.promo.descuentoEfectivo;
   const mediosVenta = sinDescEfvo ? mediosParaPromo(medios, auto.promo)
-    : mediosDelCarrito(medios, lineas.map((l) => ({ precio: l.producto.precio, preciosMedio: l.producto.preciosMedio, cant: l.cant })));
+    : mediosDelCarrito(medios, pagas.map((l) => ({ precio: l.producto.precio, preciosMedio: l.producto.preciosMedio, cant: l.cant })));
   const promoAplicada = especial ? null : auto.promo;
 
   // Pagos: un solo medio (paga todo) o dos (el primero entrega un monto y el segundo paga lo que falta).
@@ -324,7 +330,9 @@ export default function VentaPage() {
     if (cobrando || !calc || !calc.ok) return;
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
-    const r = await cobrarVenta(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, lineas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null]), pagos, especial, calc.total]))}`, especial, calc.total);
+    if (cantidadTotal === 0) return setAviso("No se puede regalar todo: tiene que haber al menos una prenda que se cobre.");
+    const cobradas = pagas.filter((l) => l.cant > 0);
+    const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null]), pagos, especial, calc.total, regalosCarrito]))}`, especial, calc.total, regalosCarrito);
     setCobrando(false);
     // Si fallo (por ejemplo, cambiaron las promos), se vuelven a pedir: la pantalla muestra el total nuevo.
     if (!r.ok) { setRecargaPromos((x) => x + 1); return setAviso(r.motivo); }
@@ -337,6 +345,7 @@ export default function VentaPage() {
     if (autoTicket) setAImprimir(true);
     setAviso("");
     setLineas(() => []);
+    setConRegalos(false);
     setEspecial(null);
     setFormEsp({ pct: "", motivo: "", autorizo: "" });
     setVerEsp(false);
@@ -484,7 +493,17 @@ export default function VentaPage() {
                     <span className="cantidad">{f.cant}</span>
                     <button className="chico" onClick={() => cambiarCantidad(claveLinea(f), 1)} aria-label={`Una más de ${f.producto.nombre}`}>+</button>
                   </td>
-                  <td className="der"><strong>{pesos(f.producto.precio * f.cant)}</strong></td>
+                  <td className="der">
+                    <strong>{pesos(f.producto.precio * (f.cant - Math.min(f.regalo ?? 0, f.cant)))}</strong>
+                    {conRegalos && !f.faltante && (
+                      <div className="fila" style={{ gap: 4, justifyContent: "flex-end", marginTop: 4, fontSize: 13, whiteSpace: "nowrap" }}>
+                        <span>🎁 de regalo:</span>
+                        <button className="chico" disabled={(f.regalo ?? 0) <= 0} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.max(0, (x.regalo ?? 0) - 1) } : x))} aria-label="Una menos de regalo">−</button>
+                        <strong>{Math.min(f.regalo ?? 0, f.cant)}</strong>
+                        <button className="chico" disabled={(f.regalo ?? 0) >= f.cant} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.min(x.cant, (x.regalo ?? 0) + 1) } : x))} aria-label="Una más de regalo">+</button>
+                      </div>
+                    )}
+                  </td>
                   <td className="der"><button className="chico" onClick={() => setLineas((l) => l.filter((x) => claveLinea(x) !== claveLinea(f)))}>Quitar</button></td>
                 </tr>
               ))}
@@ -492,8 +511,21 @@ export default function VentaPage() {
           </table>
           </div>
         )}
+        {puedeRetiro && lineas.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            {!conRegalos ? (
+              <button type="button" className="chico" onClick={() => setConRegalos(true)}>🎁 Agregar un regalo de la empresa</button>
+            ) : (
+              <p className="alerta" style={{ margin: 0 }}>
+                🎁 <strong>Regalo de la empresa:</strong> en cada prenda elegí cuántas van de regalo (sin cobrar). Si regalás una prenda distinta, escaneala y marcala. Tiene que quedar al menos una que se cobre. Sale en el ticket como REGALO.
+                {unidadesRegalo > 0 && <> · <strong>{unidadesRegalo} de regalo</strong></>}
+                {" "}<button type="button" className="chico" onClick={() => { setConRegalos(false); setLineas((l) => l.map((x) => ({ ...x, regalo: 0 }))); }}>Sacar regalos</button>
+              </p>
+            )}
+          </div>
+        )}
         <div className="fila" style={{ justifyContent: "space-between", marginTop: 16 }}>
-          <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"} · total a precio de lista</span>
+          <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"}{unidadesRegalo > 0 ? ` (+ ${unidadesRegalo} de regalo)` : ""} · total a precio de lista</span>
           <span className={descuento > 0 ? "aviso" : "total-venta"} style={descuento > 0 ? { fontSize: 18, textDecoration: "line-through" } : undefined}>{pesos(subtotal)}</span>
         </div>
         {descuento > 0 && (
@@ -713,6 +745,9 @@ export default function VentaPage() {
             <tbody>
               {ultima.items.map((i) => (
                 <tr key={i.sku}><td>{i.cant} × {i.nombre}</td><td className="der">{pesos(i.precio * i.cant)}</td></tr>
+              ))}
+              {ultima.regalos?.map((g) => (
+                <tr key={`regalo-${g.sku}`}><td>🎁 {g.cant} × {g.nombre}</td><td className="der"><strong>REGALO</strong></td></tr>
               ))}
               <tr><td className="aviso">Subtotal a precio de lista</td><td className="der">{pesos(ultima.subtotal)}</td></tr>
               {ultima.promo && <tr><td className="aviso">{ultima.promo.nombre}</td><td className="der">−{pesos(ultima.promo.monto)}</td></tr>}

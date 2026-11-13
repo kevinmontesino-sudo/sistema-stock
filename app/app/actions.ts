@@ -178,8 +178,11 @@ export async function cobrarVenta(
   clave?: string,
   especial?: { pct: number; motivo: string; autorizo: string; curvaPlus?: boolean } | null,
   totalEsperado?: number,
+  regalos?: { sku: string; cant: number; origen?: string }[],
 ) {
   return seguro("vender", async (u) => {
+    const regalosOk = (Array.isArray(regalos) ? regalos : []).map((g) => ({ sku: txt(g.sku), cant: ent(g.cant), origen: g.origen ? txt(g.origen) : undefined }));
+    if (regalosOk.length && !puede(u.rol, "retiro_empresa")) throw new repo.ErrorNegocio("Tu usuario no puede hacer regalos de la empresa.");
     // Curva Plus: la puede aplicar cualquiera que cobre en Deposito (el servidor controla el local y el porcentaje).
     if (especial && !especial.curvaPlus && !puede(u.rol, "descuento_especial")) throw new repo.ErrorNegocio("Tu usuario no puede hacer descuentos especiales.");
     const venta = await repo.registrarVenta(
@@ -193,6 +196,7 @@ export async function cobrarVenta(
       especial?.curvaPlus ? { pct: 0, motivo: "", autorizo: u.nombre, curvaPlus: true }
         : especial ? { pct: ent(especial.pct), motivo: txt(especial.motivo), autorizo: txt(especial.autorizo) } : undefined,
       typeof totalEsperado === "number" && Number.isInteger(totalEsperado) ? totalEsperado : undefined,
+      regalosOk,
     );
     const { nueva: _nueva, ...datos } = venta;
     void _nueva;

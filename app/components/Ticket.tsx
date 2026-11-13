@@ -17,6 +17,8 @@ export type DatosTicket = {
   total: number;
   pagos: PagoCalculado[];
   items: { sku: string; nombre: string; precio: number; cant: number; sinCambio?: boolean }[];
+  // Prendas que la empresa regalo con esta compra (sin cobrar).
+  regalos?: { sku: string; nombre: string; cant: number }[];
   // Solo para mostrar en el ticket (no se guarda): plata en efectivo que entrego el cliente.
   recibido?: number;
   // Solo para imprimir (no se guarda): ticket de regalo, sin precios.
@@ -55,6 +57,12 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
           {!venta.regalo && <span>{pesos(i.monto)}</span>}
         </div>
       ))}
+      {venta.regalos?.length ? (
+        <>
+          <div className="centro"><strong>TE REGALAMOS</strong></div>
+          {venta.regalos.map((g, k) => <div key={k} className="linea"><span>{g.cant} x {g.nombre}</span><span>REGALO</span></div>)}
+        </>
+      ) : null}
       <hr />
       {venta.regalo ? (
         <>

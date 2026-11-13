@@ -45,6 +45,10 @@ export function renglonesVenta(venta: DatosTicket): Renglon[] {
     const nombre = `${i.cant} x ${i.nombre}${i.sinCambio && !todoSinCambio ? " (SIN CAMBIO)" : ""}`;
     r.push(venta.regalo ? { t: "linea", s: nombre } : { t: "izqDer", izq: nombre, der: pesos(i.monto) });
   }
+  if (venta.regalos?.length) {
+    r.push({ t: "centro", s: "TE REGALAMOS", negrita: true });
+    for (const g of venta.regalos) r.push({ t: "izqDer", izq: `${g.cant} x ${g.nombre}`, der: "REGALO" });
+  }
   r.push({ t: "regla" });
   if (venta.regalo) {
     r.push({ t: "linea", s: `${cantidad} ${cantidad === 1 ? "prenda" : "prendas"}` });
