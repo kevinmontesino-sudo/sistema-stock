@@ -219,6 +219,19 @@ try {
     igual("Eliminar: ya no queda nada en camino", (await repo.listarPendientes(ZEL)).filter((t) => t.sku === M).length, 0);
   });
 
+  await paso("Retiro de la empresa (regalo sin cobrar)", async () => {
+    const R = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Miche ${sello}`, precio: 10950, cantidad: 6, reparto: {} })).sku;
+    await debeFallar("Retiro: sin motivo no", () => repo.retiroEmpresa("deposito", [{ sku: R, cant: 1 }], "x"), /para quién/);
+    await debeFallar("Retiro: no mas que el stock", () => repo.retiroEmpresa("deposito", [{ sku: R, cant: 9 }], "ZZ regalo prueba"), /solo hay/);
+    const ventasAntes = (await pool.query("select count(*)::int as n from ventas")).rows[0].n;
+    const r = await repo.retiroEmpresa("deposito", [{ sku: R, cant: 5 }], "ZZ regalo a cliente prueba");
+    igual("Retiro: unidades y valor a lista", [r.unidades, r.valorLista], [5, 54750]);
+    igual("Retiro: baja el stock", await stockDe(R, "deposito"), 1);
+    igual("Retiro: no crea ventas", (await pool.query("select count(*)::int as n from ventas")).rows[0].n, ventasAntes);
+    const lista = await repo.retirosEmpresa(20);
+    check("Retiro: lo ve la oficina con el motivo", lista.some((x) => x.sku === R && x.cantidad === 5 && x.motivo === "ZZ regalo a cliente prueba" && x.valor === 54750));
+  });
+
   // ---- 5. Devoluciones y notas de credito ----
   let nota1 = "", nota2 = "", ajuste2 = 0, monto2 = 0;
   await paso("Devolucion", async () => {
@@ -293,7 +306,7 @@ try {
     const st = await inf.stock(params);
     igual("Informe stock: unidades en White", st.totalUnidades - stockAntes.totalUnidades, (await stockDe(A, LOCAL)) + (await stockDe(B, LOCAL)));
     const ing = await inf.ingresos(params);
-    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 48); // 30 + 4 (Curva Plus) + 14 (en camino)
+    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 54); // 30 + 4 (Curva Plus) + 14 (en camino) + 6 (retiro)
     const env = (x: typeof ing) => x.enviosPorDestino.find((e) => e.destino === LOCAL) ?? { enviadas: 0, recibidas: 0 };
     igual("Informe ingresos: enviado y recibido", [env(ing).enviadas - env(ingresosAntes).enviadas, env(ing).recibidas - env(ingresosAntes).recibidas], [25, 25]);
     const nc = (await inf.notasCredito(params)).resumen;

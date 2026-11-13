@@ -230,6 +230,17 @@ export async function reimprimirTicketVenta(codigo: string) {
 }
 
 // Anula un ticket de venta equivocado (queda registrado con el motivo; el stock vuelve). Ver repo.anularVenta para las reglas.
+// Retiro de la empresa (regalo): las prendas salen sin cobrar. Ver repo.retiroEmpresa.
+export async function retiroEmpresaAccion(sucursal: string, items: { sku: string; cant: number; origen?: string }[], motivo: string) {
+  return seguro("retiro_empresa", async (u) => ({
+    retiro: await repo.retiroEmpresa(
+      suc(u, txt(sucursal)),
+      (Array.isArray(items) ? items : []).map((i) => ({ sku: txt(i.sku), cant: ent(i.cant), origen: i.origen ? txt(i.origen) : undefined })),
+      txt(motivo),
+    ),
+  }));
+}
+
 export async function anularVentaAccion(codigo: string, motivo: string) {
   return seguro("anular_venta", async (u) => ({
     anulacion: await repo.anularVenta(txt(codigo), txt(motivo), { soloSucursal: sucursalFija(u.rol, u.sucursalId), admin: u.rol === "admin" }),

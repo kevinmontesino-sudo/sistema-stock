@@ -233,6 +233,51 @@ export async function cargar(a: {
   });
 }
 
+// Retiro de la empresa: prendas que salen del stock SIN cobrar porque la empresa las regala (a un cliente, una clienta mayorista,
+// un canje...). No es una venta (no toca la caja ni los informes de ventas): es una inversion. Queda como movimiento de stock con
+// el motivo (empieza con PREFIJO_RETIRO) y la oficina lo ve en Oficina > Promos con lo que vale a precio de lista.
+export const PREFIJO_RETIRO = "Regalo de la empresa: ";
+export async function retiroEmpresa(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string }[], motivoPedido: string) {
+  if (!esSucursal(sucursal)) falla("Sucursal inexistente");
+  const motivo = motivoPedido.trim().replace(/\s+/g, " ");
+  if (motivo.length < 5 || motivo.length > 200) falla("Escribí para quién es el regalo y por qué");
+  if (itemsPedidos.length === 0) falla("No hay prendas");
+  for (const i of itemsPedidos) {
+    if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
+    if (i.origen && i.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(i.origen))) falla("Ese local no puede sacar stock de otra sucursal");
+  }
+  const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
+  if (new Set(items.map((i) => `${i.sku}|${i.origen}`)).size !== items.length) falla("Hay una prenda repetida");
+  return tx(async (c) => {
+    let unidades = 0, valorLista = 0;
+    const detalle: { sku: string; nombre: string; cant: number; precio: number; sucursal: string }[] = [];
+    for (const i of items) {
+      const p = await productoPorSku(i.sku, c);
+      if (!p) return falla(`La prenda ${i.sku} ya no existe o fue dada de baja`);
+      const hay = await stockActual(c, p.sku, i.origen);
+      if (hay < i.cant) falla(hay <= 0 ? `${p.nombre} no tiene stock en ${nombreSucursal(i.origen)}` : `De ${p.nombre} solo hay ${hay} en ${nombreSucursal(i.origen)}`);
+      await sumarStock(c, p.sku, i.origen, -i.cant);
+      await mov(c, p.sku, i.cant, i.origen, null, "ajuste", { motivo: PREFIJO_RETIRO + motivo });
+      unidades += i.cant;
+      valorLista += p.precio * i.cant;
+      detalle.push({ sku: p.sku, nombre: p.nombre, cant: i.cant, precio: p.precio, sucursal: i.origen });
+    }
+    await auditar("retiro_empresa", { sucursal, motivo, unidades, valorLista, items: detalle }, { db: c });
+    return { unidades, valorLista };
+  });
+}
+
+// Lo que la empresa regalo (para la oficina): cada retiro con su valor a precio de lista de hoy.
+export async function retirosEmpresa(limite = 100) {
+  const r = await pool.query<{ fecha: Date; sucursal: string; usuario: string | null; sku: string; nombre: string; cantidad: number; valor: number; motivo: string }>(
+    `select m.creado_en as fecha, m.desde as sucursal, u.nombre as usuario, m.sku, p.nombre, m.cantidad,
+            (m.cantidad * p.precio_lista)::float8 as valor, substr(m.motivo, $2) as motivo
+       from movimientos m join productos p on p.sku = m.sku left join usuarios u on u.id = m.usuario_id
+      where m.tipo = 'ajuste' and m.motivo like $3 order by m.creado_en desc, m.id desc limit $1`,
+    [Math.min(Math.max(1, limite), 500), PREFIJO_RETIRO.length + 1, PREFIJO_RETIRO + "%"]);
+  return r.rows.map((x) => ({ ...x, fecha: new Date(x.fecha).toISOString() }));
+}
+
 // Prenda que todavia no esta cargada en el sistema y se quiere vender ya: se crea el producto (SKU nuevo, categoria por el nombre)
 // SIN stock; al venderla, la caja la manda como "sin_cargar" y el stock se corrige en la misma venta. Si ya existe una prenda
 // comun con ese nombre y precio, se usa esa.

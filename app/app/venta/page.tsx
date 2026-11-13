@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy } from "@/app/actions";
+import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion } from "@/app/actions";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import { ticketsVentaEscpos } from "@/lib/escpos";
@@ -37,6 +37,9 @@ const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0
 export default function VentaPage() {
   const [sucursal] = useSucursal();
   const esAdmin = usePuede("admin");
+  // Retiro de la empresa (regalo sin cobrar): boton chico, con motivo y confirmacion. No es una venta.
+  const puedeRetiro = usePuede("retiro_empresa");
+  const [retiro, setRetiro] = useState<{ abierto: boolean; motivo: string; confirmo: boolean; ocupado: boolean }>({ abierto: false, motivo: "", confirmo: false, ocupado: false });
   const [autoTicket, setAutoTicket] = useAutoTicket();
   // El carrito pertenece a una sucursal: si se cambia de local, no queda nada del otro.
   const [carrito, setCarrito] = useState<{ suc: string; items: Linea[] }>({ suc: sucursal, items: [] });
@@ -665,6 +668,42 @@ export default function VentaPage() {
           <input type="checkbox" checked={autoTicket} onChange={(e) => setAutoTicket(e.target.checked)} />
           <span>Imprimir el ticket automáticamente al cobrar (en esta PC)</span>
         </label>
+        {puedeRetiro && lineas.length > 0 && (
+          <div style={{ marginTop: 14, textAlign: "right" }}>
+            {!retiro.abierto ? (
+              <button type="button" className="chico" style={{ opacity: 0.6, fontSize: 12 }} onClick={() => setRetiro({ abierto: true, motivo: "", confirmo: false, ocupado: false })}>
+                Retiro de la empresa (regalo sin cobrar)
+              </button>
+            ) : (
+              <form className="vuelto" style={{ display: "grid", gap: 8, textAlign: "left" }} onSubmit={async (e) => {
+                e.preventDefault();
+                if (retiro.ocupado || !retiro.confirmo || retiro.motivo.trim().length < 5) return;
+                setRetiro((r) => ({ ...r, ocupado: true }));
+                const r = await retiroEmpresaAccion(sucursal, lineas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen })), retiro.motivo);
+                if (!r.ok) { setRetiro((x) => ({ ...x, ocupado: false })); return setAviso(r.motivo); }
+                setRetiro({ abierto: false, motivo: "", confirmo: false, ocupado: false });
+                setLineas(() => []);
+                setEspecial(null);
+                setUltima(null);
+                setAviso(`Retiro de la empresa registrado: ${r.retiro.unidades} ${r.retiro.unidades === 1 ? "prenda" : "prendas"} (${pesos(r.retiro.valorLista)} a precio de lista) salieron del stock como regalo. No se cobró nada y no cuenta como venta.`);
+                setVersion((v) => v + 1);
+              }}>
+                <strong>Retiro de la empresa · {cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"} · {pesos(subtotal)} a precio de lista</strong>
+                <span className="aviso">Solo si la empresa decidió regalarlas (a un cliente, un canje…). Salen del stock SIN COBRAR, no es una venta y no hay ticket. Queda registrado con tu usuario y lo ve la oficina.</span>
+                <input placeholder="¿Para quién y por qué? (ej. regalo a clienta mayorista Laura por su compra)" value={retiro.motivo} maxLength={200} autoFocus
+                  onChange={(e) => setRetiro((r) => ({ ...r, motivo: e.target.value }))} required />
+                <label className="fila" style={{ gap: 8 }}>
+                  <input type="checkbox" checked={retiro.confirmo} onChange={(e) => setRetiro((r) => ({ ...r, confirmo: e.target.checked }))} />
+                  <span>Confirmo que estas prendas salen sin cobrar, como regalo de la empresa</span>
+                </label>
+                <div className="fila" style={{ gap: 8 }}>
+                  <button type="submit" disabled={retiro.ocupado || !retiro.confirmo || retiro.motivo.trim().length < 5}>{retiro.ocupado ? "Registrando…" : "Retirar sin cobrar"}</button>
+                  <button type="button" className="chico" onClick={() => setRetiro({ abierto: false, motivo: "", confirmo: false, ocupado: false })}>Cancelar</button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
       </div>
 
       {ultima && (

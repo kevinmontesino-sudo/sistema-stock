@@ -11,7 +11,7 @@ import { empresa } from "@/lib/empresa.config";
 import { panelCompleto, validarParams } from "@/lib/informes";
 import { crearToken } from "@/lib/seguridad/token";
 import { crearPromo, desactivarPromo, descuentosEspeciales, listarPromos, type PromoNueva } from "@/lib/promosAdmin";
-import { listarTipos } from "@/lib/repo";
+import { listarTipos, retirosEmpresa } from "@/lib/repo";
 
 // Acciones del panel de administracion: SOLO administradores (se verifica en cada una, no en la pantalla).
 type Resultado<T> = ({ ok: true } & T) | { ok: false; motivo: string };
@@ -216,6 +216,7 @@ export async function promosAdmin() {
   return admin(async () => ({
     promos: await listarPromos(),
     especiales: await descuentosEspeciales(50),
+    regalos: await retirosEmpresa(100),
     tipos: (await listarTipos()).map((t) => ({ codigo: t.codigo, nombre: t.nombre })),
   }));
 }

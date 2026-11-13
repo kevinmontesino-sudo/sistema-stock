@@ -8,6 +8,7 @@ import { nombreSucursal, pesos } from "@/lib/util";
 
 type Especial = { codigo: string; fecha: string; sucursal: string; usuario: string | null; pct: number; descuento: number; total: number; motivo: string; autorizo: string };
 type Categoria = { codigo: string; nombre: string };
+type Regalo = { fecha: string; sucursal: string; usuario: string | null; sku: string; nombre: string; cantidad: number; valor: number; motivo: string };
 
 // Plantillas de un toque: cada una pide como mucho un numero. Cubren las promos y ferias que usa el negocio.
 const PLANTILLAS: { id: string; titulo: string; ayuda: string; tipo: TipoPromo; n?: number; m?: number; minimo?: boolean }[] = [
@@ -37,6 +38,7 @@ const VACIO = { plantilla: "3x2", n: 3, m: 2, pct: 20, precio: 0, nombre: "", su
 export default function Promos() {
   const [promos, setPromos] = useState<PromoFila[]>([]);
   const [especiales, setEspeciales] = useState<Especial[]>([]);
+  const [regalos, setRegalos] = useState<Regalo[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [msg, setMsg] = useState<{ texto: string; mala: boolean } | null>(null);
   const [form, setForm] = useState(() => ({ ...VACIO, desde: hoy(), hasta: hoy() }));
@@ -48,7 +50,7 @@ export default function Promos() {
     promosAdmin().then((r) => {
       if (!vivo) return;
       if (!r.ok) return setMsg({ texto: r.motivo, mala: true });
-      setPromos(r.promos); setEspeciales(r.especiales); setCategorias(r.tipos);
+      setPromos(r.promos); setEspeciales(r.especiales); setRegalos(r.regalos); setCategorias(r.tipos);
     });
     return () => { vivo = false; };
   }, [version]);
@@ -223,6 +225,27 @@ export default function Promos() {
               </tr>
             ))}
             {especiales.length === 0 && <tr><td colSpan={9} className="aviso">No hubo descuentos especiales.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Regalos de la empresa (retiros sin cobrar)</h2>
+      <p className="aviso" style={{ marginTop: -8 }}>
+        Prendas que salieron del stock sin cobrar porque la empresa decidió regalarlas. No son ventas ni pérdidas: es lo invertido, a precio de lista de hoy.
+        {regalos.length > 0 && <> Total de estos {regalos.length} registros: <strong>{regalos.reduce((s, x) => s + x.cantidad, 0)} prendas · {pesos(regalos.reduce((s, x) => s + x.valor, 0))}</strong>.</>}
+      </p>
+      <div className="tarjeta" style={{ overflowX: "auto" }}>
+        <table>
+          <thead><tr><th>Fecha</th><th>Local</th><th>Usuario</th><th>Prenda</th><th className="der">Cant.</th><th className="der">Valor lista</th><th>Para quién / por qué</th></tr></thead>
+          <tbody>
+            {regalos.map((x, k) => (
+              <tr key={k}>
+                <td style={{ whiteSpace: "nowrap" }}>{new Date(x.fecha).toLocaleString("es-AR", { hour12: false, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                <td>{nombreSucursal(x.sucursal)}</td><td>{x.usuario ?? "—"}</td><td>{x.nombre} <span className="mono interno">{x.sku}</span></td>
+                <td className="der">{x.cantidad}</td><td className="der">{pesos(x.valor)}</td><td>{x.motivo}</td>
+              </tr>
+            ))}
+            {regalos.length === 0 && <tr><td colSpan={7} className="aviso">Todavía no hubo regalos de la empresa.</td></tr>}
           </tbody>
         </table>
       </div>
