@@ -252,3 +252,10 @@ td { padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: mi
 /* Link con forma de boton (ej. "Cambio o devolución" en Ventas). */
 a.boton { display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta); color: var(--texto); text-decoration: none; font-weight: 600; white-space: nowrap; }
 a.boton.principal { background: var(--acento); border-color: var(--acento); color: #fff; }
+
+/* Opciones de la empresa (prendas sin cargo, retiro sin venta): recuadro aparte, cerrado, con otro color que el tilde "Es regalo". */
+.empresa-opciones { margin-top: 18px; border: 1px solid #7c5cbf; border-radius: 10px; background: rgba(124, 92, 191, 0.08); }
+.empresa-opciones > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; color: #b9a3ec; }
+.empresa-cuerpo { display: grid; gap: 10px; padding: 0 14px 14px; }
+.empresa-cuerpo hr { width: 100%; border: 0; border-top: 1px solid rgba(124, 92, 191, 0.4); margin: 4px 0; }
+.tag-empresa { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #7c5cbf; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }

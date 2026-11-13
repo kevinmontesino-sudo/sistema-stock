@@ -40,7 +40,6 @@ export default function VentaPage() {
   const esAdmin = usePuede("admin");
   // Retiro de la empresa (regalo sin cobrar): boton chico, con motivo y confirmacion. No es una venta.
   const puedeRetiro = usePuede("retiro_empresa");
-  const [conRegalos, setConRegalos] = useState(false); // muestra en cada renglon cuantas van de regalo de la empresa
   const [retiro, setRetiro] = useState<{ abierto: boolean; motivo: string; confirmo: boolean; ocupado: boolean }>({ abierto: false, motivo: "", confirmo: false, ocupado: false });
   const [autoTicket, setAutoTicket] = useAutoTicket();
   // El carrito pertenece a una sucursal: si se cambia de local, no queda nada del otro.
@@ -345,7 +344,6 @@ export default function VentaPage() {
     if (autoTicket) setAImprimir(true);
     setAviso("");
     setLineas(() => []);
-    setConRegalos(false);
     setEspecial(null);
     setFormEsp({ pct: "", motivo: "", autorizo: "" });
     setVerEsp(false);
@@ -495,14 +493,7 @@ export default function VentaPage() {
                   </td>
                   <td className="der">
                     <strong>{pesos(f.producto.precio * (f.cant - Math.min(f.regalo ?? 0, f.cant)))}</strong>
-                    {conRegalos && !f.faltante && (
-                      <div className="fila" style={{ gap: 4, justifyContent: "flex-end", marginTop: 4, fontSize: 13, whiteSpace: "nowrap" }}>
-                        <span>🎁 de regalo:</span>
-                        <button className="chico" disabled={(f.regalo ?? 0) <= 0} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.max(0, (x.regalo ?? 0) - 1) } : x))} aria-label="Una menos de regalo">−</button>
-                        <strong>{Math.min(f.regalo ?? 0, f.cant)}</strong>
-                        <button className="chico" disabled={(f.regalo ?? 0) >= f.cant} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.min(x.cant, (x.regalo ?? 0) + 1) } : x))} aria-label="Una más de regalo">+</button>
-                      </div>
-                    )}
+                    {(f.regalo ?? 0) > 0 && <div style={{ marginTop: 4 }}><span className="tag-empresa">{Math.min(f.regalo!, f.cant)} SIN CARGO · empresa</span></div>}
                   </td>
                   <td className="der"><button className="chico" onClick={() => setLineas((l) => l.filter((x) => claveLinea(x) !== claveLinea(f)))}>Quitar</button></td>
                 </tr>
@@ -511,21 +502,8 @@ export default function VentaPage() {
           </table>
           </div>
         )}
-        {puedeRetiro && lineas.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            {!conRegalos ? (
-              <button type="button" className="chico" onClick={() => setConRegalos(true)}>🎁 Agregar un regalo de la empresa</button>
-            ) : (
-              <p className="alerta" style={{ margin: 0 }}>
-                🎁 <strong>Regalo de la empresa:</strong> en cada prenda elegí cuántas van de regalo (sin cobrar). Si regalás una prenda distinta, escaneala y marcala. Tiene que quedar al menos una que se cobre. Sale en el ticket como REGALO.
-                {unidadesRegalo > 0 && <> · <strong>{unidadesRegalo} de regalo</strong></>}
-                {" "}<button type="button" className="chico" onClick={() => { setConRegalos(false); setLineas((l) => l.map((x) => ({ ...x, regalo: 0 }))); }}>Sacar regalos</button>
-              </p>
-            )}
-          </div>
-        )}
         <div className="fila" style={{ justifyContent: "space-between", marginTop: 16 }}>
-          <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"}{unidadesRegalo > 0 ? ` (+ ${unidadesRegalo} de regalo)` : ""} · total a precio de lista</span>
+          <span className="aviso" style={{ fontSize: 16 }}>{cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"}{unidadesRegalo > 0 ? ` (+ ${unidadesRegalo} sin cargo por la empresa)` : ""} · total a precio de lista</span>
           <span className={descuento > 0 ? "aviso" : "total-venta"} style={descuento > 0 ? { fontSize: 18, textDecoration: "line-through" } : undefined}>{pesos(subtotal)}</span>
         </div>
         {descuento > 0 && (
@@ -701,13 +679,30 @@ export default function VentaPage() {
           <span>Imprimir el ticket automáticamente al cobrar (en esta PC)</span>
         </label>
         {puedeRetiro && lineas.length > 0 && (
-          <div style={{ marginTop: 14, textAlign: "right" }}>
+          <details className="empresa-opciones">
+            <summary>Opciones de la empresa · sin cargo <span className="aviso">(solo si la empresa lo decidió)</span></summary>
+            <div className="empresa-cuerpo">
+              <strong>Prendas sin cargo en esta compra</strong>
+              <span className="aviso">Elegí cuáles y cuántas no se cobran. En el ticket del cliente salen como REGALO. Tiene que quedar al menos una prenda que se cobre.</span>
+              {lineas.filter((f) => !f.faltante).map((f) => (
+                <div key={claveLinea(f)} className="fila" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <span>{f.producto.nombre} <span className="interno">({f.cant} en la compra)</span></span>
+                  <span className="fila" style={{ gap: 4, whiteSpace: "nowrap" }}>
+                    <span>Sin cargo:</span>
+                    <button className="chico" disabled={(f.regalo ?? 0) <= 0} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.max(0, (x.regalo ?? 0) - 1) } : x))} aria-label="Una menos sin cargo">−</button>
+                    <strong style={{ minWidth: 20, textAlign: "center" }}>{Math.min(f.regalo ?? 0, f.cant)}</strong>
+                    <button className="chico" disabled={(f.regalo ?? 0) >= f.cant} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.min(x.cant, (x.regalo ?? 0) + 1) } : x))} aria-label="Una más sin cargo">+</button>
+                  </span>
+                </div>
+              ))}
+              <hr />
+              <strong>Retirar todo sin vender</strong>
             {!retiro.abierto ? (
-              <button type="button" className="chico" style={{ opacity: 0.6, fontSize: 12 }} onClick={() => setRetiro({ abierto: true, motivo: "", confirmo: false, ocupado: false })}>
-                Retiro de la empresa (regalo sin cobrar)
+              <button type="button" className="chico" style={{ justifySelf: "start" }} onClick={() => setRetiro({ abierto: true, motivo: "", confirmo: false, ocupado: false })}>
+                Retirar estas prendas sin cobrar (no es una venta)
               </button>
             ) : (
-              <form className="vuelto" style={{ display: "grid", gap: 8, textAlign: "left" }} onSubmit={async (e) => {
+              <form style={{ display: "grid", gap: 8 }} onSubmit={async (e) => {
                 e.preventDefault();
                 if (retiro.ocupado || !retiro.confirmo || retiro.motivo.trim().length < 5) return;
                 setRetiro((r) => ({ ...r, ocupado: true }));
@@ -720,7 +715,7 @@ export default function VentaPage() {
                 setAviso(`Retiro de la empresa registrado: ${r.retiro.unidades} ${r.retiro.unidades === 1 ? "prenda" : "prendas"} (${pesos(r.retiro.valorLista)} a precio de lista) salieron del stock como regalo. No se cobró nada y no cuenta como venta.`);
                 setVersion((v) => v + 1);
               }}>
-                <strong>Retiro de la empresa · {cantidadTotal} {cantidadTotal === 1 ? "prenda" : "prendas"} · {pesos(subtotal)} a precio de lista</strong>
+                <strong>Retiro sin venta · {lineas.reduce((s, l) => s + l.cant, 0)} prendas del carrito · {pesos(lineas.reduce((s, l) => s + l.producto.precio * l.cant, 0))} a precio de lista</strong>
                 <span className="aviso">Solo si la empresa decidió regalarlas (a un cliente, un canje…). Salen del stock SIN COBRAR, no es una venta y no hay ticket. Queda registrado con tu usuario y lo ve la oficina.</span>
                 <input placeholder="¿Para quién y por qué? (ej. regalo a clienta mayorista Laura por su compra)" value={retiro.motivo} maxLength={200} autoFocus
                   onChange={(e) => setRetiro((r) => ({ ...r, motivo: e.target.value }))} required />
@@ -734,7 +729,8 @@ export default function VentaPage() {
                 </div>
               </form>
             )}
-          </div>
+            </div>
+          </details>
         )}
       </div>
 
@@ -747,7 +743,7 @@ export default function VentaPage() {
                 <tr key={i.sku}><td>{i.cant} × {i.nombre}</td><td className="der">{pesos(i.precio * i.cant)}</td></tr>
               ))}
               {ultima.regalos?.map((g) => (
-                <tr key={`regalo-${g.sku}`}><td>🎁 {g.cant} × {g.nombre}</td><td className="der"><strong>REGALO</strong></td></tr>
+                <tr key={`regalo-${g.sku}`}><td>{g.cant} × {g.nombre} <span className="tag-empresa">SIN CARGO · empresa</span></td><td className="der"><strong>$ 0</strong></td></tr>
               ))}
               <tr><td className="aviso">Subtotal a precio de lista</td><td className="der">{pesos(ultima.subtotal)}</td></tr>
               {ultima.promo && <tr><td className="aviso">{ultima.promo.nombre}</td><td className="der">−{pesos(ultima.promo.monto)}</td></tr>}
