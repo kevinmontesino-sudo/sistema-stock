@@ -7,6 +7,15 @@ import { nombreSucursal } from "@/lib/util";
 
 const LOCALES = empresa.sucursales.filter((s) => s.id !== "deposito");
 const necesitaLocal = (rol: string) => rol === "vendedor" || rol === "encargado";
+// Cuenta de Deposito: puede descontar el stock de un local (ej. el chico de pedidos que trabaja en Zelarrayan); la plata va a Deposito.
+function SelectStockDeposito({ valor, cambiar }: { valor: string; cambiar: (v: string) => void }) {
+  return (
+    <select value={valor} onChange={(e) => cambiar(e.target.value)} title="De qué stock descuenta cuando vende (el cobro va siempre a la caja de Depósito)">
+      <option value="">Stock: Depósito / San Lorenzo</option>
+      {LOCALES.map((s) => <option key={s.id} value={s.id}>Stock: {s.nombre}</option>)}
+    </select>
+  );
+}
 const fechaHora = (iso: string | null) => (iso ? new Date(iso).toLocaleString("es-AR", { hour12: false }) : "nunca");
 
 export default function Usuarios() {
@@ -78,10 +87,11 @@ export default function Usuarios() {
               <tr key={u.id}>
                 <td><input value={edit.nombre} onChange={(e) => setEdit({ ...edit, nombre: e.target.value })} /></td>
                 <td>{u.email}</td>
-                <td><select value={edit.rol} onChange={(e) => setEdit({ ...edit, rol: e.target.value, sucursalId: necesitaLocal(e.target.value) ? (edit.sucursalId || LOCALES[0].id) : "" })}>
+                <td><select value={edit.rol} onChange={(e) => setEdit({ ...edit, rol: e.target.value, sucursalId: necesitaLocal(e.target.value) ? (edit.sucursalId || LOCALES[0].id) : e.target.value === "deposito" ? edit.sucursalId : "" })}>
                   {ROLES.map((r) => <option key={r} value={r}>{NOMBRE_ROL[r]}</option>)}</select></td>
                 <td>{necesitaLocal(edit.rol) ? <select value={edit.sucursalId} onChange={(e) => setEdit({ ...edit, sucursalId: e.target.value })}>
-                  {LOCALES.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select> : "—"}</td>
+                  {LOCALES.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                  : edit.rol === "deposito" ? <SelectStockDeposito valor={edit.sucursalId} cambiar={(v) => setEdit({ ...edit, sucursalId: v })} /> : "—"}</td>
                 <td colSpan={2}><label><input type="checkbox" checked={edit.activo} onChange={(e) => setEdit({ ...edit, activo: e.target.checked })} /> Activo</label></td>
                 <td className="der"><button className="chico" onClick={() => guardar(u.id)}>Guardar</button> <button className="chico" onClick={() => setEditando(null)}>Cancelar</button></td>
               </tr>
@@ -90,7 +100,7 @@ export default function Usuarios() {
                 <td>{u.nombre}{!u.activo && " (inactivo)"}</td>
                 <td>{u.email}</td>
                 <td>{NOMBRE_ROL[u.rol]}</td>
-                <td>{u.sucursalId ? nombreSucursal(u.sucursalId) : "—"}</td>
+                <td>{u.sucursalId ? (u.rol === "deposito" ? `Stock de ${nombreSucursal(u.sucursalId)}` : nombreSucursal(u.sucursalId)) : "—"}</td>
                 <td>{u.totpActivo ? "Sí" : "No"}</td>
                 <td>{fechaHora(u.ultimoLogin)}{u.debeCambiarClave && <span className="interno"> · clave temporal</span>}</td>
                 <td className="der">
@@ -109,12 +119,13 @@ export default function Usuarios() {
         <input placeholder="Nombre y apellido" value={nuevo.nombre} onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })} required />
         <input type="email" placeholder="Email (es su usuario)" value={nuevo.email} onChange={(e) => setNuevo({ ...nuevo, email: e.target.value })} required />
         <div className="fila">
-          <select value={nuevo.rol} onChange={(e) => setNuevo({ ...nuevo, rol: e.target.value })}>{ROLES.map((r) => <option key={r} value={r}>{NOMBRE_ROL[r]}</option>)}</select>
+          <select value={nuevo.rol} onChange={(e) => setNuevo({ ...nuevo, rol: e.target.value, sucursalId: necesitaLocal(e.target.value) ? LOCALES[0].id : "" })}>{ROLES.map((r) => <option key={r} value={r}>{NOMBRE_ROL[r]}</option>)}</select>
           {necesitaLocal(nuevo.rol) && (
             <select value={nuevo.sucursalId} onChange={(e) => setNuevo({ ...nuevo, sucursalId: e.target.value })}>{LOCALES.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
           )}
+          {nuevo.rol === "deposito" && <SelectStockDeposito valor={nuevo.sucursalId} cambiar={(v) => setNuevo({ ...nuevo, sucursalId: v })} />}
         </div>
-        <p className="aviso" style={{ margin: 0 }}>Se genera una contraseña temporal que se muestra una sola vez. Los vendedores y encargados trabajan siempre en su local.</p>
+        <p className="aviso" style={{ margin: 0 }}>Se genera una contraseña temporal que se muestra una sola vez. Los vendedores y encargados trabajan siempre en su local. Una cuenta de Depósito puede descontar el stock de un local (el cobro va igual a la caja de Depósito).</p>
         <button className="principal" type="submit">Crear usuario</button>
       </form>
     </>

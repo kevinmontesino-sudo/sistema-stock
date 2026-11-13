@@ -7,7 +7,7 @@ import { ticketCortesiaEscpos, ticketsVentaEscpos } from "@/lib/escpos";
 import type { DatosCortesia } from "@/lib/ticketRenglones";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { compartirTicketPdf } from "@/lib/ticketPdf";
-import { usePuede } from "@/components/SesionContext";
+import { usePuede, useSesion } from "@/components/SesionContext";
 import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, sugerenciaPromo, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
@@ -32,13 +32,16 @@ const ES_SKU = /^[a-z]{3}\d{6}$/i;
 const SIN_LINEAS: Linea[] = [];
 
 // Stocks de los que puede vender un local: el deposito puede usar tambien el de San Lorenzo.
-const origenesDe = (sucursal: string) => (sucursal === DEPOSITO ? [DEPOSITO, ORIGEN_SL] : [sucursal]);
+// De que stocks vende este local. Una cuenta de deposito con local asignado (ej. Depósito Zelarrayan) vende solo de ese local.
+const origenesDe = (sucursal: string, fijo?: string[] | null) => (fijo?.length ? fijo : sucursal === DEPOSITO ? [DEPOSITO, ORIGEN_SL] : [sucursal]);
 
 const etiquetaPct = (pct: number) => (pct === 0 ? "precio de lista" : `${pct > 0 ? "+" : "−"}${pctTexto(pct)}`);
 
 export default function VentaPage() {
   const [sucursal] = useSucursal();
   const esAdmin = usePuede("admin");
+  const origenFijoTxt = useSesion()?.origenStock?.join(",") ?? "";
+  const origenFijo = useMemo(() => (origenFijoTxt ? origenFijoTxt.split(",") : null), [origenFijoTxt]);
   // Cortesia empresarial: prendas que no se cobran (algunas de una compra, o todas: ahi no hay venta y sale un comprobante).
   const puedeRetiro = usePuede("retiro_empresa");
   const [cortesiaPara, setCortesiaPara] = useState("");
@@ -118,7 +121,7 @@ export default function VentaPage() {
 
   // Solo se puede vender lo que hay en esta sucursal.
   const agregarProducto = useCallback((p: Producto) => {
-    const origenes = origenesDe(sucursal);
+    const origenes = origenesDe(sucursal, origenFijo);
     const hayEn = (o: string) => p.stock[o] ?? 0;
     const usadas = (o: string) => lineasRef.current.filter((x) => x.producto.sku === p.sku && x.origen === o).reduce((s, x) => s + x.cant, 0);
     // Si la prenda ya esta en el carrito y ese stock tiene lugar, se suma ahi; si no, sale del primero que tenga (el deposito antes que San Lorenzo).
@@ -140,7 +143,7 @@ export default function VentaPage() {
     }
     setAviso("");
     // El aviso solo cuando el origen se eligio solo para una linea nueva (si se suma a una linea que ya estaba, no cambia).
-    if (!existente) setAvisoOrigen(origen !== sucursal ? `${p.nombre}: no hay en ${nombreSucursal(sucursal)}, se descuenta del stock de ${nombreSucursal(origen)}. Si en realidad está en ${nombreSucursal(sucursal)}, cambialo en la línea ("Sale del stock de").` : "");
+    if (!existente) setAvisoOrigen(origen !== origenesDe(sucursal, origenFijo)[0] ? `${p.nombre}: no hay en ${nombreSucursal(sucursal)}, se descuenta del stock de ${nombreSucursal(origen)}. Si en realidad está en ${nombreSucursal(sucursal)}, cambialo en la línea ("Sale del stock de").` : "");
     setUltima(null);
     setUltimoSku(`${p.sku}|${origen}`);
     setLineas((l) => {
@@ -148,7 +151,7 @@ export default function VentaPage() {
       if (i >= 0) return l.map((x, j) => (j === i ? { ...x, cant: x.cant + 1 } : x));
       return [...l, { producto: p, cant: 1, origen }];
     });
-  }, [sucursal, setLineas]);
+  }, [sucursal, origenFijo, setLineas]);
 
   // Botones + y − de cada renglon: no se puede pasar del stock de este local ni bajar de 1 (para sacarla esta "Quitar").
   const cambiarCantidad = useCallback((clave: string, delta: number) => {
@@ -182,7 +185,7 @@ export default function VentaPage() {
 
   // Respuesta a la pregunta: la prenda esta en el local. Se agrega (o se suma) en la linea del propio stock, marcada para corregir al cobrar.
   const elegirFaltante = useCallback((p: Producto, f: Faltante) => {
-    const origen = origenesDe(sucursal)[0];
+    const origen = origenesDe(sucursal, origenFijo)[0];
     setPregunta(null);
     setAviso("");
     setUltima(null);
@@ -192,7 +195,7 @@ export default function VentaPage() {
       if (i >= 0) return l.map((x, j) => (j === i ? { ...x, cant: x.cant + 1, faltante: f } : x));
       return [...l, { producto: p, cant: 1, origen, faltante: f }];
     });
-  }, [sucursal, setLineas]);
+  }, [sucursal, origenFijo, setLineas]);
 
   async function agregarSinCargar() {
     if (!sinCargar) return;
@@ -204,7 +207,7 @@ export default function VentaPage() {
     setSinCargar(null);
     // Si resulta que ya estaba cargada y tiene stock aca, se vende normal; si no, sin stock (se suma al cobrar).
     const p = r.producto;
-    if (origenesDe(sucursal).some((o) => (p.stock[o] ?? 0) > 0)) agregarProducto(p);
+    if (origenesDe(sucursal, origenFijo).some((o) => (p.stock[o] ?? 0) > 0)) agregarProducto(p);
     else elegirFaltante(p, { modo: "sin_cargar" });
   }
 
@@ -230,20 +233,20 @@ export default function VentaPage() {
   // Sugerencias por nombre: solo prendas con stock en este local, las que mas tienen arriba.
   const dManual = useDebounced(manual, 200);
   const consulta = dManual.trim().length >= 2 && ![ES_SKU, ES_CODIGO_NOTA, ES_CODIGO_VENTA].some((r) => r.test(dManual.trim())) ? dManual : "";
-  const stockTotal = useCallback((p: Producto) => origenesDe(sucursal).reduce((s, o) => s + (p.stock[o] ?? 0), 0), [sucursal]);
+  const stockTotal = useCallback((p: Producto) => origenesDe(sucursal, origenFijo).reduce((s, o) => s + (p.stock[o] ?? 0), 0), [sucursal, origenFijo]);
   const ordenar = useCallback((ps: Producto[]) => [...ps].sort((a, b) => stockTotal(b) - stockTotal(a)).slice(0, 8), [stockTotal]);
   useEffect(() => {
     if (!consulta) return;
     let vivo = true;
     // Primero las que tienen stock aca; si no hay ninguna, todas (la prenda puede estar en el local aunque el sistema no la tenga).
-    buscarProductos({ q: consulta, sucursalConStock: origenesDe(sucursal).join(",") }).then(async (r) => {
+    buscarProductos({ q: consulta, sucursalConStock: origenesDe(sucursal, origenFijo).join(",") }).then(async (r) => {
       if (!vivo || !r.ok) return;
       if (r.productos.length) return setSugeridas(ordenar(r.productos));
       const t = await buscarProductos({ q: consulta });
       if (vivo && t.ok) setSugeridas(t.productos.slice(0, 8));
     });
     return () => { vivo = false; };
-  }, [consulta, sucursal, ordenar]);
+  }, [consulta, sucursal, origenFijo, ordenar]);
   const lista = consulta ? sugeridas : [];
 
   async function confirmar() {
@@ -254,7 +257,7 @@ export default function VentaPage() {
     if (sel >= 0 && lista[sel]) return agregarProducto(lista[sel]);
     // SKU, nota de credito o ticket escaneados con el cursor en el buscador: se tratan igual que escaneados fuera (no se buscan como nombre).
     if (ES_SKU.test(t) || ES_CODIGO_NOTA.test(t) || ES_CODIGO_VENTA.test(t)) return agregar(t);
-    const r = await buscarProductos({ q: t, sucursalConStock: origenesDe(sucursal).join(",") });
+    const r = await buscarProductos({ q: t, sucursalConStock: origenesDe(sucursal, origenFijo).join(",") });
     const primero = r.ok ? ordenar(r.productos)[0] : undefined;
     if (primero) return agregarProducto(primero);
     const todas = await buscarProductos({ q: t });
@@ -448,7 +451,7 @@ export default function VentaPage() {
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { agregarProducto(p); setManual(""); setSel(-1); }}>
                 <span>{p.nombre} <small>· {p.sku}</small></span>
-                <span><strong>{pesos(p.precio)}</strong> <small>{sucursal === DEPOSITO ? origenesDe(sucursal).map((o) => `${p.stock[o] ?? 0} en ${nombreSucursal(o)}`).join(" · ") : `${p.stock[sucursal] ?? 0} acá`}</small></span>
+                <span><strong>{pesos(p.precio)}</strong> <small>{sucursal === DEPOSITO ? origenesDe(sucursal, origenFijo).map((o) => `${p.stock[o] ?? 0} en ${nombreSucursal(o)}`).join(" · ") : `${p.stock[sucursal] ?? 0} acá`}</small></span>
               </button>
             ))}
           </div>
@@ -457,9 +460,9 @@ export default function VentaPage() {
       {aviso && <p className="alerta mala no-print" role="alert" style={{ margin: "0 0 12px", fontSize: 16 }}>{aviso}</p>}
       {pregunta && (
         <div className="alerta no-print" role="alertdialog" style={{ margin: "0 0 12px", fontSize: 16, background: "#fff3c4", color: "#000", border: "1px solid #e0b100" }}>
-          <strong>{pregunta.nombre}</strong> ({pesos(pregunta.precio)}): el sistema no tiene {lineas.some((l) => l.producto.sku === pregunta.sku) ? "más " : ""}en {origenesDe(sucursal).map(nombreSucursal).join(" ni en ")}. ¿La tenés igual acá?
+          <strong>{pregunta.nombre}</strong> ({pesos(pregunta.precio)}): el sistema no tiene {lineas.some((l) => l.producto.sku === pregunta.sku) ? "más " : ""}en {origenesDe(sucursal, origenFijo).map(nombreSucursal).join(" ni en ")}. ¿La tenés igual acá?
           <div className="fila" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-            {empresa.sucursales.filter((s) => !origenesDe(sucursal).includes(s.id) && (pregunta.stock[s.id] ?? 0) > 0).map((s) => (
+            {empresa.sucursales.filter((s) => !origenesDe(sucursal, origenFijo).includes(s.id) && (pregunta.stock[s.id] ?? 0) > 0).map((s) => (
               <button key={s.id} className="principal" onClick={() => elegirFaltante(pregunta, { modo: "traer", desde: s.id })}>
                 Sí: el sistema la tiene en {s.nombre} ({pregunta.stock[s.id]}), pasarla acá
               </button>
@@ -470,11 +473,11 @@ export default function VentaPage() {
           <p style={{ margin: "8px 0 0", fontSize: 13 }}>El stock se corrige al cobrar y queda registrado para la oficina (informe de control).</p>
         </div>
       )}
-      {avisoOrigen && lineas.some((l) => l.origen !== sucursal) && <p className="alerta no-print" role="status" style={{ margin: "0 0 12px", fontSize: 15, background: "#fff3c4", color: "#000", border: "1px solid #e0b100" }}>{avisoOrigen}</p>}
+      {avisoOrigen && lineas.some((l) => l.origen !== origenesDe(sucursal, origenFijo)[0]) && <p className="alerta no-print" role="status" style={{ margin: "0 0 12px", fontSize: 15, background: "#fff3c4", color: "#000", border: "1px solid #e0b100" }}>{avisoOrigen}</p>}
 
       <div className="tarjeta no-print">
         {lineas.length === 0 ? (
-          <p className="aviso">Escaneá una prenda para empezar. Solo se pueden vender prendas que están en {origenesDe(sucursal).map(nombreSucursal).join(" o ")}.</p>
+          <p className="aviso">Escaneá una prenda para empezar. Solo se pueden vender prendas que están en {origenesDe(sucursal, origenFijo).map(nombreSucursal).join(" o ")}.</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
           <table className="carrito">
@@ -495,8 +498,8 @@ export default function VentaPage() {
                       <><br /><label className="fila" style={{ gap: 6, fontSize: 13, marginTop: 4, flexWrap: "wrap" }}>
                         <span>Sale del stock de:</span>
                         <select value={f.origen} disabled={!!f.faltante} onChange={(e) => cambiarOrigen(claveLinea(f), e.target.value)}
-                          style={f.origen !== sucursal ? { background: "#fff3c4", color: "#000", fontWeight: 700 } : undefined}>
-                          {origenesDe(sucursal).map((o) => <option key={o} value={o}>{nombreSucursal(o)} (hay {f.producto.stock[o] ?? 0})</option>)}
+                          style={f.origen !== origenesDe(sucursal, origenFijo)[0] ? { background: "#fff3c4", color: "#000", fontWeight: 700 } : undefined}>
+                          {origenesDe(sucursal, origenFijo).map((o) => <option key={o} value={o}>{nombreSucursal(o)} (hay {f.producto.stock[o] ?? 0})</option>)}
                         </select>
                       </label></>
                     )}

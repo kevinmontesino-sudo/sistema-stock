@@ -239,16 +239,19 @@ export async function cargar(a: {
 // "Regalo de la empresa: " es el nombre viejo (se sigue leyendo).
 export const PREFIJO_RETIRO = "Cortesía empresarial: ";
 const SQL_ES_CORTESIA = "(m.motivo like 'Cortesía empresarial: %' or m.motivo like 'Regalo de la empresa: %')";
-export async function retiroEmpresa(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string }[], motivoPedido: string) {
+// De que stock puede salir un renglon. `permitidos` viene de la cuenta (ver origenesStock); si no, la regla de siempre.
+const origenOk = (sucursal: string, origen: string, permitidos?: string[] | null) =>
+  permitidos?.length ? permitidos.includes(origen) : origen === sucursal || (sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(origen));
+export async function retiroEmpresa(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string }[], motivoPedido: string, permitidos?: string[] | null) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const motivo = motivoPedido.trim().replace(/\s+/g, " ");
   if (motivo.length < 3 || motivo.length > 200) falla("Escribí para quién es la cortesía");
   if (itemsPedidos.length === 0) falla("No hay prendas");
   for (const i of itemsPedidos) {
     if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
-    if (i.origen && i.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(i.origen))) falla("Ese local no puede sacar stock de otra sucursal");
+    if (!origenOk(sucursal, i.origen || permitidos?.[0] || sucursal, permitidos)) falla("Esta cuenta no puede sacar stock de otra sucursal");
   }
-  const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
+  const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || permitidos?.[0] || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
   if (new Set(items.map((i) => `${i.sku}|${i.origen}`)).size !== items.length) falla("Hay una prenda repetida");
   return tx(async (c) => {
     let unidades = 0, valorLista = 0;
@@ -515,25 +518,25 @@ export type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" }
 // regalosPedidos: prendas que la empresa le regala al cliente CON esta compra (salen sin cobrar, como retiro de la empresa ligado a la
 // venta; salen en el ticket como REGALO). Tiene que haber al menos una prenda paga: no se puede regalar todo.
 export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string; faltante?: Faltante | null }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number,
-  regalosPedidos: { sku: string; cant: number; origen?: string }[] = []) {
+  regalosPedidos: { sku: string; cant: number; origen?: string }[] = [], permitidos?: string[] | null) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const especial = especialPedido ? validarEspecial(especialPedido, sucursal) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
   for (const i of itemsPedidos) {
     if (!Number.isInteger(i.cant) || i.cant < 1) falla("Cantidad inválida");
-    if (i.origen && i.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(i.origen))) falla("Ese local no puede vender con el stock de otra sucursal");
+    if (!origenOk(sucursal, i.origen || permitidos?.[0] || sucursal, permitidos)) falla("Esta cuenta no puede vender con el stock de otra sucursal");
     const f = i.faltante;
     if (f && !(f.modo === "sin_cargar" || (f.modo === "traer" && esSucursal(f.desde) && f.desde !== (i.origen || sucursal)))) falla("Datos inválidos para vender sin stock");
   }
   // Siempre se bloquean las prendas en el mismo orden (por SKU y origen): dos ventas al mismo tiempo no se traban entre si.
-  const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
+  const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || permitidos?.[0] || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
   // Un mismo SKU de un mismo origen no puede aparecer dos veces (se controla el stock sobre el total).
   if (new Set(items.map((i) => `${i.sku}|${i.origen}`)).size !== items.length) falla("Hay una prenda repetida en la venta");
   for (const g of regalosPedidos) {
     if (!Number.isInteger(g.cant) || g.cant < 1) falla("Cantidad de cortesía inválida");
-    if (g.origen && g.origen !== sucursal && !(sucursal === DEPOSITO && ORIGENES_DEPOSITO.includes(g.origen))) falla("Ese local no puede regalar stock de otra sucursal");
+    if (!origenOk(sucursal, g.origen || permitidos?.[0] || sucursal, permitidos)) falla("Esta cuenta no puede dar stock de otra sucursal");
   }
-  const regalos = regalosPedidos.map((g) => ({ ...g, origen: g.origen || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
+  const regalos = regalosPedidos.map((g) => ({ ...g, origen: g.origen || permitidos?.[0] || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
   if (new Set(regalos.map((g) => `${g.sku}|${g.origen}`)).size !== regalos.length) falla("Hay una cortesía repetida");
   return tx(async (c) => {
     // Un reintento del mismo cobro (misma clave) devuelve la venta ya registrada en vez de duplicarla.

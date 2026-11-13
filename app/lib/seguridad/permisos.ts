@@ -36,6 +36,12 @@ export const puede = (rol: Rol, permiso: Permiso) => PERMISOS[permiso].includes(
 export const permisosDe = (rol: Rol) => (Object.keys(PERMISOS) as Permiso[]).filter((p) => puede(rol, p));
 
 // Sucursal en la que puede operar. El administrador elige cualquiera; los demas quedan fijos en la suya.
+// Cuenta de deposito con un local asignado (ej. "Depósito Zelarrayan", el chico de pedidos que trabaja alla): vende y cobra como
+// Deposito (la plata va a la caja de Deposito) pero el stock sale de ese local. null = la regla de siempre (Deposito o San Lorenzo).
+export function origenesStock(rol: Rol, sucursalId: string | null): string[] | null {
+  return rol === "deposito" && sucursalId && sucursalId !== DEPOSITO ? [sucursalId] : null;
+}
+
 export function sucursalFija(rol: Rol, sucursalId: string | null): string | null {
   if (rol === "admin") return null;
   if (rol === "deposito") return DEPOSITO;

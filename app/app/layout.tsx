@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Cabecera } from "@/components/Cabecera";
 import { SesionProvider } from "@/components/SesionContext";
 import { empresa } from "@/lib/empresa.config";
-import { permisosDe, sucursalFija } from "@/lib/seguridad/permisos";
+import { permisosDe, origenesStock, sucursalFija } from "@/lib/seguridad/permisos";
 import { usuarioActual } from "@/lib/seguridad/sesion";
 import "./globals.css";
 
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const u = await usuarioActual();
-  const sesion = u && { nombre: u.nombre, email: u.email, rol: u.rol, sucursalFija: sucursalFija(u.rol, u.sucursalId), // Con contrasena temporal no se muestra ningun acceso: solo se puede elegir la nueva.
+  const sesion = u && { nombre: u.nombre, email: u.email, rol: u.rol, sucursalFija: sucursalFija(u.rol, u.sucursalId), origenStock: origenesStock(u.rol, u.sucursalId), // Con contrasena temporal no se muestra ningun acceso: solo se puede elegir la nueva.
     permisos: u.debeCambiarClave ? [] : permisosDe(u.rol) };
   return (
     <html

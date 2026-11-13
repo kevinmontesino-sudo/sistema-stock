@@ -3,7 +3,8 @@ import { createContext, useContext } from "react";
 import type { Permiso, Rol } from "@/lib/seguridad/permisos";
 
 // Datos de la sesion para la interfaz (menu, sucursal fija). Es solo comodidad: quien decide es siempre el servidor.
-export type DatosSesion = { nombre: string; email: string; rol: Rol; sucursalFija: string | null; permisos: Permiso[] };
+// origenStock: de que stock vende esta cuenta (cuenta de deposito con local asignado); null = lo de siempre.
+export type DatosSesion = { nombre: string; email: string; rol: Rol; sucursalFija: string | null; origenStock: string[] | null; permisos: Permiso[] };
 export const SesionCtx = createContext<DatosSesion | null>(null);
 export const useSesion = () => useContext(SesionCtx);
 export const usePuede = (p: Permiso) => !!useContext(SesionCtx)?.permisos.includes(p);

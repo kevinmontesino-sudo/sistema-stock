@@ -69,6 +69,9 @@ function validarDatos(a: { nombre: string; email: string; rol: string; sucursalI
   let sucursalId: string | null = a.sucursalId || null;
   if (rol === "vendedor" || rol === "encargado") {
     if (!sucursalId || !empresa.sucursales.some((s) => s.id === sucursalId && s.id !== "deposito")) throw new ErrorNegocio("Elegí el local en el que trabaja.");
+  } else if (rol === "deposito") {
+    // Deposito con local asignado: vende como Deposito pero descuenta el stock de ese local (ver origenesStock). Vacio = lo de siempre.
+    if (sucursalId && !empresa.sucursales.some((s) => s.id === sucursalId && s.id !== "deposito")) throw new ErrorNegocio("Elegí un local válido para el stock.");
   } else sucursalId = null;
   return { nombre, email, rol, sucursalId };
 }

@@ -246,6 +246,20 @@ try {
     igual("Regalo: al anular vuelve todo al stock", await stockDe(G, "deposito"), 5);
   });
 
+  await paso("Cuenta Deposito con stock de Zelarrayan", async () => {
+    const ZEL = "zelarrayan";
+    const Z = (await repo.cargar({ categoria: "Remera", nombre: `ZZ DepZel ${sello}`, precio: 15000, cantidad: 4, reparto: { [ZEL]: 3 } })).sku;
+    for (const t of await repo.listarPendientes(ZEL)) if (t.sku === Z) await repo.recibirTraslado(t.id, ZEL);
+    const tr = [{ medioId: "transferencia", monto: null as number | null }];
+    const v = await repo.registrarVenta("deposito", [{ sku: Z, cant: 2 }], tr, undefined, undefined, undefined, [], [ZEL]);
+    igual("DepZel: descuenta de Zelarrayan, no de Deposito", [await stockDe(Z, ZEL), await stockDe(Z, "deposito")], [1, 1]);
+    const fila = (await pool.query("select v.sucursal_id, vi.stock_de from ventas v join venta_items vi on vi.venta_id = v.id where v.codigo = $1", [v.codigo])).rows[0];
+    igual("DepZel: la venta (la plata) es de Deposito y el stock de Zelarrayan", [fila.sucursal_id, fila.stock_de], ["deposito", ZEL]);
+    await debeFallar("DepZel: no puede vender stock de Deposito", () => repo.registrarVenta("deposito", [{ sku: Z, cant: 1, origen: "deposito" }], tr, undefined, undefined, undefined, [], [ZEL]), /no puede vender/);
+    await repo.anularVenta(v.codigo, "ZZ prueba depzel", { soloSucursal: null, admin: true });
+    igual("DepZel: al anular vuelve a Zelarrayan", await stockDe(Z, ZEL), 3);
+  });
+
   // ---- 5. Devoluciones y notas de credito ----
   let nota1 = "", nota2 = "", ajuste2 = 0, monto2 = 0;
   await paso("Devolucion", async () => {
@@ -320,7 +334,7 @@ try {
     const st = await inf.stock(params);
     igual("Informe stock: unidades en White", st.totalUnidades - stockAntes.totalUnidades, (await stockDe(A, LOCAL)) + (await stockDe(B, LOCAL)));
     const ing = await inf.ingresos(params);
-    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 59); // 30 + 4 (Curva Plus) + 14 (en camino) + 6 (retiro) + 5 (regalo)
+    igual("Informe ingresos: cargado", ing.totalCargado - ingresosAntes.totalCargado, 63); // 30 + 4 (Curva Plus) + 14 (en camino) + 6 (retiro) + 5 (regalo) + 4 (depzel)
     const env = (x: typeof ing) => x.enviosPorDestino.find((e) => e.destino === LOCAL) ?? { enviadas: 0, recibidas: 0 };
     igual("Informe ingresos: enviado y recibido", [env(ing).enviadas - env(ingresosAntes).enviadas, env(ing).recibidas - env(ingresosAntes).recibidas], [25, 25]);
     const nc = (await inf.notasCredito(params)).resumen;

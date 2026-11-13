@@ -7,7 +7,7 @@ import type { DatosEtiqueta } from "@/components/Etiqueta";
 import { imprimirEtiquetasEnServidor } from "@/lib/impresoraServidor";
 import { auditar } from "@/lib/seguridad/auditoria";
 import { conUsuario, type UsuarioSesion } from "@/lib/seguridad/contexto";
-import { puede, sucursalFija, type Permiso } from "@/lib/seguridad/permisos";
+import { origenesStock, puede, sucursalFija, type Permiso } from "@/lib/seguridad/permisos";
 import { ipDelPedido, usuarioActual } from "@/lib/seguridad/sesion";
 
 // sesion:false = no hay sesion valida (la pantalla vuelve al login). cambiarClave = hay sesion pero falta elegir una contrasena propia.
@@ -197,6 +197,7 @@ export async function cobrarVenta(
         : especial ? { pct: ent(especial.pct), motivo: txt(especial.motivo), autorizo: txt(especial.autorizo) } : undefined,
       typeof totalEsperado === "number" && Number.isInteger(totalEsperado) ? totalEsperado : undefined,
       regalosOk,
+      origenesStock(u.rol, u.sucursalId),
     );
     const { nueva: _nueva, ...datos } = venta;
     void _nueva;
@@ -241,6 +242,7 @@ export async function retiroEmpresaAccion(sucursal: string, items: { sku: string
       suc(u, txt(sucursal)),
       (Array.isArray(items) ? items : []).map((i) => ({ sku: txt(i.sku), cant: ent(i.cant), origen: i.origen ? txt(i.origen) : undefined })),
       txt(motivo),
+      origenesStock(u.rol, u.sucursalId),
     ),
   }));
 }
