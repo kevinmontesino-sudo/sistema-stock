@@ -1,6 +1,7 @@
 // Administracion de usuarios desde la terminal (no depende de la pantalla). Uso:
 //   npm run usuario -- listar
 //   npm run usuario -- crear <email> "<Nombre>" <admin|encargado|vendedor|deposito> [sucursal]   (pide la contrasena sin mostrarla)
+//   ... crear ... --provisoria   (no pide nada: genera una contrasena provisoria, la muestra UNA vez y obliga a cambiarla al entrar)
 //   npm run usuario -- clave <email>             (nueva contrasena; obliga a cambiarla al entrar)
 //   npm run usuario -- desbloquear <email>       (borra los intentos fallidos de login)
 //   npm run usuario -- reset-2fa <email>         (reinicia la doble verificacion)
@@ -44,12 +45,16 @@ try {
     const r = await pool.query("select email, nombre, rol, sucursal_id, activo, totp_activo from usuarios order by rol, email");
     console.table(r.rows);
   } else if (cmd === "crear") {
-    const [email, nombre, rol, sucursal] = args;
+    const provisoria = args.includes("--provisoria");
+    const [email, nombre, rol, sucursal] = args.filter((a) => a !== "--provisoria");
     if (!email || !nombre || !["admin", "encargado", "vendedor", "deposito"].includes(rol)) throw new Error('Uso: crear <email> "<Nombre>" <admin|encargado|vendedor|deposito> [sucursal]');
     if ((rol === "encargado" || rol === "vendedor") && !sucursal) throw new Error("Falta la sucursal (zelarrayan, white o sanlorenzo).");
-    const clave = await claveNueva(email);
-    await pool.query("insert into usuarios (nombre, email, password_hash, rol, sucursal_id) values ($1, lower($2), $3, $4, $5)", [nombre, email, await hash(clave), rol, sucursal ?? null]);
+    // Provisoria: letras sin las que se confunden (0/O, 1/l) + numeros + un simbolo; cumple las reglas de validar().
+    const abc = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const clave = provisoria ? "Prov-" + [...randomBytes(10)].map((b) => abc[b % abc.length]).join("") + "7" : await claveNueva(email);
+    await pool.query("insert into usuarios (nombre, email, password_hash, rol, sucursal_id, debe_cambiar_clave) values ($1, lower($2), $3, $4, $5, $6)", [nombre, email, await hash(clave), rol, sucursal ?? null, provisoria]);
     console.log(`Usuario creado: ${email} (${rol}).`);
+    if (provisoria) console.log(`Contrasena provisoria (se muestra solo esta vez): ${clave}\nAl entrar, el sistema le pide elegir su propia contrasena.`);
   } else if (cmd === "clave") {
     const email = args[0];
     const clave = await claveNueva(email);
