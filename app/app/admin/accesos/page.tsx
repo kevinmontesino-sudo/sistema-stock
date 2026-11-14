@@ -53,7 +53,7 @@ export default function Accesos() {
         <div className="tarjeta" style={{ marginBottom: 16, borderColor: "var(--acento)" }}>
           <p style={{ margin: 0 }}><strong>Llave &quot;{nuevo.nombre}&quot;</strong> (vence el {fecha(nuevo.vence)})</p>
           <p className="mono" style={{ fontSize: 15, margin: "8px 0", wordBreak: "break-all" }}>{nuevo.token}</p>
-          <p className="aviso" style={{ margin: 0 }}>Copiala ahora y pasásela solo a quien corresponda: <strong>no se vuelve a mostrar</strong>. Quien la tenga puede leer los informes{nuevo.alcance === "promos" ? " y crear o desactivar promos" : "; no puede modificar nada"}.</p>
+          <p className="aviso" style={{ margin: 0 }}>Copiala ahora y pasásela solo a quien corresponda: <strong>no se vuelve a mostrar</strong>. {nuevo.alcance === "stock" ? "Quien la tenga solo puede consultar prendas, precios y stock por local: no ve ventas, cajas ni informes y no puede modificar nada." : <>Quien la tenga puede leer los informes{nuevo.alcance === "promos" ? " y crear o desactivar promos" : "; no puede modificar nada"}.</>}</p>
           <div className="fila" style={{ gap: 8, marginTop: 8 }}>
             <button className="chico" onClick={() => navigator.clipboard?.writeText(nuevo.token)}>Copiar</button>
             <button className="chico" onClick={() => setNuevo(null)}>Listo, ya la guardé</button>
@@ -66,9 +66,9 @@ export default function Accesos() {
           <tbody>
             {lista.map((t) => (
               <tr key={t.id} style={{ opacity: t.estado === "activa" ? 1 : 0.5 }}>
-                <td>{t.nombre}</td><td>{t.alcance === "promos" ? "Informes + promos" : "Solo informes"}</td><td className="mono">{t.prefijo}…</td><td>{fecha(t.vence)}</td><td>{fecha(t.ultimoUso)}</td><td className="der">{t.usos}</td><td>{t.estado}</td>
+                <td>{t.nombre}</td><td>{t.alcance === "promos" ? "Informes + promos" : t.alcance === "stock" ? "Solo stock" : "Solo informes"}</td><td className="mono">{t.prefijo}…</td><td>{fecha(t.vence)}</td><td>{fecha(t.ultimoUso)}</td><td className="der">{t.usos}</td><td>{t.estado}</td>
                 <td className="der" style={{ whiteSpace: "nowrap" }}>{t.estado === "activa" && <>
-                  <button className="chico" onClick={() => alcance(t)}>{t.alcance === "promos" ? "Quitar promos" : "Permitir promos"}</button>{" "}
+                  {t.alcance !== "stock" && <button className="chico" onClick={() => alcance(t)}>{t.alcance === "promos" ? "Quitar promos" : "Permitir promos"}</button>}{" "}
                   <button className="chico" onClick={() => revocar(t)}>Revocar</button>
                 </>}</td>
               </tr>
@@ -85,6 +85,7 @@ export default function Accesos() {
         </select>
         <select value={form.alcance} onChange={(e) => setForm({ ...form, alcance: e.target.value })}>
           <option value="informes">Solo leer informes</option><option value="promos">Leer informes y administrar promos</option>
+          <option value="stock">Solo stock (para el asistente de clientes)</option>
         </select>
         <button className="principal" type="submit">Crear llave</button>
       </form>

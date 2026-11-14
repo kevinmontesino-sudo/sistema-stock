@@ -17,6 +17,7 @@ const json = (cuerpo: unknown, status = 200, extra: Record<string, string> = {})
 async function llave(req: Request, escribe: boolean) {
   const t = await verificarToken(req.headers.get("authorization"));
   if (!t) return { error: json({ error: "Llave inválida, vencida o revocada." }, 401, { "WWW-Authenticate": "Bearer" }) };
+  if (t.alcance === "stock") return { error: json({ error: "Esta llave es solo de stock: no puede consultar ni modificar promos." }, 403) };
   if (!permitirPedido(t.id)) return { error: json({ error: "Demasiados pedidos: esperá un minuto." }, 429, { "Retry-After": "60" }) };
   if (escribe && t.alcance !== "promos") return { error: json({ error: "Esta llave es solo de lectura: para crear o desactivar promos hace falta una llave de alcance \"promos\" (Oficina > Accesos API)." }, 403) };
   return { t };

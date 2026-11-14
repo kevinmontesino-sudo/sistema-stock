@@ -12,6 +12,7 @@ const json = (cuerpo: unknown, status = 200, extra: Record<string, string> = {})
 export async function GET(req: Request) {
   const t = await verificarToken(req.headers.get("authorization"));
   if (!t) return json({ error: "Llave inválida, vencida o revocada." }, 401, { "WWW-Authenticate": "Bearer" });
+  if (t.alcance === "stock") return json({ error: "Esta llave es solo de stock: no puede consultar informes." }, 403);
   if (!permitirPedido(t.id)) return json({ error: "Demasiados pedidos: esperá un minuto." }, 429, { "Retry-After": "60" });
 
   const q = new URL(req.url).searchParams;

@@ -186,7 +186,7 @@ export async function crearTokenApi(a: { nombre: string; dias: number; alcance?:
     const nombre = txt(a.nombre).trim();
     if (nombre.length < 3 || nombre.length > 60) throw new ErrorNegocio("Ponele un nombre a la llave (por ejemplo: Cesar - Claude).");
     const dias = [30, 90, 180].includes(Number(a.dias)) ? Number(a.dias) : 90;
-    const alcance = a.alcance === "promos" ? "promos" : "informes";
+    const alcance = a.alcance === "promos" ? "promos" : a.alcance === "stock" ? "stock" : "informes";
     const t = await crearToken(nombre, dias, yo.id, alcance);
     await auditar("llave_api_creada", { id: t.id, nombre, dias, alcance });
     return { token: t.token, vence: t.vence, nombre };
@@ -197,9 +197,10 @@ export async function crearTokenApi(a: { nombre: string; dias: number; alcance?:
 export async function cambiarAlcanceToken(id: number, alcance: string) {
   return admin(async () => {
     const nuevo = alcance === "promos" ? "promos" : "informes";
+    // Una llave de stock no cambia de alcance (ni se le puede dar acceso a informes o promos): si hace falta otra cosa, se crea otra llave.
     const r = await pool.query<{ nombre: string }>(
-      "update tokens_api set alcance = $2 where id = $1 and revocado_en is null and vence_en > now() returning nombre", [Number(id), nuevo]);
-    if (!r.rows[0]) throw new ErrorNegocio("No existe esa llave, o está vencida o revocada.");
+      "update tokens_api set alcance = $2 where id = $1 and revocado_en is null and vence_en > now() and alcance <> 'stock' returning nombre", [Number(id), nuevo]);
+    if (!r.rows[0]) throw new ErrorNegocio("No existe esa llave, está vencida o revocada, o es una llave de stock (esas no cambian de alcance).");
     await auditar("llave_api_alcance", { id: Number(id), nombre: r.rows[0].nombre, alcance: nuevo });
     return {};
   });
