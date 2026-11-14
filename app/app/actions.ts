@@ -218,7 +218,7 @@ export async function cajaDeHoy(sucursal: string) {
 }
 
 export async function ventaParaDevolver(codigo: string) {
-  return seguro("devolver", async (u) => ({ venta: await repo.ventaParaDevolucion(txt(codigo), sucursalFija(u.rol, u.sucursalId)) }));
+  return seguro("devolver", async (u) => ({ venta: await repo.ventaParaDevolucion(txt(codigo), null) }));
 }
 
 // Ventas por dia o mes para encontrar la compra de un cliente que perdio el ticket.
@@ -258,7 +258,7 @@ export async function emitirNotaCredito(sucursal: string, ventaCodigo: string, i
     const nota = await repo.emitirNota(
       suc(u, txt(sucursal)), txt(ventaCodigo),
       (Array.isArray(items) ? items : []).map((i) => ({ itemId: ent(i.itemId), cant: ent(i.cant), falladas: ent(i.falladas) || 0 })),
-      sucursalFija(u.rol, u.sucursalId),
+      null, // cambios y devoluciones valen en cualquier local: la prenda vuelve al stock del local donde se hace
     );
     await auditar("nota_emitida", { nota: nota.codigo, venta: nota.ventaCodigo, monto: nota.montoInicial, sucursal: nota.sucursal, items: nota.items });
     return { nota };

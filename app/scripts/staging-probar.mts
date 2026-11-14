@@ -558,6 +558,16 @@ try {
   });
 
   // ---- 9. Controles sobre TODA la base (datos reales incluidos) ----
+  await paso("Devolucion en otro local", async () => {
+    // Un cambio se puede hacer en cualquier local: la prenda vuelve al stock del local donde se devuelve.
+    await repo.ajustarStock(A, LOCAL, 3, "prueba cambio en otro local");
+    const v = await repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "transferencia", monto: null }]);
+    const dv = await repo.ventaParaDevolucion(v.codigo, null);
+    const antesWhite = await stockDe(A, LOCAL), antesZel = await stockDe(A, "zelarrayan");
+    const n = await repo.emitirNota("zelarrayan", v.codigo, [{ itemId: dv.items[0].id, cant: 1, falladas: 0 }], null);
+    igual("Cambio en otro local: suma al local donde se hace", [await stockDe(A, "zelarrayan"), await stockDe(A, LOCAL)], [antesZel + 1, antesWhite]);
+    igual("Cambio en otro local: nota vigente", n.estado, "vigente");
+  });
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;
     igual("Toda venta: pagos = total", await q(`select count(*)::int as n from ventas v
