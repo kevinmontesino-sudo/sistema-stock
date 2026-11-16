@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { anularVentaAccion, listarVentas, reimprimirTicketVenta } from "@/app/actions";
+import { anularVentaAccion, listarVentas, marcarRegaloAccion, reimprimirTicketVenta } from "@/app/actions";
 import { Ticket, type DatosTicket } from "@/components/Ticket";
 import { ticketVentaEscpos } from "@/lib/escpos";
 import { useSucursal } from "@/lib/hooks";
@@ -80,7 +80,13 @@ export default function VentasPage() {
     setAviso("");
     const r = await reimprimirTicketVenta(codigo);
     if (!r.ok) { setImprimiendo(""); return setAviso(r.motivo); }
-    const venta = { ...r.venta, regalo: como === "regalo" };
+    let plazoRegalo: number | undefined;
+    if (como === "regalo") {
+      const g = await marcarRegaloAccion(codigo);
+      if (!g.ok) { setImprimiendo(""); return setAviso(g.motivo); }
+      plazoRegalo = g.dias;
+    }
+    const venta = { ...r.venta, regalo: como === "regalo", plazoRegalo };
     if (como === "pdf") {
       try { await compartirTicketPdf(venta); setAviso(`PDF del ticket ${codigo} listo.`); }
       catch { setAviso("No se pudo armar el PDF del ticket."); }

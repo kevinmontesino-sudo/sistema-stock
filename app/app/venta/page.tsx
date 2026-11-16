@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buscarProductos, cajaDeHoy, cobrarVenta, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion } from "@/app/actions";
+import { buscarProductos, cajaDeHoy, cobrarVenta, marcarRegaloAccion, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion } from "@/app/actions";
 import { Ticket, TicketCortesia, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import { ticketCortesiaEscpos, ticketsVentaEscpos } from "@/lib/escpos";
@@ -374,11 +374,18 @@ export default function VentaPage() {
     if (nota && notaMonto > 0 && nota.saldo - notaMonto > 0) setSaldoNota({ codigo: nota.codigo, saldo: nota.saldo - notaMonto });
     setNota(null);
     setUltimaCortesia(null);
-    setUltima({ ...r.venta, sucursal, recibido: pagoEfectivo && recibidoNum >= pagoEfectivo.monto ? recibidoNum : undefined });
-    setImprimirComo(esRegalo ? "ambos" : "normal");
+    // Ticket de regalo: la compra se marca para que tenga 30 dias de cambio (y el ticket de regalo lo diga). Si no se pudo marcar, sale el ticket normal.
+    let plazoRegalo: number | undefined;
+    let comoImprimir: "normal" | "ambos" = "normal";
+    if (esRegalo) {
+      const g = await marcarRegaloAccion(r.venta.codigo);
+      if (g.ok) { plazoRegalo = g.dias; comoImprimir = "ambos"; } else setAviso(`No se pudo marcar el regalo (${g.motivo}): se imprime el ticket normal.`);
+    }
+    setUltima({ ...r.venta, sucursal, plazoRegalo, recibido: pagoEfectivo && recibidoNum >= pagoEfectivo.monto ? recibidoNum : undefined });
+    setImprimirComo(comoImprimir);
     setEsRegalo(false);
     if (autoTicket) setAImprimir(true);
-    setAviso("");
+    if (!esRegalo || comoImprimir === "ambos") setAviso("");
     setLineas(() => []);
     setEspecial(null);
     setFormEsp({ pct: "", motivo: "", autorizo: "" });
@@ -388,6 +395,16 @@ export default function VentaPage() {
     setEntrega1("");
     setRecibido("");
     setVersion((v) => v + 1);
+  }
+
+  // Imprime un ticket de regalo (solo o junto al normal): antes marca la compra para que tenga 30 dias de cambio, y el ticket lo dice.
+  async function imprimirConRegalo(como: "regalo" | "ambos") {
+    if (!ultima) return;
+    const g = await marcarRegaloAccion(ultima.codigo);
+    if (!g.ok) return setAviso(g.motivo);
+    setUltima((u) => (u ? { ...u, plazoRegalo: g.dias } : u));
+    setImprimirComo(como);
+    setAImprimir(true);
   }
 
   useEffect(() => {
@@ -799,8 +816,8 @@ export default function VentaPage() {
           <p className="aviso">Ticket interno · No válido como factura.</p>
           <div className="fila" style={{ gap: 8, marginTop: 8 }}>
             <button onClick={() => { setImprimirComo("normal"); setAImprimir(true); }}>Imprimir ticket</button>
-            <button onClick={() => { setImprimirComo("regalo"); setAImprimir(true); }} title="Sin precios: el importe dice INVALUABLE">🎁 Ticket de regalo</button>
-            <button onClick={() => { setImprimirComo("ambos"); setAImprimir(true); }}>Imprimir los dos</button>
+            <button onClick={() => imprimirConRegalo("regalo")} title="Sin precios: el importe dice INVALUABLE. La compra queda con 30 días de cambio">🎁 Ticket de regalo</button>
+            <button onClick={() => imprimirConRegalo("ambos")}>Imprimir los dos</button>
             {(sucursal === DEPOSITO || esAdmin) && <button onClick={() => compartirTicketPdf(ultima).catch(() => setAviso("No se pudo armar el PDF del ticket."))}>PDF para WhatsApp</button>}
             <button onClick={() => setVerTicket((v) => !v)}>{verTicket ? "Ocultar ticket" : "Ver ticket en pantalla"}</button>
           </div>

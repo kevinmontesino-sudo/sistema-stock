@@ -5,7 +5,7 @@ import { TicketNota } from "@/components/TicketNota";
 import { useEscaner, useSucursal } from "@/lib/hooks";
 import { ticketNotaEscpos } from "@/lib/escpos";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
-import { DIAS_DEVOLUCION, ES_CODIGO_NOTA, nombreSucursal, pesos, type NotaCredito, type VentaDevolvible } from "@/lib/util";
+import { DIAS_DEVOLUCION, DIAS_DEVOLUCION_REGALO, ES_CODIGO_NOTA, nombreSucursal, pesos, type NotaCredito, type VentaDevolvible } from "@/lib/util";
 
 export default function DevolucionPage() {
   const [sucursal] = useSucursal();
@@ -118,7 +118,7 @@ export default function DevolucionPage() {
             </tbody>
           </table>
           <p className="aviso">
-            El vale es por lo que el cliente pagó por cada prenda (con el descuento o recargo de su medio de pago) y no vence. Se acepta devolver hasta {DIAS_DEVOLUCION} días después de la compra. Solo se devuelve en vale, no en efectivo.
+            El vale es por lo que el cliente pagó por cada prenda (con el descuento o recargo de su medio de pago) y no vence. Se acepta devolver hasta {DIAS_DEVOLUCION} días después de la compra ({DIAS_DEVOLUCION_REGALO} si se imprimió el ticket de regalo). Solo se devuelve en vale, no en efectivo.
             Si no marcás una prenda como fallada, vuelve al stock de {nombreSucursal(sucursal)}.
           </p>
           <div className="fila" style={{ justifyContent: "space-between" }}>

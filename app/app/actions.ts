@@ -226,6 +226,15 @@ export async function listarVentas(sucursal: string, desde: string, hasta: strin
   return seguro("devolver", async (u) => ({ ventas: await repo.ventasListado(suc(u, txt(sucursal)), txt(desde), txt(hasta)) }));
 }
 
+// Se imprime un ticket de regalo: la compra queda con 30 dias de cambio. Devuelve los dias que van en el ticket.
+export async function marcarRegaloAccion(codigo: string) {
+  return seguro("vender", async (u) => {
+    const r = await repo.marcarRegalo(txt(codigo), sucursalFija(u.rol, u.sucursalId), u.id);
+    if (r.nueva) await auditar("ticket_regalo", { venta: txt(codigo), dias: r.dias });
+    return { dias: r.dias };
+  });
+}
+
 export async function reimprimirTicketVenta(codigo: string) {
   return seguro("devolver", async (u) => {
     const venta = await repo.ticketPorCodigo(txt(codigo), sucursalFija(u.rol, u.sucursalId));

@@ -581,6 +581,22 @@ try {
     igual("Promo por medio: pago mixto con otro medio NO aplica", mixta.promo, undefined);
     await promosAdmin.desactivarPromo(p.id);
   });
+  await paso("Ticket de regalo: 30 dias de cambio", async () => {
+    await repo.ajustarStock(A, LOCAL, 5, "prueba ticket de regalo");
+    const v = await repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "transferencia", monto: null }]);
+    const sin = (await pool.query("select 1 from ventas_regalo r join ventas x on x.id = r.venta_id where x.codigo = $1", [v.codigo])).rowCount;
+    igual("Regalo: una compra comun no esta marcada", sin, 0);
+    const g1 = await repo.marcarRegalo(v.codigo, LOCAL, null);
+    igual("Regalo: se marca y tiene 30 dias", [g1.dias, g1.nueva], [30, true]);
+    const g2 = await repo.marcarRegalo(v.codigo, LOCAL, null);
+    igual("Regalo: marcarla de nuevo no duplica", [g2.dias, g2.nueva], [30, false]);
+    await debeFallar("Regalo: otro local no la marca", () => repo.marcarRegalo(v.codigo, "zelarrayan", null), /se hizo en/);
+    await debeFallar("Regalo: ticket inexistente", () => repo.marcarRegalo("V999999X", LOCAL, null), /No existe|inválido/);
+    const dv = await repo.ventaParaDevolucion(v.codigo, null);
+    igual("Regalo: se puede devolver", dv.codigo, v.codigo);
+    const n = await repo.emitirNota(LOCAL, v.codigo, [{ itemId: dv.items[0].id, cant: 1, falladas: 0 }], null);
+    igual("Regalo: la nota se emite", n.estado, "vigente");
+  });
   await paso("Cierre de caja: abre, cuenta, deja y caja fuerte", async () => {
     const ci = await import("../lib/cierre");
     const u = { id: 1, nombre: "ZZ Staging" };

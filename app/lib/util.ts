@@ -135,6 +135,8 @@ export const ES_CODIGO_NOTA = /^n[0-9a-f]{10}$/i;
 export const ES_ESCANEO_NOTA = ES_CODIGO_NOTA;
 // La nota de credito no vence; lo que tiene limite es devolver una compra: hasta 15 dias despues.
 export const DIAS_DEVOLUCION = 15;
+// Compras con ticket de regalo (se imprimio el ticket de regalo): se pueden cambiar hasta 30 dias despues.
+export const DIAS_DEVOLUCION_REGALO = 30;
 
 export type NotaCredito = {
   codigo: string; ventaCodigo: string; sucursal: string; creada: string;

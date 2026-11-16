@@ -23,6 +23,8 @@ export type DatosTicket = {
   recibido?: number;
   // Solo para imprimir (no se guarda): ticket de regalo, sin precios.
   regalo?: boolean;
+  // Dias de cambio que figuran en el ticket de regalo (30 si la compra quedo marcada como regalo). Por defecto, los de siempre.
+  plazoRegalo?: number;
 };
 
 const signo = (n: number) => (n > 0 ? "+" : n < 0 ? "-" : "");
@@ -32,7 +34,8 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
   const dos = (n: number) => String(n).padStart(2, "0");
   // Formato fijo (no depende del idioma del navegador): evita diferencias entre servidor y pantalla.
   const fecha = `${dos(f.getDate())}/${dos(f.getMonth() + 1)}/${f.getFullYear()} ${dos(f.getHours())}:${dos(f.getMinutes())}`;
-  const tope = new Date(f.getTime() + DIAS_DEVOLUCION * 86_400_000);
+  const dias = venta.regalo ? venta.plazoRegalo ?? DIAS_DEVOLUCION : DIAS_DEVOLUCION;
+  const tope = new Date(f.getTime() + dias * 86_400_000);
   const limite = `${dos(tope.getDate())}/${dos(tope.getMonth() + 1)}/${tope.getFullYear()}`;
   const cantidad = venta.items.reduce((s, i) => s + i.cant, 0);
   const unico = venta.pagos.length === 1 ? venta.pagos[0] : null;
@@ -103,7 +106,7 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
         <div className="centro"><strong>VENTA SIN CAMBIO</strong></div>
       ) : (
         <>
-          <div className="centro"><strong>Cambios por {DIAS_DEVOLUCION} días</strong></div>
+          <div className="centro"><strong>Cambios por {dias} días</strong></div>
           <div className="centro">Hasta el {limite} presentando este ticket.</div>
           {sinCambio && <div className="centro">Las prendas marcadas SIN CAMBIO no tienen cambio.</div>}
         </>

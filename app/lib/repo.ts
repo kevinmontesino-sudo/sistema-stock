@@ -6,7 +6,7 @@ import { descuentoEspecial, mediosParaPromo, mejorPromo, promosParaMedios, TOPE_
 import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, tipoDesdeNombre, totalReparto,
-  calcularPagos, mediosDelCarrito, NO_ANULADA, DIAS_DEVOLUCION, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
+  calcularPagos, mediosDelCarrito, NO_ANULADA, DIAS_DEVOLUCION, DIAS_DEVOLUCION_REGALO, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
 // Error esperado: se le muestra el mensaje al usuario.
@@ -737,6 +737,24 @@ export async function ventasListado(sucursal: string, desde: string, hasta: stri
   return r.rows.map((x) => ({ codigo: x.codigo, fecha: x.fecha.toISOString(), total: x.total, unidades: x.unidades, medios: x.medios ?? "", devuelta: x.devuelta, anulada: x.anulada, items: x.items }));
 }
 
+// Marca una compra como regalo (se va a imprimir su ticket de regalo): desde ahora se puede cambiar hasta 30 dias en vez de 15.
+// Solo se marca si todavia esta dentro de los 15 dias de siempre (no sirve para revivir una compra vencida); si ya estaba marcada, sigue valiendo.
+// Devuelve cuantos dias de cambio le corresponden, para que el ticket diga lo mismo que el sistema.
+export async function marcarRegalo(codigo: string, soloSucursal: string | null, usuarioId: number | null) {
+  const cod = codigo.trim().toUpperCase();
+  if (!ES_CODIGO_VENTA.test(cod)) return falla("Código de ticket inválido");
+  const v = await pool.query<{ id: number; sucursal_id: string; vieja: boolean }>(
+    `select id::int as id, sucursal_id, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as vieja from ventas where codigo = $1`, [cod]);
+  const venta = v.rows[0];
+  if (!venta) return falla(`No existe la venta ${cod}`);
+  if (soloSucursal && venta.sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(venta.sucursal_id)}.`);
+  if ((await pool.query("select 1 from ventas_anuladas where venta_id = $1", [venta.id])).rowCount) return falla(`La venta ${cod} fue anulada.`);
+  if ((await pool.query("select 1 from ventas_regalo where venta_id = $1", [venta.id])).rowCount) return { dias: DIAS_DEVOLUCION_REGALO, nueva: false };
+  if (venta.vieja) return { dias: DIAS_DEVOLUCION, nueva: false };
+  await pool.query("insert into ventas_regalo (venta_id, usuario_id) values ($1, $2) on conflict do nothing", [venta.id, usuarioId]);
+  return { dias: DIAS_DEVOLUCION_REGALO, nueva: true };
+}
+
 // Ticket de una venta ya cobrada, para reimprimirlo (el cliente lo perdio o salio mal). Un local solo reimprime los suyos.
 export async function ticketPorCodigo(codigo: string, soloSucursal: string | null = null) {
   const cod = codigo.trim().toUpperCase();
@@ -965,8 +983,9 @@ export async function ventaParaDevolucion(codigo: string, soloSucursal: string |
   if (soloSucursal && venta.sucursal_id !== soloSucursal) {
     return falla(`Esa compra se hizo en ${nombreSucursal(venta.sucursal_id)}: la devolución se hace en ese local.`);
   }
-  if (Date.now() - venta.creado_en.getTime() > DIAS_DEVOLUCION * 86_400_000) {
-    return falla(`Esa compra es del ${venta.creado_en.toLocaleDateString("es-AR")}: pasaron más de ${DIAS_DEVOLUCION} días y ya no se acepta la devolución`);
+  const dias = (await pool.query("select 1 from ventas_regalo where venta_id = $1", [venta.id])).rowCount ? DIAS_DEVOLUCION_REGALO : DIAS_DEVOLUCION;
+  if (Date.now() - venta.creado_en.getTime() > dias * 86_400_000) {
+    return falla(`Esa compra es del ${venta.creado_en.toLocaleDateString("es-AR")}: pasaron más de ${dias} días y ya no se acepta la devolución`);
   }
   const f = factorDeVenta(venta);
   const it = await pool.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; sinCambio: boolean }>(
@@ -1051,7 +1070,7 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     // "for update" sobre ventas, porque la aplicacion no tiene (ni debe tener) permiso de modificar la tabla de ventas.
     await c.query("select pg_advisory_xact_lock(hashtext($1))", [`devolucion:${codigoVenta}`]);
     const v = await c.query<{ id: number; total: number; subtotal_lista: number; descuento_promo: number; fuera: boolean; sucursal_id: string; creado_en: Date }>(
-      `select id::int as id, total, subtotal_lista, descuento_promo, sucursal_id, creado_en, creado_en < now() - interval '${DIAS_DEVOLUCION} days' as fuera
+      `select id::int as id, total, subtotal_lista, descuento_promo, sucursal_id, creado_en, creado_en < now() - make_interval(days => case when exists (select 1 from ventas_regalo r where r.venta_id = ventas.id) then ${DIAS_DEVOLUCION_REGALO} else ${DIAS_DEVOLUCION} end) as fuera
        from ventas where codigo = $1`, [codigoVenta],
     );
     if (!v.rows[0]) return falla("No existe esa venta");
@@ -1059,7 +1078,7 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     if ((await c.query("select 1 from ventas_anuladas where venta_id = $1", [ventaId])).rowCount) return falla("Esa venta fue anulada: no se puede devolver");
     // Un local solo devuelve compras de su propio local: si no, se podria "crear" stock y vales con ventas ajenas.
     if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}: la devolución se hace en ese local.`);
-    if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra: ya no se acepta la devolución`);
+    if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra (más de ${DIAS_DEVOLUCION_REGALO} si era un ticket de regalo): ya no se acepta la devolución`);
     const f = factorDeVenta(v.rows[0]);
     const vi = await c.query<{ id: number; sku: string; nombre: string; precio: number; vendidas: number; devueltas: number; sin_cambio: boolean; stock_de: string | null }>(
       `select vi.id::int as id, vi.sku, vi.nombre, vi.precio_lista as precio, vi.cantidad as vendidas, vi.sin_cambio, vi.stock_de,

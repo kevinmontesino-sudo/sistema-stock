@@ -19,8 +19,8 @@ export const fechaTicket = (iso: string) => {
   const f = new Date(iso);
   return `${dos(f.getDate())}/${dos(f.getMonth() + 1)}/${f.getFullYear()} ${dos(f.getHours())}:${dos(f.getMinutes())}`;
 };
-export const limiteCambio = (iso: string) => {
-  const t = new Date(new Date(iso).getTime() + DIAS_DEVOLUCION * 86_400_000);
+export const limiteCambio = (iso: string, dias: number = DIAS_DEVOLUCION) => {
+  const t = new Date(new Date(iso).getTime() + dias * 86_400_000);
   return `${dos(t.getDate())}/${dos(t.getMonth() + 1)}/${t.getFullYear()}`;
 };
 export const TEXTO_REGALO = {
@@ -90,7 +90,8 @@ export function renglonesVenta(venta: DatosTicket): Renglon[] {
   r.push({ t: "regla" }, { t: "barras", valor: venta.codigo });
   if (todoSinCambio) r.push({ t: "centro", s: "VENTA SIN CAMBIO", negrita: true });
   else {
-    r.push({ t: "centro", s: `Cambios por ${DIAS_DEVOLUCION} días`, negrita: true }, { t: "centro", s: `Hasta el ${limiteCambio(venta.fecha)} presentando este ticket.` });
+    const dias = venta.regalo ? venta.plazoRegalo ?? DIAS_DEVOLUCION : DIAS_DEVOLUCION;
+    r.push({ t: "centro", s: `Cambios por ${dias} días`, negrita: true }, { t: "centro", s: `Hasta el ${limiteCambio(venta.fecha, dias)} presentando este ticket.` });
     if (sinCambio) r.push({ t: "centro", s: "Las prendas marcadas SIN CAMBIO no tienen cambio." });
   }
   if (venta.regalo) r.push({ t: "linea", s: "" }, { t: "centro", s: TEXTO_REGALO.despedida, negrita: true }, { t: "corazon", mm: 6 }, { t: "linea", s: "" });
