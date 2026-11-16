@@ -568,6 +568,19 @@ try {
     igual("Cambio en otro local: suma al local donde se hace", [await stockDe(A, "zelarrayan"), await stockDe(A, LOCAL)], [antesZel + 1, antesWhite]);
     igual("Cambio en otro local: nota vigente", n.estado, "vigente");
   });
+  await paso("Promo solo con ciertos medios de pago", async () => {
+    await repo.ajustarStock(A, LOCAL, 5, "prueba promo por medio de pago");
+    await debeFallar("Promo por medio: medio inexistente", () => promosAdmin.crearPromo({ nombre: `ZZ medio malo ${sello}`, tipo: "porcentaje", pct: 10, medios: ["bitcoin"], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /Medio de pago inexistente/);
+    const p = await promosAdmin.crearPromo({ nombre: `ZZ Solo tarjeta ${sello}`, tipo: "porcentaje", pct: 50, medios: ["tarjeta"], sucursales: [LOCAL], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" });
+    igual("Promo por medio: se guarda y se describe", [p.medios, /SOLO pagando con tarjeta/.test(p.descripcion)], [["tarjeta"], true]);
+    const conEfvo = await repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "efectivo", monto: null }]);
+    igual("Promo por medio: pagando en efectivo NO aplica", conEfvo.promo, undefined);
+    const conTarj = await repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "tarjeta", monto: null }]);
+    check("Promo por medio: pagando con tarjeta SI aplica", !!conTarj.promo && conTarj.promo.monto > 0, JSON.stringify(conTarj.promo));
+    const mixta = await repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "tarjeta", monto: 3000 }, { medioId: "efectivo", monto: null }]);
+    igual("Promo por medio: pago mixto con otro medio NO aplica", mixta.promo, undefined);
+    await promosAdmin.desactivarPromo(p.id);
+  });
   await paso("Cierre de caja: abre, cuenta, deja y caja fuerte", async () => {
     const ci = await import("../lib/cierre");
     const u = { id: 1, nombre: "ZZ Staging" };

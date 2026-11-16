@@ -12,8 +12,20 @@ export type Promo = {
   tipos: string[]; sucursales: string[]; desde: string; hasta: string;
   descuentoEfectivo: boolean; // si ademas corren los descuentos por medio de pago (efectivo, transferencia); false = precio unico
   sinCambio: boolean;         // las prendas que entran quedan sin cambio
+  medios: string[];           // medios de pago con los que vale (ids de medios_pago); vacio = con cualquiera
   categorias?: string[];      // nombres de las categorias (para mostrar)
 };
+// Nombre de cada medio para mostrar en las promos ("tarjeta" es el credito).
+export const NOMBRE_MEDIO_PROMO: Record<string, string> = { efectivo: "efectivo", transferencia: "transferencia", tarjeta: "tarjeta" };
+export const textoMedios = (medios: string[]) => medios.map((m) => NOMBRE_MEDIO_PROMO[m] ?? m).join(" o ");
+// La promo vale solo si TODO lo que se paga va con alguno de sus medios. Las notas de credito no cuentan (no son un medio de pago);
+// sin ningun medio elegido todavia, solo valen las promos sin restriccion.
+export function valeConMedios(p: Pick<Promo, "medios">, pagados: string[]) {
+  if (!p.medios || p.medios.length === 0) return true;
+  const ids = pagados.filter((id) => !id.toLowerCase().startsWith("nota:") && id !== "nota_credito");
+  return ids.length > 0 && ids.every((id) => p.medios.includes(id));
+}
+export const promosParaMedios = <T extends Pick<Promo, "medios">>(promos: T[], pagados: string[]) => promos.filter((p) => valeConMedios(p, pagados));
 export type ItemPromo = { tipo: string; precio: number; cant: number };
 export type Detalle = {
   descuento: number;
@@ -38,7 +50,7 @@ export function textoPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "precio">
 }
 
 // Que hace la promo, en una frase para el cajero y para la oficina. Ej.: "Llevando 3 prendas, la más barata va gratis".
-export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "precio" | "sinCambio" | "descuentoEfectivo"> & { categorias?: string[] }) {
+export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "precio" | "sinCambio" | "descuentoEfectivo"> & { medios?: string[]; categorias?: string[] }) {
   const cats = p.categorias?.length ? p.categorias.join(", ").toLowerCase() : "";
   const de = cats ? ` (${cats})` : "";
   let s: string;
@@ -51,6 +63,7 @@ export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "pr
     s = p.n && p.n > 1 ? `Llevando ${p.n} o más prendas${de}, cada una a ${pesos(p.precio ?? 0)}` : `${cats ? cats.charAt(0).toUpperCase() + cats.slice(1) : "Todas las prendas"} a ${pesos(p.precio ?? 0)} c/u`;
   }
   if (!p.descuentoEfectivo) s += " (precio único, sin descuento por medio de pago)";
+  if (p.medios?.length) s += ` · SOLO pagando con ${textoMedios(p.medios)}`;
   if (p.sinCambio) s += " · SIN CAMBIO";
   return s;
 }

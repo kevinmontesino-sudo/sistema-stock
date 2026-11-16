@@ -8,7 +8,7 @@ import type { DatosCortesia } from "@/lib/ticketRenglones";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { compartirTicketPdf } from "@/lib/ticketPdf";
 import { usePuede, useSesion } from "@/components/SesionContext";
-import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, sugerenciaPromo, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
+import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
   calcularPagos, mediosDelCarrito, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
@@ -291,11 +291,22 @@ export default function VentaPage() {
   // Promo: la mejor de las de hoy (no se acumulan). El descuento especial la reemplaza. Al cobrar, el servidor recalcula todo.
   const promos = promosHoy.suc === sucursal ? promosHoy.promos : [];
   const itemsPromo = pagas.map((l) => ({ tipo: l.producto.tipo, precio: l.producto.precio, cant: l.cant }));
-  const auto = mejorPromo(promos, itemsPromo);
+  // Promos que valen solo con ciertos medios de pago (ej. solo credito): cuentan unicamente si TODO el pago va con esos medios.
+  // Si la nota de credito cubre todo, el sistema completa con transferencia (ver `pagos` mas abajo): se calcula igual que en el servidor.
+  const idsElegidos = mixto ? ((parseInt(entrega1) || 0) > 0 ? [pago1, pago2] : []) : medioSel ? [medioSel] : [];
+  const idsPago = (n: number) => {
+    const m = nota && n > 0 ? montoNotaAplicable(n, nota.saldo, nota.ajustePct) : 0;
+    return nota && m > 0 && Math.max(0, n - Math.round(m / (1 + nota.ajustePct / 100))) === 0 ? ["transferencia"] : idsElegidos;
+  };
+  const auto1 = mejorPromo(promosParaMedios(promos, idsElegidos), itemsPromo);
+  const auto = mejorPromo(promosParaMedios(promos, idsPago(subtotal - auto1.descuento)), itemsPromo);
+  // La mejor promo de todas (sin mirar el medio): si es una que exige otro medio de pago, se le avisa al cajero.
+  const mejorSinMedio = mejorPromo(promos, itemsPromo);
+  const promoPorOtroMedio = !especial && mejorSinMedio.promo && mejorSinMedio.promo.medios.length > 0 && mejorSinMedio.descuento > auto.descuento ? mejorSinMedio : null;
   const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
   const nombrePromo = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
   const neto = subtotal - descuento;
-  const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promos, itemsPromo, auto.descuento) : null;
+  const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promosParaMedios(promos, idsElegidos), itemsPromo, auto.descuento) : null;
   // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), los medios con descuento pasan a 0%: se paga el precio de la promo.
   // Productos unicos (efectivo cargado a mano): cada medio toma el % que da el carrito, igual que en el servidor.
   const sinDescEfvo = !especial && !!auto.promo && !auto.promo.descuentoEfectivo;
@@ -545,6 +556,7 @@ export default function VentaPage() {
             {promoAplicada && !promoAplicada.descuentoEfectivo && <p className="aviso" style={{ margin: "4px 0 0" }}>Esta promo tiene precio único: se paga {pesos(neto)} con cualquier medio (sin los descuentos por medio de pago).</p>}
           </div>
         )}
+        {promoPorOtroMedio?.promo && <p className="alerta" style={{ margin: "8px 0 0" }}>💳 La promo <strong>{promoPorOtroMedio.promo.nombre}</strong> (ahorra {pesos(promoPorOtroMedio.descuento)}) vale solo pagando con {textoMedios(promoPorOtroMedio.promo.medios)}.</p>}
         {sugerencia && <p className="alerta" style={{ margin: "8px 0 0" }}>💡 {sugerencia.texto}</p>}
 
         {!soloCortesia && (<>

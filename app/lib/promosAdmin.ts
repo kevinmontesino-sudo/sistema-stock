@@ -14,6 +14,7 @@ export type PromoNueva = {
   nombre?: string; tipo: string; n?: number | null; m?: number | null; pct?: number | null; precio?: number | null;
   sucursales?: string[]; tipos?: string[]; desde: string; hasta: string;
   descuento_efectivo?: boolean; sin_cambio?: boolean;
+  medios?: string[]; // medios de pago con los que vale (efectivo, transferencia, tarjeta); vacio o sin poner = todos
 };
 const HOY_SQL = "(now() at time zone 'America/Argentina/Buenos_Aires')::date";
 // "2026-02-30" pasa Date.parse: se compara contra la fecha que de verdad resulta.
@@ -30,7 +31,7 @@ const hoyAR = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/
 export async function listarPromos(f: { soloVigentes?: boolean } = {}): Promise<PromoFila[]> {
   const r = await pool.query<Promo & { activa: boolean; origen: string; creada: Date; ventas: number; descontado: number; hoy: string }>(
     `select p.id::int as id, p.nombre, p.tipo, p.n, p.m, p.pct::float8 as pct, p.precio, p.tipos, p.sucursales, p.desde::text as desde, p.hasta::text as hasta,
-       p.descuento_efectivo as "descuentoEfectivo", p.sin_cambio as "sinCambio",
+       p.descuento_efectivo as "descuentoEfectivo", p.sin_cambio as "sinCambio", p.medios,
        (select coalesce(array_agg(t.nombre order by t.nombre), '{}') from tipos t where t.codigo = any(p.tipos)) as categorias,
        p.activa, p.origen, p.creado_en as creada,
        (select count(*)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) as ventas,
@@ -77,6 +78,15 @@ export async function crearPromo(a: PromoNueva, quien: { usuarioId: number | nul
     const faltan = tiposPedidos.filter((t) => !ok.rows.some((x) => x.codigo === t));
     if (faltan.length) falla(`Categoría inexistente: ${faltan.join(", ")}`);
   }
+  const mediosPedidos = [...new Set(lista(a.medios, "medios").map((x) => x.trim().toLowerCase()).filter(Boolean))];
+  let medios: string[] = [];
+  if (mediosPedidos.length) {
+    const ok = await pool.query<{ id: string }>("select id from medios_pago where activo and id <> 'nota_credito'");
+    const todos = ok.rows.map((x) => x.id);
+    const mal = mediosPedidos.filter((x) => !todos.includes(x));
+    if (mal.length) falla(`Medio de pago inexistente: ${mal.join(", ")}. Opciones: ${todos.join(", ")}`);
+    medios = mediosPedidos.length === todos.length ? [] : mediosPedidos; // todos = vale con cualquiera
+  }
   const desde = String(a.desde ?? ""), hasta = String(a.hasta ?? "");
   if (!fechaValida(desde) || !fechaValida(hasta)) falla("Fechas inválidas: usá AAAA-MM-DD (y que la fecha exista)");
   if (hasta < desde) falla("La fecha de fin es anterior a la de inicio");
@@ -87,9 +97,9 @@ export async function crearPromo(a: PromoNueva, quien: { usuarioId: number | nul
   const vigentes = await pool.query<{ n: number }>(`select count(*)::int as n from promos where activa and hasta >= ${HOY_SQL}`);
   if (vigentes.rows[0].n >= 30) falla("Hay demasiadas promos activas: desactivá alguna antes de crear otra");
   const r = await pool.query<{ id: number }>(
-    `insert into promos (nombre, tipo, n, m, pct, precio, sucursales, tipos, desde, hasta, origen, creado_por, descuento_efectivo, sin_cambio)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id::int as id`,
-    [nombre, tipo, n, m, pct, precio, sucursales, tiposPedidos, desde, hasta, quien.origen.slice(0, 80), quien.usuarioId, descuentoEfectivo, sinCambio],
+    `insert into promos (nombre, tipo, n, m, pct, precio, sucursales, tipos, desde, hasta, origen, creado_por, descuento_efectivo, sin_cambio, medios)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) returning id::int as id`,
+    [nombre, tipo, n, m, pct, precio, sucursales, tiposPedidos, desde, hasta, quien.origen.slice(0, 80), quien.usuarioId, descuentoEfectivo, sinCambio, medios],
   );
   return (await listarPromos()).find((p) => p.id === r.rows[0].id)!;
 }

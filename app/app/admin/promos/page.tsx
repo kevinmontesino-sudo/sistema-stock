@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { crearPromoAdmin, desactivarPromoAdmin, promosAdmin } from "@/app/admin/acciones";
 import { empresa } from "@/lib/empresa.config";
 import type { PromoFila } from "@/lib/promosAdmin";
-import { descripcionPromo, textoPromo, TOPE_PCT, type TipoPromo } from "@/lib/promos";
+import { descripcionPromo, NOMBRE_MEDIO_PROMO, textoPromo, TOPE_PCT, type TipoPromo } from "@/lib/promos";
 import { nombreSucursal, pesos } from "@/lib/util";
 
 type Especial = { codigo: string; fecha: string; sucursal: string; usuario: string | null; pct: number; descuento: number; total: number; motivo: string; autorizo: string };
@@ -33,7 +33,7 @@ function finde() {
   if (dow === 6) return { desde: h, hasta: masDias(h, 1) };
   return { desde: masDias(h, 6 - dow), hasta: masDias(h, 7 - dow) };
 }
-const VACIO = { plantilla: "3x2", n: 3, m: 2, pct: 20, precio: 0, nombre: "", sucursales: [] as string[], tipos: [] as string[], desde: "", hasta: "", sinCambio: false, efectivo: true };
+const VACIO = { plantilla: "3x2", n: 3, m: 2, pct: 20, precio: 0, nombre: "", sucursales: [] as string[], tipos: [] as string[], desde: "", hasta: "", sinCambio: false, efectivo: true, medios: [] as string[] };
 
 export default function Promos() {
   const [promos, setPromos] = useState<PromoFila[]>([]);
@@ -73,7 +73,7 @@ export default function Promos() {
     precio: tipo === "precio" ? form.precio : null,
   };
   const cats = form.tipos.map((c) => categorias.find((x) => x.codigo === c)?.nombre ?? c);
-  const frase = descripcionPromo({ ...datos, categorias: cats, sinCambio: form.sinCambio, descuentoEfectivo: form.efectivo });
+  const frase = descripcionPromo({ ...datos, categorias: cats, sinCambio: form.sinCambio, descuentoEfectivo: form.efectivo, medios: form.medios });
   const donde = form.sucursales.length ? form.sucursales.map(nombreSucursal).join(", ") : "todos los locales";
   const cuando = form.desde === form.hasta ? `El ${diaLindo(form.desde)}` : `Del ${diaLindo(form.desde)} al ${diaLindo(form.hasta)}`;
   const listo = tipo !== "precio" || form.precio > 0;
@@ -89,7 +89,7 @@ export default function Promos() {
     setOcupado(true);
     const r = await crearPromoAdmin({
       ...datos, nombre: form.nombre, desde: form.desde, hasta: form.hasta, sucursales: form.sucursales, tipos: form.tipos,
-      descuento_efectivo: form.efectivo, sin_cambio: form.sinCambio,
+      descuento_efectivo: form.efectivo, sin_cambio: form.sinCambio, medios: form.medios,
     });
     setOcupado(false);
     if (!r.ok) return setMsg({ texto: r.motivo, mala: true });
@@ -153,6 +153,13 @@ export default function Promos() {
           <button type="button" className={`chico ${form.tipos.length === 0 ? "on" : ""}`} onClick={() => setForm({ ...form, tipos: [] })}>Todas las prendas</button>
           {categorias.map((c) => (
             <button key={c.codigo} type="button" className={`chico ${form.tipos.includes(c.codigo) ? "on" : ""}`} onClick={() => setForm({ ...form, tipos: alternar(form.tipos, c.codigo) })}>{c.nombre}</button>
+          ))}
+        </div>
+        <div className="fila" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span className="aviso">¿Con qué se paga?</span>
+          <button type="button" className={`chico ${form.medios.length === 0 ? "on" : ""}`} onClick={() => setForm({ ...form, medios: [] })}>Cualquier medio</button>
+          {Object.entries(NOMBRE_MEDIO_PROMO).map(([id, nombre]) => (
+            <button key={id} type="button" className={`chico ${form.medios.includes(id) ? "on" : ""}`} onClick={() => setForm({ ...form, medios: alternar(form.medios, id) })}>Solo {nombre}</button>
           ))}
         </div>
         <div className="fila" style={{ gap: 6, flexWrap: "wrap" }}>

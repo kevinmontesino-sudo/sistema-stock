@@ -57,6 +57,7 @@ const herramientas = [
         pct: { type: "number", minimum: 0.5, maximum: 50, description: "porcentaje: descuento." },
         precio: { type: "integer", minimum: 1, description: "precio: pesos por prenda." },
         descuento_efectivo: { type: "boolean", description: "Si ademas corren los descuentos por medio de pago (efectivo y transferencia). false = precio unico: se paga el precio de la promo con cualquier medio. Por defecto true en nxm/porcentaje, false en precio." },
+        medios: { type: "array", items: { type: "string", enum: ["efectivo", "transferencia", "tarjeta"] }, description: "Medios de pago con los que vale la promo (tarjeta = credito). Solo vale si TODO el pago va con alguno de ellos. Vacio = cualquiera." },
         sin_cambio: { type: "boolean", description: "true = las prendas de la promo quedan SIN CAMBIO (feria de saldos)." },
         sucursales: { type: "array", items: { type: "string", enum: ["deposito", "zelarrayan", "white", "sanlorenzo"] }, description: "Locales donde vale. Vacio = todos." },
         tipos: { type: "array", items: { type: "string" }, description: "Codigos de categoria (ver ver_promos). Vacio = todas las prendas." },

@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 import { DEPOSITO, empresa } from "./empresa.config";
 import { type Db, pool, tx } from "./db";
 import { usuarioEnCurso } from "./seguridad/contexto";
-import { descuentoEspecial, mediosParaPromo, mejorPromo, TOPE_PCT, type Promo } from "./promos";
+import { descuentoEspecial, mediosParaPromo, mejorPromo, promosParaMedios, TOPE_PCT, type Promo } from "./promos";
 import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, tipoDesdeNombre, totalReparto,
@@ -479,7 +479,7 @@ export async function totalEnSucursal(sucursal: string) {
 // Pagos: cada medio lleva su porcentaje de la tabla medios_pago (se puede dividir entre varios medios, ver calcularPagos).
 // Promos vigentes HOY (hora de Argentina) en un local.
 const SELECT_PROMO = `select id::int as id, nombre, tipo, n, m, pct::float8 as pct, precio, tipos, sucursales, desde::text as desde, hasta::text as hasta,
-  descuento_efectivo as "descuentoEfectivo", sin_cambio as "sinCambio",
+  descuento_efectivo as "descuentoEfectivo", sin_cambio as "sinCambio", medios,
   (select coalesce(array_agg(t.nombre order by t.nombre), '{}') from tipos t where t.codigo = any(promos.tipos)) as categorias from promos`;
 export async function promosVigentes(sucursal: string, db: Db = pool): Promise<Promo[]> {
   const r = await db.query<Promo>(
@@ -579,7 +579,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     }
     const subtotal = prods.reduce((s, p, i) => s + p.precio * items[i].cant, 0);
     // Promo: la elige el servidor con las promos de la base (lo que diga la pantalla no cuenta). El descuento especial la reemplaza.
-    const auto = especial ? { promo: null, descuento: 0, detalle: null } : mejorPromo(await promosVigentes(sucursal, c), prods.map((p, i) => ({ tipo: p.tipo, precio: p.precio, cant: items[i].cant })));
+    const auto = especial ? { promo: null, descuento: 0, detalle: null } : mejorPromo(promosParaMedios(await promosVigentes(sucursal, c), pagos.map((p) => p.medioId)), prods.map((p, i) => ({ tipo: p.tipo, precio: p.precio, cant: items[i].cant })));
     const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
     const promoNombre = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : null;
     // Lo que se paga a "precio de lista" despues de la promo: sobre eso se aplican los medios de pago.
