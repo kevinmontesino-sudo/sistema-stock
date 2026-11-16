@@ -163,11 +163,14 @@ export async function ticketCierreEscpos(c: CierreCaja, medios: MedioDia[]) {
   r.izqDer(`${c.ventas} ventas · ${c.unidades} prendas`, pesos(medios.reduce((s, x) => s + x.monto, 0)), true);
   for (const x of medios) r.izqDer(`${x.nombre} (${x.ventas})`, pesos(x.monto));
   if (c.notasEmitidas > 0) r.izqDer(`Notas de crédito emitidas (${c.notasEmitidas})`, pesos(c.notasMonto));
-  r.regla().centro("EFECTIVO", true);
-  r.izqDer("Fondo con que abrió", pesos(c.fondoInicial)).izqDer("+ Cobrado en efectivo", pesos(c.esperado.efectivo ?? 0));
-  if (c.retiros > 0) r.izqDer(`- Retiros: ${c.retirosMotivo ?? ""}`, pesos(c.retiros));
-  r.izqDer("Debería haber", pesos(c.efectivoEsperado)).izqDer("Contado", pesos(c.efectivoContado));
+  r.regla().centro("EFECTIVO EN CAJA", true);
+  r.izqDer("Abrió con", pesos(c.fondoInicial)).izqDer("+ Cobrado en efectivo", pesos(c.esperado.efectivo ?? 0));
+  if (c.retiros > 0) r.izqDer(`- Pagos: ${c.retirosMotivo ?? ""}`, pesos(c.retiros));
+  r.izqDer("Debería haber", pesos(c.efectivoEsperado)).izqDer("Contó al cerrar", pesos(c.efectivoContado));
   r.izqDer(c.diferencia === 0 ? "DIFERENCIA" : c.diferencia > 0 ? "SOBRA" : "FALTA", c.diferencia === 0 ? "$0 · OK" : pesos(Math.abs(c.diferencia)), true);
+  if (c.fondoSiguiente !== null) {
+    r.regla().izqDer("Queda en caja p/ mañana", pesos(c.fondoSiguiente), true).izqDer("A caja fuerte", pesos(c.efectivoContado - c.fondoSiguiente), true);
+  }
   const otros = Object.entries(c.contado).filter(([id]) => id !== "efectivo");
   if (otros.length) {
     r.regla().centro("OTROS MEDIOS (lo que contó el local)");

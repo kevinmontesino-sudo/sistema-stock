@@ -568,6 +568,20 @@ try {
     igual("Cambio en otro local: suma al local donde se hace", [await stockDe(A, "zelarrayan"), await stockDe(A, LOCAL)], [antesZel + 1, antesWhite]);
     igual("Cambio en otro local: nota vigente", n.estado, "vigente");
   });
+  await paso("Cierre de caja: abre, cuenta, deja y caja fuerte", async () => {
+    const ci = await import("../lib/cierre");
+    const u = { id: 1, nombre: "ZZ Staging" };
+    const base = { fondoInicial: 100000, retiros: 0, retirosMotivo: "", otrosContados: {}, observaciones: "" };
+    await debeFallar("Cierre: falta lo que se deja para mañana", () => ci.cerrarCaja(LOCAL, "2020-01-05", { ...base, efectivoContado: 100000, fondoSiguiente: undefined as unknown as number }, u), /Falta/);
+    await debeFallar("Cierre: no se deja mas de lo contado", () => ci.cerrarCaja(LOCAL, "2020-01-05", { ...base, efectivoContado: 100000, fondoSiguiente: 150000 }, u), /más de lo que contaste/);
+    const c = await ci.cerrarCaja(LOCAL, "2020-01-05", { ...base, efectivoContado: 100000, fondoSiguiente: 80000 }, u);
+    igual("Cierre: guarda lo que queda en la caja", [c.fondoSiguiente, c.efectivoContado - (c.fondoSiguiente ?? 0)], [80000, 20000]);
+    igual("Cierre: sin ventas ese dia, debe haber = fondo", [c.efectivoEsperado, c.diferencia], [100000, 0]);
+    const sig = await ci.resumenDia(LOCAL, "2020-01-06");
+    igual("Cierre: el dia siguiente abre con lo que se dejo", sig.fondoSugerido, 80000);
+    const cl = await pool.connect();
+    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from cierres_caja where cerrado_por = 'ZZ Staging' and dia = '2020-01-05'"); await cl.query("commit"); } finally { cl.release(); }
+  });
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;
     igual("Toda venta: pagos = total", await q(`select count(*)::int as n from ventas v

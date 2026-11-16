@@ -13,6 +13,7 @@ export type CierreCaja = {
   fondoInicial: number; retiros: number; retirosMotivo: string | null; ventas: number; unidades: number;
   esperado: Record<string, number>; contado: Record<string, number>;
   efectivoEsperado: number; efectivoContado: number; diferencia: number;
+  fondoSiguiente: number | null; // lo que se deja en la caja para el vuelto del dia siguiente (null en cierres viejos); el resto va a la caja fuerte
   notasEmitidas: number; notasMonto: number; observaciones: string | null;
 };
 export type MedioDia = { id: string; nombre: string; ventas: number; monto: number };
@@ -20,6 +21,7 @@ export type ResumenDia = {
   sucursal: string; dia: string; ventas: number; unidades: number; totalCobrado: number; medios: MedioDia[];
   pagadoConNotas: number; notasEmitidas: number; notasMonto: number;
   cierre: CierreCaja | null; ventasDespuesDelCierre: number;
+  fondoSugerido: number | null; // lo que dejo el ultimo cierre anterior de este local (con eso se abre la caja)
 };
 
 export async function hoyAR() {
@@ -34,14 +36,14 @@ const sucOk = (s: string) => { if (!empresa.sucursales.some((x) => x.id === s)) 
 type FilaCierre = {
   id: number; sucursal_id: string; dia: string; creado_en: Date; cerrado_por: string; fondo_inicial: number; retiros: number; retiros_motivo: string | null;
   ventas: number; unidades: number; esperado: Record<string, number>; contado: Record<string, number>; efectivo_esperado: number; efectivo_contado: number;
-  diferencia: number; notas_emitidas: number; notas_monto: number; observaciones: string | null;
+  diferencia: number; fondo_siguiente: number | null; notas_emitidas: number; notas_monto: number; observaciones: string | null;
 };
 const COLS = `id::int, sucursal_id, dia::text, creado_en, cerrado_por, fondo_inicial, retiros, retiros_motivo, ventas, unidades, esperado, contado,
-  efectivo_esperado, efectivo_contado, diferencia, notas_emitidas, notas_monto, observaciones`;
+  efectivo_esperado, efectivo_contado, diferencia, fondo_siguiente, notas_emitidas, notas_monto, observaciones`;
 const aCierre = (c: FilaCierre): CierreCaja => ({
   id: c.id, sucursal: c.sucursal_id, dia: c.dia, creado: c.creado_en.toISOString(), cerradoPor: c.cerrado_por, fondoInicial: c.fondo_inicial,
   retiros: c.retiros, retirosMotivo: c.retiros_motivo, ventas: c.ventas, unidades: c.unidades, esperado: c.esperado, contado: c.contado,
-  efectivoEsperado: c.efectivo_esperado, efectivoContado: c.efectivo_contado, diferencia: c.diferencia, notasEmitidas: c.notas_emitidas,
+  efectivoEsperado: c.efectivo_esperado, efectivoContado: c.efectivo_contado, diferencia: c.diferencia, fondoSiguiente: c.fondo_siguiente, notasEmitidas: c.notas_emitidas,
   notasMonto: c.notas_monto, observaciones: c.observaciones,
 });
 
@@ -66,13 +68,16 @@ export async function resumenDia(sucursal: string, dia: string): Promise<Resumen
   const despues = cierre
     ? (await pool.query<{ n: number }>(`select count(*)::int as n from ventas v where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and v.creado_en > $3`, [sucursal, dia, cierre.creado])).rows[0].n
     : 0;
+  const ant = await pool.query<{ f: number | null }>(
+    "select fondo_siguiente as f from cierres_caja where sucursal_id = $1 and dia < $2::date and fondo_siguiente is not null order by dia desc limit 1", [sucursal, dia]);
   return {
+    fondoSugerido: ant.rows[0]?.f ?? null,
     sucursal, dia, ventas: v.rows[0].ventas, unidades: v.rows[0].unidades, medios: m.rows, totalCobrado: m.rows.reduce((s, x) => s + x.monto, 0),
     pagadoConNotas: n.rows[0].monto, notasEmitidas: e.rows[0].n, notasMonto: e.rows[0].monto, cierre, ventasDespuesDelCierre: despues,
   };
 }
 
-export type DatosCierre = { fondoInicial: number; retiros: number; retirosMotivo: string; efectivoContado: number; otrosContados: Record<string, number>; observaciones: string };
+export type DatosCierre = { fondoInicial: number; retiros: number; retirosMotivo: string; efectivoContado: number; fondoSiguiente: number; otrosContados: Record<string, number>; observaciones: string };
 const monto = (v: unknown, que: string, obligatorio = true) => {
   if (v === null || v === undefined || v === "") { if (obligatorio) throw new ErrorNegocio(`Falta ${que}.`); return 0; }
   const n = Number(v);
@@ -100,6 +105,8 @@ async function cerrarCajaConCandado(sucursal: string, dia: string, d: DatosCierr
   const fondo = monto(d.fondoInicial, "el efectivo con el que abrió la caja", false);
   const retiros = monto(d.retiros, "el monto retirado", false);
   const contado = monto(d.efectivoContado, "el efectivo contado");
+  const dejado = monto(d.fondoSiguiente, "cuánto dejás en la caja para mañana (si no dejás nada, poné 0)");
+  if (dejado > contado) throw new ErrorNegocio("No podés dejar en la caja más de lo que contaste.");
   const motivo = (d.retirosMotivo ?? "").trim().slice(0, 200);
   if (retiros > 0 && !motivo) throw new ErrorNegocio("Si retiraste plata de la caja, escribí para qué (gasto, depósito en banco, etc.).");
   const r = await resumenDia(sucursal, dia);
@@ -115,10 +122,10 @@ async function cerrarCajaConCandado(sucursal: string, dia: string, d: DatosCierr
   try {
     const x = await pool.query<FilaCierre>(
       `insert into cierres_caja (sucursal_id, dia, usuario_id, cerrado_por, fondo_inicial, retiros, retiros_motivo, ventas, unidades, esperado, contado,
-         efectivo_esperado, efectivo_contado, diferencia, notas_emitidas, notas_monto, observaciones)
-       values ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) returning ${COLS}`,
+         efectivo_esperado, efectivo_contado, diferencia, fondo_siguiente, notas_emitidas, notas_monto, observaciones)
+       values ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) returning ${COLS}`,
       [sucursal, dia, usuario.id, usuario.nombre, fondo, retiros, motivo || null, r.ventas, r.unidades, JSON.stringify(esperado), JSON.stringify({ efectivo: contado, ...otros }),
-        efectivoEsperado, contado, diferencia, r.notasEmitidas, r.notasMonto, (d.observaciones ?? "").trim().slice(0, 500) || null],
+        efectivoEsperado, contado, diferencia, dejado, r.notasEmitidas, r.notasMonto, (d.observaciones ?? "").trim().slice(0, 500) || null],
     );
     return aCierre(x.rows[0]);
   } catch (e) {

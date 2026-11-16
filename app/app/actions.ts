@@ -345,16 +345,17 @@ export async function datosCierre(sucursal: string, dia: string) {
   });
 }
 
-export async function cerrarCajaAccion(sucursal: string, dia: string, d: { fondoInicial: unknown; retiros: unknown; retirosMotivo: unknown; efectivoContado: unknown; otrosContados: unknown; observaciones: unknown }) {
+export async function cerrarCajaAccion(sucursal: string, dia: string, d: { fondoInicial: unknown; retiros: unknown; retirosMotivo: unknown; efectivoContado: unknown; fondoSiguiente: unknown; otrosContados: unknown; observaciones: unknown }) {
   return seguro("vender", async (u) => {
     const otros: Record<string, number> = {};
     if (d.otrosContados && typeof d.otrosContados === "object") for (const [k, v] of Object.entries(d.otrosContados)) if (v !== "" && v !== null && v !== undefined) otros[k] = ent(v);
     const c = await cierre.cerrarCaja(suc(u, txt(sucursal)), txt(dia), {
       fondoInicial: ent(d.fondoInicial || 0), retiros: ent(d.retiros || 0), retirosMotivo: txt(d.retirosMotivo),
       efectivoContado: d.efectivoContado === "" || d.efectivoContado === null || d.efectivoContado === undefined ? (undefined as unknown as number) : ent(d.efectivoContado),
+      fondoSiguiente: d.fondoSiguiente === "" || d.fondoSiguiente === null || d.fondoSiguiente === undefined ? (undefined as unknown as number) : ent(d.fondoSiguiente),
       otrosContados: otros, observaciones: txt(d.observaciones),
     }, { id: u.id, nombre: u.nombre });
-    await auditar("caja_cerrada", { sucursal: c.sucursal, dia: c.dia, efectivoEsperado: c.efectivoEsperado, efectivoContado: c.efectivoContado, diferencia: c.diferencia, ventas: c.ventas });
+    await auditar("caja_cerrada", { sucursal: c.sucursal, dia: c.dia, efectivoEsperado: c.efectivoEsperado, efectivoContado: c.efectivoContado, fondoSiguiente: c.fondoSiguiente, diferencia: c.diferencia, ventas: c.ventas });
     return { cierre: c };
   });
 }
