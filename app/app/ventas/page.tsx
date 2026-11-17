@@ -31,6 +31,7 @@ export default function VentasPage() {
   const [ventas, setVentas] = useState<VentaListada[] | null>(null);
   const [error, setError] = useState("");
   const [filtro, setFiltro] = useState("");
+  const [medioFiltro, setMedioFiltro] = useState("");   // "" = todos los medios de pago
   const [nuevasPrimero, setNuevasPrimero] = useState(false);
   const [reimpreso, setReimpreso] = useState<DatosTicket | null>(null);
   const [aviso, setAviso] = useState("");
@@ -56,11 +57,16 @@ export default function VentasPage() {
 
   const lista = useMemo(() => {
     const q = filtro.trim().toLowerCase();
-    const f = (ventas ?? []).filter((v) => !q || v.codigo.toLowerCase().includes(q) || v.items.some((i) => i.nombre.toLowerCase().includes(q)));
+    const f = (ventas ?? []).filter((v) => (!q || v.codigo.toLowerCase().includes(q) || v.items.some((i) => i.nombre.toLowerCase().includes(q)))
+      && (!medioFiltro || v.pagos.some((p) => p.medio === medioFiltro)));
     return nuevasPrimero ? [...f].reverse() : f;
-  }, [ventas, filtro, nuevasPrimero]);
+  }, [ventas, filtro, medioFiltro, nuevasPrimero]);
+  // Medios con los que se pago algo en este periodo (para el desplegable).
+  const mediosDelPeriodo = useMemo(() => [...new Set((ventas ?? []).flatMap((v) => v.pagos.map((p) => p.medio)))].sort(), [ventas]);
+  // Lo cobrado con el medio elegido en una venta (en pagos mixtos es solo una parte del total).
+  const montoDelMedio = (v: VentaListada) => v.pagos.filter((p) => p.medio === medioFiltro).reduce((s, p) => s + p.monto, 0);
   const vigentes = lista.filter((v) => !v.anulada);
-  const total = vigentes.reduce((s, v) => s + v.total, 0);
+  const total = vigentes.reduce((s, v) => s + (medioFiltro ? montoDelMedio(v) : v.total), 0);
 
   async function anular(v: VentaListada) {
     if (ocupado) return;
@@ -116,6 +122,10 @@ export default function VentasPage() {
           ? <input type="date" value={dia} max={hoy()} onChange={(e) => setDia(e.target.value)} />
           : <input type="month" value={mes} max={hoy().slice(0, 7)} onChange={(e) => setMes(e.target.value)} />}
         <input type="search" value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Filtrar por prenda o ticket" style={{ flex: 1, minWidth: 200 }} />
+        <select value={medioFiltro} onChange={(e) => setMedioFiltro(e.target.value)} aria-label="Filtrar por medio de pago" title="Para separar, por ejemplo, las ventas por transferencia y facturarlas aparte">
+          <option value="">Todos los medios de pago</option>
+          {mediosDelPeriodo.map((m) => <option key={m} value={m}>Solo {m}</option>)}
+        </select>
         <label className="fila" style={{ gap: 6, fontSize: 14 }}>
           <input type="checkbox" checked={nuevasPrimero} onChange={(e) => setNuevasPrimero(e.target.checked)} /> Más nuevas primero
         </label>
@@ -126,9 +136,9 @@ export default function VentasPage() {
       <div className="tarjeta no-print">
         {ventas === null ? <p className="aviso">Cargando…</p> : lista.length === 0 ? <p className="aviso">No hay ventas en este período{filtro ? " con ese filtro" : ""}.</p> : (
           <>
-            <p style={{ marginTop: 0 }}><strong>{vigentes.length} venta{vigentes.length === 1 ? "" : "s"}</strong> · {pesos(total)}{vigentes.length < lista.length && <span className="interno"> · {lista.length - vigentes.length} anulada{lista.length - vigentes.length === 1 ? "" : "s"} (no suman)</span>}</p>
+            <p style={{ marginTop: 0 }}><strong>{vigentes.length} venta{vigentes.length === 1 ? "" : "s"}</strong> · {pesos(total)}{medioFiltro && <span className="interno"> cobrados con {medioFiltro}</span>}{vigentes.length < lista.length && <span className="interno"> · {lista.length - vigentes.length} anulada{lista.length - vigentes.length === 1 ? "" : "s"} (no suman)</span>}</p>
             <table>
-              <thead><tr><th>Fecha</th><th>Ticket</th><th>Prendas</th><th>Pagó</th><th className="der">Total</th><th /></tr></thead>
+              <thead><tr><th>Fecha</th><th>Ticket</th><th>Prendas</th><th>Pagó</th><th className="der">{medioFiltro ? `Con ${medioFiltro}` : "Total"}</th><th /></tr></thead>
               <tbody>
                 {lista.map((v) => (
                   <Fragment key={v.codigo}>
@@ -137,7 +147,7 @@ export default function VentasPage() {
                     <td><code>{v.codigo}</code>{v.anulada ? <strong style={{ textDecoration: "none", display: "inline-block" }}> · ANULADA</strong> : v.devuelta && <span className="interno"> · con devolución</span>}</td>
                     <td>{v.items.map((i) => `${i.cantidad} x ${i.nombre}`).join(", ")}</td>
                     <td>{v.medios}</td>
-                    <td className="der" style={{ whiteSpace: "nowrap" }}>{pesos(v.total)}</td>
+                    <td className="der" style={{ whiteSpace: "nowrap" }}>{pesos(medioFiltro ? montoDelMedio(v) : v.total)}{medioFiltro && montoDelMedio(v) !== v.total && <div className="interno">de {pesos(v.total)}</div>}</td>
                     <td style={{ minWidth: 190, textDecoration: "none" }}>
                       {!v.anulada && (
                         <span className="fila" style={{ gap: 6, flexWrap: "wrap" }}>

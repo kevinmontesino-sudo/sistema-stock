@@ -146,6 +146,7 @@ export type NotaCredito = {
 };
 export type VentaListada = {
   codigo: string; fecha: string; total: number; unidades: number; medios: string; devuelta: boolean; anulada: boolean;
+  pagos: { medio: string; monto: number }[];   // cuanto se pago con cada medio (para separar transferencias, etc.)
   items: { nombre: string; cantidad: number }[];
 };
 export type VentaDevolvible = {

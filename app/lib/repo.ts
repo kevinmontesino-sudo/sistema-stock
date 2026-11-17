@@ -718,13 +718,15 @@ export async function ventasListado(sucursal: string, desde: string, hasta: stri
   if (!fecha.test(desde) || !fecha.test(hasta) || desde > hasta) falla("Fechas inválidas");
   const dias = (Date.parse(hasta) - Date.parse(desde)) / 86_400_000;
   if (!(dias >= 0 && dias <= 62)) falla("Elegí un período de hasta 2 meses");
-  const r = await pool.query<{ codigo: string; fecha: Date; total: number; unidades: number; medios: string | null; devuelta: boolean; anulada: boolean; items: { nombre: string; cantidad: number }[] }>(
+  const r = await pool.query<{ codigo: string; fecha: Date; total: number; unidades: number; medios: string | null; devuelta: boolean; anulada: boolean; pagos: { medio: string; monto: number }[]; items: { nombre: string; cantidad: number }[] }>(
     `select v.codigo, v.creado_en as fecha, v.total, v.id,
        (select coalesce(sum(vi.cantidad), 0)::int from venta_items vi where vi.venta_id = v.id) as unidades,
        (select string_agg(distinct case when p.nota_credito_id is null then m.nombre else 'Nota de crédito' end, ' + ')
           from venta_pagos p join medios_pago m on m.id = p.medio_pago_id where p.venta_id = v.id) as medios,
        exists (select 1 from notas_credito n where n.venta_id = v.id) as devuelta,
        exists (select 1 from ventas_anuladas va where va.venta_id = v.id) as anulada,
+       (select coalesce(json_agg(json_build_object('medio', case when p.nota_credito_id is null then m.nombre else 'Nota de crédito' end, 'monto', p.monto) order by p.id), '[]'::json)
+          from venta_pagos p join medios_pago m on m.id = p.medio_pago_id where p.venta_id = v.id) as pagos,
        (select coalesce(json_agg(json_build_object('nombre', vi.nombre, 'cantidad', vi.cantidad) order by vi.id), '[]'::json)
           from venta_items vi where vi.venta_id = v.id) as items
      from ventas v
@@ -734,7 +736,7 @@ export async function ventasListado(sucursal: string, desde: string, hasta: stri
      order by v.creado_en, v.id limit 2000`,
     [sucursal, desde, hasta],
   );
-  return r.rows.map((x) => ({ codigo: x.codigo, fecha: x.fecha.toISOString(), total: x.total, unidades: x.unidades, medios: x.medios ?? "", devuelta: x.devuelta, anulada: x.anulada, items: x.items }));
+  return r.rows.map((x) => ({ codigo: x.codigo, fecha: x.fecha.toISOString(), total: x.total, unidades: x.unidades, medios: x.medios ?? "", devuelta: x.devuelta, anulada: x.anulada, pagos: x.pagos, items: x.items }));
 }
 
 // Marca una compra como regalo (se va a imprimir su ticket de regalo): desde ahora se puede cambiar hasta 30 dias en vez de 15.

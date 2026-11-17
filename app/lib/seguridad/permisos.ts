@@ -28,7 +28,7 @@ export const PERMISOS: Record<Permiso, Rol[]> = {
   eliminar_producto: ["admin", "deposito"],           // dar de baja una prenda cargada por error (baja logica: las ventas viejas se conservan)
   descuento_especial: ["admin", "encargado", "deposito"], // descuento a mano en la caja, con motivo y quien lo autorizo (lo ve la oficina)
   anular_venta: ["admin", "encargado", "deposito"], // anular un ticket equivocado (los locales, solo de hoy; la oficina, cualquier dia con la caja abierta)
-  retiro_empresa: ["admin", "encargado", "deposito"], // sacar prendas sin cobrar como regalo de la empresa (no es venta; lo ve la oficina)
+  retiro_empresa: TODOS,                              // sacar prendas sin cobrar como regalo de la empresa (no es venta; lo ve la oficina)
   admin: ["admin"],                                   // usuarios, auditoria, informes, promos
 };
 
