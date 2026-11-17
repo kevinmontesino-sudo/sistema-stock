@@ -112,8 +112,9 @@ async function nuevo() {
 
 // Venta marcada como regalo: dos tickets cortados, uno para el que compro (con importe) y otro de regalo (sin precios).
 export async function ticketsVentaEscpos(venta: DatosTicket, conRegalo: boolean) {
+  // Solo el normal (o solo el de regalo si la venta ya viene con regalo: true); con conRegalo salen los dos.
+  if (!conRegalo) return ticketVentaEscpos(venta);
   const a = await ticketVentaEscpos({ ...venta, regalo: false });
-  if (!conRegalo) return a;
   const b = await ticketVentaEscpos({ ...venta, regalo: true, recibido: undefined });
   const out = new Uint8Array(a.length + b.length);
   out.set(a);
