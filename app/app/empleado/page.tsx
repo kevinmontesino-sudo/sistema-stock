@@ -84,7 +84,7 @@ export default function CompraEmpleado() {
     <>
       <h1>Compra de empleado · {nombreSucursal(sucursal)}</h1>
       <p className="aviso" style={{ marginTop: -8 }}>
-        Las prendas bajan del stock y se cargan a la cuenta corriente del empleado en la ficha, al precio de efectivo.
+        Las prendas bajan del stock y se cargan a la cuenta corriente del empleado en la ficha, a precio Curva Plus (lista −25%, pago en efectivo).
       </p>
       {msg && <p className={`alerta ${msg.mala ? "mala" : ""}`} role="alert">{msg.texto}</p>}
       {datos && !datos.configurada && <p className="alerta mala">Todavía no está conectada la ficha. Un administrador tiene que configurarla (FICHA_URL y FICHA_API_KEY).</p>}

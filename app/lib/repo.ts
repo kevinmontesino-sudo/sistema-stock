@@ -298,7 +298,8 @@ export async function compraEmpleado(sucursal: string, empleado: { id: number; n
       if (!p) return falla(`La prenda ${i.sku} ya no existe o fue dada de baja`);
       const hay = await stockActual(c, p.sku, i.origen);
       if (hay < i.cant) falla(hay <= 0 ? `${p.nombre} no tiene stock en ${nombreSucursal(i.origen)}` : `De ${p.nombre} solo hay ${hay} en ${nombreSucursal(i.origen)}`);
-      const monto = precioDeMedio({ precio: p.precio, preciosMedio: p.preciosMedio }, efvo) * i.cant;
+      // Precio de empleado = Curva Plus (como una venta de Depósito con Curva Plus pagada en efectivo): lista -25%, y encima el precio de efectivo.
+      const monto = Math.round(precioDeMedio({ precio: p.precio, preciosMedio: p.preciosMedio }, efvo) * i.cant * (1 - empresa.curvaPlus.pct / 100));
       if (!(monto > 0)) falla(`${p.nombre} no tiene precio: no se puede cargar a la cuenta`);
       await sumarStock(c, p.sku, i.origen, -i.cant);
       await mov(c, p.sku, i.cant, i.origen, null, "ajuste", { motivo: `Compra de empleado: ${empleado.nombre} (ficha #${empleado.id}) ${codigo}` });

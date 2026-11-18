@@ -641,11 +641,12 @@ try {
       await repo.ajustarStock(A, LOCAL, 7, "prueba compra de empleado");
       const precio = (await repo.productoPorSku(A))!.precio;
       const unit = Math.round(precio * (1 + pct("efectivo") / 100));
+      const montoEmp = Math.round(unit * 2 * 0.75); // Curva Plus: lista -25% y encima efectivo
       const antes = await stockDe(A, LOCAL);
       await debeFallar("Empleado: no alcanza el stock", () => repo.compraEmpleado(LOCAL, emps[0], [{ sku: A, cant: antes + 1 }], null, null), /solo hay/);
       const c = await repo.compraEmpleado(LOCAL, emps[0], [{ sku: A, cant: 2 }], null, null);
       igual("Empleado: baja el stock", await stockDe(A, LOCAL), antes - 2);
-      igual("Empleado: monto = efectivo x cantidad", [c.total, c.unidades], [unit * 2, 2]);
+      igual("Empleado: monto = Curva Plus x efectivo x cantidad", [c.total, c.unidades], [montoEmp, 2]);
       const fila = (await pool.query("select estado, monto, empleado_id, detalle, referencia from consumos_empleado where codigo = $1", [c.codigo])).rows;
       igual("Empleado: queda pendiente en la cola", [fila.length, fila[0].estado, fila[0].empleado_id], [1, "pendiente", 16]);
       check("Empleado: el detalle dice el producto", /^Picking Stock - 2 x .*\(/.test(fila[0].detalle), fila[0].detalle);
@@ -657,7 +658,7 @@ try {
       const e2 = await ficha.enviarPendientes();
       const env = recibidos.get(fila[0].referencia);
       igual("Ficha: al volver, se envia", [e2.enviados, (await pool.query("select estado from consumos_empleado where codigo = $1", [c.codigo])).rows[0].estado], [1, "enviado"]);
-      igual("Ficha: recibe empleado, monto y referencia", [env?.empleadoId, env?.monto, env?.referencia], [16, unit * 2, fila[0].referencia]);
+      igual("Ficha: recibe empleado, monto y referencia", [env?.empleadoId, env?.monto, env?.referencia], [16, montoEmp, fila[0].referencia]);
       // Reenvio de lo mismo (por ejemplo si la respuesta se perdio): la ficha lo reconoce y no duplica.
       await pool.query("update consumos_empleado set estado = 'pendiente' where codigo = $1", [c.codigo]);
       await ficha.enviarPendientes();
