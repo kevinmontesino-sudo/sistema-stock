@@ -1,6 +1,7 @@
 "use server";
 import * as repo from "@/lib/repo";
 import * as cierre from "@/lib/cierre";
+import * as ficha from "@/lib/ficha";
 import { nombreSucursal, preciosDe, type Reparto } from "@/lib/util";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
@@ -232,6 +233,44 @@ export async function marcarRegaloAccion(codigo: string) {
     const r = await repo.marcarRegalo(txt(codigo), sucursalFija(u.rol, u.sucursalId), u.id);
     if (r.nueva) await auditar("ticket_regalo", { venta: txt(codigo), dias: r.dias });
     return { dias: r.dias };
+  });
+}
+
+// ---- Compras de empleados (cuenta corriente en el sistema de ficha) ----
+// Lista de empleados activos de la ficha, cuantas cargas faltan enviarle y las ultimas compras.
+export async function datosCompraEmpleado() {
+  return seguro("compra_empleado", async () => {
+    const configurada = ficha.fichaConfigurada();
+    let empleados: ficha.EmpleadoFicha[] = [];
+    let aviso = "";
+    if (configurada) {
+      try { empleados = await ficha.empleadosActivos(); } catch (e) { aviso = e instanceof repo.ErrorNegocio ? e.message : "No se pudo consultar a la ficha."; }
+    }
+    return { configurada, empleados, aviso, pendientes: await ficha.contarPendientes(), ultimas: await ficha.ultimasCompras(15) };
+  });
+}
+
+export async function comprarComoEmpleado(sucursal: string, empleadoId: number, items: { sku: string; cant: number }[]) {
+  return seguro("compra_empleado", async (u) => {
+    if (!ficha.fichaConfigurada()) throw new repo.ErrorNegocio("Falta configurar la conexión con la ficha. Avisale a un administrador.");
+    // El empleado tiene que estar en la lista de activos de la ficha (no se confia en el nombre que manda la pantalla).
+    const emp = (await ficha.empleadosActivos()).find((e) => e.id === ent(empleadoId));
+    if (!emp) throw new repo.ErrorNegocio("Ese empleado no figura entre los activos de la ficha.");
+    const compra = await repo.compraEmpleado(
+      suc(u, txt(sucursal)), { id: emp.id, nombre: emp.nombre },
+      (Array.isArray(items) ? items : []).map((i) => ({ sku: txt(i.sku), cant: ent(i.cant) })),
+      origenesStock(u.rol, u.sucursalId), u.id,
+    );
+    // Se intenta cargar en la ficha ya; si no responde, queda pendiente y se reenvia solo (el stock ya bajó).
+    const envio = await ficha.enviarPendientes().catch(() => null);
+    return { compra, enviados: envio?.enviados ?? 0, pendientes: envio?.pendiente ?? (await ficha.contarPendientes()).pendiente };
+  });
+}
+
+export async function reintentarFicha() {
+  return seguro("compra_empleado", async () => {
+    const r = await ficha.enviarPendientes();
+    return { enviados: r.enviados, pendientes: r.pendiente, conError: r.error };
   });
 }
 

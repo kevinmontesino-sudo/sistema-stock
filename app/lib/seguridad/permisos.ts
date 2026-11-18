@@ -8,7 +8,7 @@ export const NOMBRE_ROL: Record<Rol, string> = { admin: "Administrador", encarga
 // Que puede hacer cada rol. TODA accion del servidor pide uno de estos permisos: es el unico lugar para ajustarlos.
 export type Permiso =
   | "catalogo" | "vender" | "recibir" | "devolver" | "deshacer_recepcion" | "cargar" | "imprimir_etiquetas"
-  | "mover" | "cancelar_envio" | "ver_totales" | "remito" | "editar_producto" | "ajustar_stock" | "eliminar_producto" | "descuento_especial" | "anular_venta" | "retiro_empresa" | "admin";
+  | "mover" | "cancelar_envio" | "ver_totales" | "remito" | "editar_producto" | "ajustar_stock" | "eliminar_producto" | "descuento_especial" | "anular_venta" | "retiro_empresa" | "compra_empleado" | "admin";
 
 const TODOS: Rol[] = ["admin", "encargado", "vendedor", "deposito"];
 export const PERMISOS: Record<Permiso, Rol[]> = {
@@ -29,6 +29,7 @@ export const PERMISOS: Record<Permiso, Rol[]> = {
   descuento_especial: ["admin", "encargado", "deposito"], // descuento a mano en la caja, con motivo y quien lo autorizo (lo ve la oficina)
   anular_venta: ["admin", "encargado", "deposito"], // anular un ticket equivocado (los locales, solo de hoy; la oficina, cualquier dia con la caja abierta)
   retiro_empresa: TODOS,                              // sacar prendas sin cobrar como regalo de la empresa (no es venta; lo ve la oficina)
+  compra_empleado: TODOS,                             // prendas que se lleva un empleado: baja del stock de SU local y se carga a su cuenta corriente en la ficha (cualquier cuenta)
   admin: ["admin"],                                   // usuarios, auditoria, informes, promos
 };
 

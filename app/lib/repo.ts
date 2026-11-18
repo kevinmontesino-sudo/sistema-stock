@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import { DEPOSITO, empresa } from "./empresa.config";
 import { type Db, pool, tx } from "./db";
@@ -6,7 +7,7 @@ import { descuentoEspecial, mediosParaPromo, mejorPromo, promosParaMedios, TOPE_
 import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, tipoDesdeNombre, totalReparto,
-  calcularPagos, mediosDelCarrito, NO_ANULADA, DIAS_DEVOLUCION, DIAS_DEVOLUCION_REGALO, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
+  calcularPagos, mediosDelCarrito, NO_ANULADA, precioDeMedio, DIAS_DEVOLUCION, DIAS_DEVOLUCION_REGALO, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
 } from "./util";
 
 // Error esperado: se le muestra el mensaje al usuario.
@@ -270,6 +271,48 @@ export async function retiroEmpresa(sucursal: string, itemsPedidos: { sku: strin
     await auditar("retiro_empresa", { sucursal, motivo, unidades, valorLista, items: detalle }, { db: c });
     const ahora = await c.query<{ t: Date }>("select now() as t");
     return { unidades, valorLista, fecha: ahora.rows[0].t.toISOString(), sucursal, para: motivo, items: detalle.map((d) => ({ sku: d.sku, nombre: d.nombre, cant: d.cant })) };
+  });
+}
+
+// Compra de un empleado: las prendas salen del stock y quedan en la cola para cargarse a su cuenta corriente en la ficha (ver lib/ficha.ts).
+// El monto es el precio de EFECTIVO de cada prenda (lista -20%, o el efectivo a mano de un producto unico), calculado aca: no lo manda la pantalla.
+// El empleado ya viene validado contra la lista de activos de la ficha.
+export async function compraEmpleado(sucursal: string, empleado: { id: number; nombre: string }, itemsPedidos: { sku: string; cant: number; origen?: string }[], permitidos: string[] | null | undefined, usuarioId: number | null) {
+  if (!esSucursal(sucursal)) falla("Sucursal inexistente");
+  if (!Number.isInteger(empleado.id) || empleado.id <= 0 || !empleado.nombre.trim()) falla("Elegí el empleado");
+  if (itemsPedidos.length === 0) falla("No hay prendas");
+  for (const i of itemsPedidos) {
+    if (!Number.isInteger(i.cant) || i.cant < 1 || i.cant > 200) falla("Cantidad inválida");
+    if (!origenOk(sucursal, i.origen || permitidos?.[0] || sucursal, permitidos)) falla("Esta cuenta no puede sacar stock de otra sucursal");
+  }
+  const items = itemsPedidos.map((i) => ({ ...i, origen: i.origen || permitidos?.[0] || sucursal })).sort((a, b) => a.sku.localeCompare(b.sku) || a.origen.localeCompare(b.origen));
+  if (new Set(items.map((i) => `${i.sku}|${i.origen}`)).size !== items.length) falla("Hay una prenda repetida");
+  return tx(async (c) => {
+    const efvo = (await c.query<MedioPago>("select id, nombre, ajuste_pct::float8 as \"ajustePct\" from medios_pago where id = 'efectivo'")).rows[0];
+    if (!efvo) return falla("No está configurado el medio de pago efectivo");
+    const codigo = "CE" + randomBytes(5).toString("hex").toUpperCase();
+    const lineas: { sku: string; nombre: string; cant: number; monto: number }[] = [];
+    let n = 0;
+    for (const i of items) {
+      const p = await productoPorSku(i.sku, c);
+      if (!p) return falla(`La prenda ${i.sku} ya no existe o fue dada de baja`);
+      const hay = await stockActual(c, p.sku, i.origen);
+      if (hay < i.cant) falla(hay <= 0 ? `${p.nombre} no tiene stock en ${nombreSucursal(i.origen)}` : `De ${p.nombre} solo hay ${hay} en ${nombreSucursal(i.origen)}`);
+      const monto = precioDeMedio({ precio: p.precio, preciosMedio: p.preciosMedio }, efvo) * i.cant;
+      if (!(monto > 0)) falla(`${p.nombre} no tiene precio: no se puede cargar a la cuenta`);
+      await sumarStock(c, p.sku, i.origen, -i.cant);
+      await mov(c, p.sku, i.cant, i.origen, null, "ajuste", { motivo: `Compra de empleado: ${empleado.nombre} (ficha #${empleado.id}) ${codigo}` });
+      n++;
+      const detalle = `Picking Stock - ${i.cant > 1 ? `${i.cant} x ` : ""}${p.nombre} (${p.sku})`.slice(0, 190);
+      await c.query(
+        `insert into consumos_empleado (codigo, referencia, empleado_id, empleado_nombre, sku, cantidad, sucursal_id, monto, detalle, usuario_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [codigo, `${codigo}-${n}`, empleado.id, empleado.nombre.slice(0, 80), p.sku, i.cant, i.origen, monto, detalle, usuarioId]);
+      lineas.push({ sku: p.sku, nombre: p.nombre, cant: i.cant, monto });
+    }
+    const total = lineas.reduce((s, l) => s + l.monto, 0);
+    await auditar("compra_empleado", { codigo, empleado: empleado.nombre, empleadoId: empleado.id, sucursal, total, items: lineas }, { db: c });
+    return { codigo, empleado: empleado.nombre, total, unidades: lineas.reduce((s, l) => s + l.cant, 0), items: lineas };
   });
 }
 

@@ -597,6 +597,84 @@ try {
     const n = await repo.emitirNota(LOCAL, v.codigo, [{ itemId: dv.items[0].id, cant: 1, falladas: 0 }], null);
     igual("Regalo: la nota se emite", n.estado, "vigente");
   });
+  await paso("Compra de empleado: baja stock, cola y ficha", async () => {
+    const http = await import("node:http");
+    const ficha = await import("../lib/ficha");
+    const CLAVE = "clave-de-prueba-ficha";
+    // Ficha simulada: pide la llave, lista empleados y guarda consumos (reconoce la referencia repetida). `modo` simula caida o rechazo.
+    const recibidos = new Map<string, Record<string, unknown>>();
+    let modo: "ok" | "caido" | "rechaza" = "ok";
+    const srv = http.createServer((req, res) => {
+      let cuerpo = "";
+      req.on("data", (d) => (cuerpo += d));
+      req.on("end", () => {
+        const sal = (st: number, o: unknown) => { res.writeHead(st, { "Content-Type": "application/json" }); res.end(JSON.stringify(o)); };
+        if (req.headers["x-api-key"] !== CLAVE) return sal(401, { error: "No autorizado" });
+        if (req.url === "/api/empleados-activos") return sal(200, [{ id: 16, nombre: "Micaela De Giorgio", sucursal: "Ingeniero White" }, { id: 19, nombre: "Juan Harrey", sucursal: "Depósito" }]);
+        if (req.url === "/api/compras-empleado" && req.method === "POST") {
+          if (modo === "caido") return sal(503, { error: "caido" });
+          if (modo === "rechaza") return sal(400, { error: "Empleado inexistente o no está activo" });
+          const b = JSON.parse(cuerpo) as Record<string, unknown>;
+          const ya = recibidos.get(String(b.referencia));
+          if (ya) return sal(200, ya);
+          recibidos.set(String(b.referencia), b);
+          return sal(201, b);
+        }
+        sal(404, {});
+      });
+    });
+    await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", ok));
+    const puerto = (srv.address() as { port: number }).port;
+    const antesUrl = process.env.FICHA_URL, antesKey = process.env.FICHA_API_KEY;
+    try {
+      delete process.env.FICHA_URL; delete process.env.FICHA_API_KEY;
+      igual("Ficha: sin configurar se nota", ficha.fichaConfigurada(), false);
+      process.env.FICHA_URL = `http://127.0.0.1:${puerto}`; process.env.FICHA_API_KEY = "otra-clave";
+      await debeFallar("Ficha: con llave mala no lista empleados", () => ficha.empleadosActivos(true), /rechaz/);
+      process.env.FICHA_API_KEY = CLAVE;
+      const emps = await ficha.empleadosActivos(true);
+      igual("Ficha: lista empleados activos", emps.map((e) => e.id), [16, 19]);
+      process.env.FICHA_URL = "http://ficha.example.com";
+      igual("Ficha: http que no es local no se acepta", ficha.fichaConfigurada(), false);
+      process.env.FICHA_URL = `http://127.0.0.1:${puerto}`;
+
+      await repo.ajustarStock(A, LOCAL, 7, "prueba compra de empleado");
+      const precio = (await repo.productoPorSku(A))!.precio;
+      const unit = Math.round(precio * (1 + pct("efectivo") / 100));
+      const antes = await stockDe(A, LOCAL);
+      await debeFallar("Empleado: no alcanza el stock", () => repo.compraEmpleado(LOCAL, emps[0], [{ sku: A, cant: antes + 1 }], null, null), /solo hay/);
+      const c = await repo.compraEmpleado(LOCAL, emps[0], [{ sku: A, cant: 2 }], null, null);
+      igual("Empleado: baja el stock", await stockDe(A, LOCAL), antes - 2);
+      igual("Empleado: monto = efectivo x cantidad", [c.total, c.unidades], [unit * 2, 2]);
+      const fila = (await pool.query("select estado, monto, empleado_id, detalle, referencia from consumos_empleado where codigo = $1", [c.codigo])).rows;
+      igual("Empleado: queda pendiente en la cola", [fila.length, fila[0].estado, fila[0].empleado_id], [1, "pendiente", 16]);
+      check("Empleado: el detalle dice el producto", /^Picking Stock - 2 x .*\(/.test(fila[0].detalle), fila[0].detalle);
+
+      modo = "caido";
+      const e1 = await ficha.enviarPendientes();
+      igual("Ficha caida: no se pierde, sigue pendiente", [e1.enviados, (await pool.query("select estado, intentos from consumos_empleado where codigo = $1", [c.codigo])).rows[0]], [0, { estado: "pendiente", intentos: 1 }]);
+      modo = "ok";
+      const e2 = await ficha.enviarPendientes();
+      const env = recibidos.get(fila[0].referencia);
+      igual("Ficha: al volver, se envia", [e2.enviados, (await pool.query("select estado from consumos_empleado where codigo = $1", [c.codigo])).rows[0].estado], [1, "enviado"]);
+      igual("Ficha: recibe empleado, monto y referencia", [env?.empleadoId, env?.monto, env?.referencia], [16, unit * 2, fila[0].referencia]);
+      // Reenvio de lo mismo (por ejemplo si la respuesta se perdio): la ficha lo reconoce y no duplica.
+      await pool.query("update consumos_empleado set estado = 'pendiente' where codigo = $1", [c.codigo]);
+      await ficha.enviarPendientes();
+      igual("Ficha: reenviar la misma referencia no duplica", [recibidos.size, (await pool.query("select estado from consumos_empleado where codigo = $1", [c.codigo])).rows[0].estado], [1, "enviado"]);
+      // Rechazo (400): queda en error para que lo revise la oficina, no se reintenta solo.
+      const c2 = await repo.compraEmpleado(LOCAL, emps[1], [{ sku: A, cant: 1 }], null, null);
+      modo = "rechaza";
+      await ficha.enviarPendientes();
+      igual("Ficha rechaza: queda en error", (await pool.query("select estado from consumos_empleado where codigo = $1", [c2.codigo])).rows[0].estado, "error");
+      igual("Ficha: cuenta lo pendiente y lo rechazado", (await ficha.contarPendientes()).error >= 1, true);
+      await pool.query("update consumos_empleado set estado = 'enviado' where estado <> 'enviado' and codigo = $1", [c2.codigo]);
+    } finally {
+      srv.close();
+      if (antesUrl === undefined) delete process.env.FICHA_URL; else process.env.FICHA_URL = antesUrl;
+      if (antesKey === undefined) delete process.env.FICHA_API_KEY; else process.env.FICHA_API_KEY = antesKey;
+    }
+  });
   await paso("Cierre de caja: abre, cuenta, deja y caja fuerte", async () => {
     const ci = await import("../lib/cierre");
     const u = { id: 1, nombre: "ZZ Staging" };
