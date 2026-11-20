@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
-const VERSION = "1.1.1";
+const VERSION = "1.2.0";
 const PUERTO = Number(process.env.AGENTE_PUERTO) || 9101;
 const ORIGENES = (process.env.AGENTE_ORIGENES || "https://stock-caja-ventas.xmenosmasprendas.com,http://localhost:3000,http://127.0.0.1:3000")
   .split(",").map((s) => s.trim()).filter(Boolean);
@@ -125,6 +125,30 @@ const servidor = http.createServer(async (req, res) => {
       return res.end(`Agente de impresion de etiquetas v${VERSION}: funcionando.\nSistema: ${platform()}\nImpresoras de esta PC:\n  ${lista}\n`);
     }
 
+
+    // Prueba de lenguaje: se abre a mano en el navegador de esa PC (http://127.0.0.1:9101/probar?impresora=4206) y manda una etiqueta
+    // de prueba en TSPL, otra en ZPL y otra en EPL. La que salga impresa dice el lenguaje que habla la impresora.
+    if (req.method === "GET" && ruta === "/probar" && !origen) {
+      const sf = req.headers["sec-fetch-site"];
+      if (sf && sf !== "none") return responder(res, 403, { ok: false, error: "Abrilo escribiendo la direccion en el navegador" });
+      const q = new URL(req.url, "http://127.0.0.1").searchParams.get("impresora") || "";
+      const t = (n) => `TEXTO DE PRUEBA ${n}`;
+      const tspl = `SIZE 50 mm,30 mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 1,0\r\nCLS\r\nTEXT 16,16,"3",0,1,1,"${t("TSPL")}"\r\nBARCODE 16,60,"128",80,1,0,2,2,"123456"\r\nPRINT 1,1\r\n`;
+      const zpl = `^XA^CI0^PW400^LL240^FO16,16^A0N,28,16^FD${t("ZPL")}^FS^FO16,60^BY2^BCN,80,Y,N,N^FD123456^FS^PQ1^XZ\r\n`;
+      const epl = `\r\nN\r\nq400\r\nQ240,24\r\nA16,16,0,3,1,1,N,"${t("EPL")}"\r\nB16,60,0,1,2,2,80,B,"123456"\r\nP1\r\n`;
+      let texto;
+      try {
+        const nombre = await enCola(async () => {
+          const n = await buscarImpresora(q || "etiqueta");
+          await enviarCrudo(n, [tspl, zpl, epl].map((x) => Buffer.from(x, "latin1")));
+          return n;
+        });
+        texto = `Mande 3 etiquetas de prueba a "${nombre}".\nMira cual salio impresa: dice TSPL, ZPL o EPL.\n(si salen las 3 o ninguna, avisa)\n`;
+      } catch (e) { texto = `No se pudo: ${e.message}\n`; }
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end(texto);
+    }
+
     if (!permitido) return responder(res, 403, { ok: false, error: "Origen no permitido" });
 
     if (req.method === "GET" && ruta === "/estado") {
@@ -137,7 +161,7 @@ const servidor = http.createServer(async (req, res) => {
       const datos = JSON.parse(await leerCuerpo(req) || "{}");
       const trabajos = datos.trabajos;
       const valido = Array.isArray(trabajos) && trabajos.length >= 1 && trabajos.length <= 500
-        && trabajos.every((t) => typeof t === "string" && t.length < 40000 && t.startsWith("SIZE "));
+        && trabajos.every((t) => typeof t === "string" && t.length < 40000 && /^(SIZE |\^XA|\r?\nN\r?\n)/.test(t));
       if (!valido) return responder(res, 400, { ok: false, error: "Trabajos de impresion invalidos" }, cors);
       if (typeof datos.impresora !== "string" || datos.impresora.length > 60) return responder(res, 400, { ok: false, error: "Impresora invalida" }, cors);
       const r = await enCola(async () => {

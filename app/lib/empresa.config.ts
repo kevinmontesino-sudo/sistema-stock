@@ -43,6 +43,8 @@ export const empresa = {
   impresionEtiquetas: "agente" as "agente" | "directa" | "ventana" | "servidor",
   // Parte del nombre de la impresora de etiquetas tal como la ve el sistema (ej. "Xprinter XP-410B" o "Xprinter_XP_410B").
   impresoraEtiquetas: "410|470|4206",
+  // Lenguaje que habla la impresora de etiquetas: "tspl" (Xprinter, la mayoria), "zpl" (Zebra y copias) o "epl" (Eltron / Zebra LP). Para saber cual es la tuya: npm run etiquetas:probar.
+  lenguajeEtiquetas: "tspl" as "tspl" | "zpl" | "epl",
   // Impresora de tickets (rollo de 80 mm) tal como la ve cada PC: varias opciones separadas por "|" (Windows: "EPSON TM-T20IV Receipt"; Mac: la cola que se haya creado, ej. "ticket").
   impresoraTickets: "TM-T20|ticket",
   // Ajustes TSPL (si las etiquetas salen del reves o la separacion no coincide, se cambian aca).

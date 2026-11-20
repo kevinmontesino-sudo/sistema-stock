@@ -78,8 +78,62 @@ export function etiquetaTspl(e: DatosEtiqueta, copias: number) {
   return L.join("\r\n") + "\r\n";
 }
 
+// Posiciones comunes (en puntos) para ZPL y EPL: misma disposicion que la etiqueta TSPL.
+function disposicion(e: DatosEtiqueta) {
+  const ancho = Math.round(empresa.etiquetaMm.ancho * PUNTOS_MM);
+  const altoMm = e.altoMm ?? empresa.etiquetaMm.alto;
+  const alto = Math.round(altoMm * PUNTOS_MM);
+  const margen = 16;
+  const sku = soloAscii(e.sku);
+  const barraX = Math.max(0, Math.floor((ancho - modulos(sku) * 2) / 2));
+  const nombre = soloAscii(e.nombre);
+  const maxLinea = Math.floor((ancho - 2 * margen) / ANCHO_FUENTE["2"]);
+  const primera = `${sku}  ${nombre}`;
+  const lineas = primera.length <= maxLinea ? [primera] : partir(nombre, maxLinea - sku.length - 2, maxLinea);
+  const doble = lineas.length > 1;
+  const baja = alto <= 208;
+  const altoBarras = baja ? (doble ? 40 : 52) : doble ? 64 : 88;
+  const yBarras = baja ? (doble ? 8 : 10) : doble ? 10 : 14;
+  const y = baja ? (doble ? 54 : 68) : doble ? 82 : 110;
+  const textos: { x: number; y: number; t: string; grande: boolean }[] = [];
+  if (doble) textos.push({ x: margen, y, t: `${sku}  ${lineas[0]}`, grande: false }, { x: margen, y: y + (baja ? 20 : 22), t: lineas[1], grande: false });
+  else textos.push({ x: margen, y, t: lineas[0], grande: false });
+  const yPrecios = baja ? (doble ? 100 : 96) : doble ? 130 : 134;
+  const paso = baja ? 24 : 26;
+  e.precios.slice(0, 3).forEach((p, i) => {
+    const t = soloAscii(p.cuotas ? `${p.cuotas} cuotas de ${pesos(p.valor)}` : `${p.nombre}: ${pesos(p.valor)}`);
+    textos.push({ x: margen, y: yPrecios + i * paso, t, grande: t.length * ANCHO_FUENTE["3"] <= ancho - 2 * margen });
+  });
+  return { ancho, alto, altoMm, sku, barraX, altoBarras, yBarras, textos };
+}
+
+// Misma etiqueta en ZPL (Zebra y las que lo imitan). Fuente 0 escalable: grande ~ fuente 3 de TSPL, chica ~ fuente 2.
+export function etiquetaZpl(e: DatosEtiqueta, copias: number) {
+  const d = disposicion(e);
+  const L = [
+    "^XA", "^CI0", `^PW${d.ancho}`, `^LL${d.alto}`, "^LH0,0", "^PR4", `^MD${Math.max(0, Math.min(30, empresa.servidor.oscuridad * 2 - 10))}`,
+  ];
+  if (e.marco) L.push(`^FO0,0^GB${d.ancho},${d.alto},2^FS`);
+  L.push(`^FO${d.barraX},${d.yBarras}^BY2,3,${d.altoBarras}^BCN,${d.altoBarras},N,N,N^FD${d.sku}^FS`);
+  for (const t of d.textos) L.push(`^FO${t.x},${t.y}^A0N,${t.grande ? 24 : 22},${t.grande ? 14 : 12}^FD${t.t.replace(/[\^~]/g, " ")}^FS`);
+  L.push(`^PQ${Math.max(1, copias)},0,1,N`, "^XZ");
+  return L.join("\r\n") + "\r\n";
+}
+
+// Misma etiqueta en EPL2 (Eltron / Zebra LP-TLP viejas). Fuentes internas: 2 = 8x12, 3 = 10x16.
+export function etiquetaEpl(e: DatosEtiqueta, copias: number) {
+  const d = disposicion(e);
+  const L = ["", "N", `q${d.ancho}`, `Q${d.alto},${Math.round(empresa.tspl.separacionMm * PUNTOS_MM)}`, `D${Math.max(0, Math.min(15, empresa.servidor.oscuridad))}`, "ZT"];
+  if (e.marco) L.push(`X0,0,2,${d.ancho - 1},${d.alto - 1}`);
+  L.push(`B${d.barraX},${d.yBarras},0,1,2,2,${d.altoBarras},N,"${d.sku}"`);
+  for (const t of d.textos) L.push(`A${t.x},${t.y},0,${t.grande ? 3 : 2},1,1,N,"${t.t.replace(/"/g, "'")}"`);
+  L.push(`P${Math.max(1, copias)}`);
+  return L.join("\r\n") + "\r\n";
+}
+
 // Agrupa etiquetas iguales (misma prenda y precios) para imprimirlas con un solo comando.
-export function trabajosTspl(cola: DatosEtiqueta[]) {
+export function trabajosTspl(cola: DatosEtiqueta[], lenguaje: "tspl" | "zpl" | "epl" = empresa.lenguajeEtiquetas) {
+  const armar = lenguaje === "zpl" ? etiquetaZpl : lenguaje === "epl" ? etiquetaEpl : etiquetaTspl;
   const grupos = new Map<string, { e: DatosEtiqueta; n: number }>();
   for (const e of cola) {
     const k = `${e.altoMm ?? ""}|${e.sku}|${e.nombre}|${e.precios.map((p) => p.valor).join(",")}|${e.marco ? 1 : 0}`;
@@ -87,5 +141,5 @@ export function trabajosTspl(cola: DatosEtiqueta[]) {
     if (g) g.n++;
     else grupos.set(k, { e, n: 1 });
   }
-  return [...grupos.values()].map((g) => etiquetaTspl(g.e, g.n));
+  return [...grupos.values()].map((g) => armar(g.e, g.n));
 }
