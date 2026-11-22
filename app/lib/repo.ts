@@ -574,15 +574,12 @@ export async function vendedoresListado(soloActivos = true, db: Pick<typeof pool
 export async function vendedoresParaCaja(sucursal: string) {
   const todos = await vendedoresListado(true);
   const propios = todos.filter((v) => v.sucursalId === sucursal);
-  return { vendedores: [...propios, ...todos.filter((v) => v.sucursalId !== sucursal)], obligatorio: todos.length > 0 };
+  return { vendedores: [...propios, ...todos.filter((v) => v.sucursalId !== sucursal)] };
 }
 
-// Si ya hay vendedores cargados, cada venta tiene que decir quien la hizo. Si todavia no hay ninguno, se puede cobrar sin eso (no se frena la caja).
+// El vendedor es opcional (a veces el cliente se atiende solo): sin vendedor, la venta no suma comision a nadie.
 async function vendedorDeVenta(c: Pick<typeof pool, "query">, vendedorId: number | null | undefined) {
-  if (vendedorId === null || vendedorId === undefined) {
-    if ((await c.query("select 1 from vendedores where activo limit 1")).rowCount) falla("Elegí quién hizo la venta (Vendedor)");
-    return null;
-  }
+  if (vendedorId === null || vendedorId === undefined) return null;
   const r = await c.query<{ id: number; nombre: string; sucursalId: string }>(
     `select id::int as id, nombre, sucursal_id as "sucursalId" from vendedores where id = $1 and activo`, [vendedorId]);
   if (!r.rows[0]) falla("Ese vendedor ya no está activo. Elegí otro.");

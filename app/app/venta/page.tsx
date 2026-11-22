@@ -91,8 +91,9 @@ export default function VentaPage() {
   const [verEsp, setVerEsp] = useState(false);
   const [errEsp, setErrEsp] = useState("");
   const [recargaPromos, setRecargaPromos] = useState(0);
-  // Vendedor (comision): los de este local primero; se acuerda del ultimo que se uso en este equipo para no elegirlo en cada venta.
-  const [vend, setVend] = useState<{ suc: string; lista: Vendedor[]; obligatorio: boolean } | null>(null);
+  // Vendedor (comision): los de este local primero. Es opcional (sin vendedor = el cliente se atendio solo) y se borra despues de cada venta,
+  // para que la comision de una venta nunca le caiga a quien no la hizo.
+  const [vend, setVend] = useState<{ suc: string; lista: Vendedor[] } | null>(null);
   const [vendedorId, setVendedorId] = useState<number | null>(null);
   const [verOtros, setVerOtros] = useState(false);
   const [sel, setSel] = useState(-1);
@@ -106,20 +107,14 @@ export default function VentaPage() {
     let vivo = true;
     vendedoresDeCaja(sucursal).then((r) => {
       if (!vivo || !r.ok) return;
-      setVend({ suc: sucursal, lista: r.vendedores, obligatorio: r.obligatorio });
-      let guardado: number | null = null;
-      try { guardado = Number(localStorage.getItem(`vendedor-${sucursal}`)) || null; } catch { /* sin almacenamiento */ }
-      setVendedorId(guardado && r.vendedores.some((v) => v.id === guardado) ? guardado : null);
+      setVend({ suc: sucursal, lista: r.vendedores });
+      setVendedorId(null);
       setVerOtros(false);
     });
     return () => { vivo = false; };
   }, [sucursal]);
-  const elegirVendedor = (id: number) => {
-    setVendedorId(id);
-    try { localStorage.setItem(`vendedor-${sucursal}`, String(id)); } catch { /* sin almacenamiento */ }
-  };
+  const elegirVendedor = (id: number | null) => setVendedorId((actual) => (actual === id ? null : id));
   const vendedoresCaja = vend && vend.suc === sucursal ? vend : null;
-  const faltaVendedor = !!vendedoresCaja?.obligatorio && vendedorId === null;
 
   useEffect(() => {
     let vivo = true;
@@ -387,7 +382,6 @@ export default function VentaPage() {
 
   async function cobrar() {
     if (cobrando || !calc || !calc.ok) return;
-    if (faltaVendedor) return setAviso("Elegí quién hizo la venta (Vendedor)");
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
     const cobradas = pagas.filter((l) => l.cant > 0);
@@ -406,6 +400,7 @@ export default function VentaPage() {
       const g = await marcarRegaloAccion(r.venta.codigo);
       if (g.ok) { plazoRegalo = g.dias; comoImprimir = "ambos"; } else setAviso(`No se pudo marcar el regalo (${g.motivo}): se imprime el ticket normal.`);
     }
+    setVendedorId(null);
     setUltima({ ...r.venta, sucursal, plazoRegalo, recibido: pagoEfectivo && recibidoNum >= pagoEfectivo.monto ? recibidoNum : undefined });
     setImprimirComo(comoImprimir);
     setEsRegalo(false);
@@ -451,7 +446,6 @@ export default function VentaPage() {
   const textoCobrar = !lineas.length ? "Cobrar"
     : !calc ? (mixto ? "Escribí cuánto entrega el cliente" : "Elegí cómo paga")
     : !calc.ok ? "Completá el pago"
-    : faltaVendedor ? "Elegí quién vendió"
     : `Cobrar ${pesos(calc.total)} · ${calc.pagos.map((p) => p.nombre).join(" + ")}`;
 
   function aplicarEspecial(e: React.FormEvent) {
@@ -766,7 +760,7 @@ export default function VentaPage() {
           const elegidoOtro = otros.find((v) => v.id === vendedorId);
           return (
             <div className="vendedor-caja" style={{ margin: "8px 0" }}>
-              <strong style={{ fontSize: 15 }}>¿Quién vendió?</strong>
+              <strong style={{ fontSize: 15 }}>¿Quién vendió?</strong> <span className="aviso">· si el cliente se atendió solo, dejalo sin elegir</span>
               <div className="fila" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                 {propios.map((v) => (
                   <button key={v.id} type="button" className={vendedorId === v.id ? "principal chico" : "chico"} onClick={() => elegirVendedor(v.id)}>{v.nombre}</button>
@@ -792,7 +786,7 @@ export default function VentaPage() {
           <span>🎁 <strong>Es regalo</strong> <span className="aviso">· salen dos tickets: el del cliente con el importe y uno de regalo sin precios ❤</span></span>
         </label>
         <button className="principal boton-cobrar" onClick={cobrar}
-          disabled={lineas.length === 0 || !calc || !calc.ok || cobrando || faltaVendedor}>
+          disabled={lineas.length === 0 || !calc || !calc.ok || cobrando}>
           {cobrando ? "Registrando…" : textoCobrar}
         </button>
         </>)}

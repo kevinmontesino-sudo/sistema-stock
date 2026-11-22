@@ -46,7 +46,7 @@ export default function Vendedores() {
   return (
     <main className="contenedor">
       <h1>Vendedores y comisiones</h1>
-      <p className="aviso">Las personas que aparecen en la caja como «¿Quién vendió?». Cada una pertenece a una sucursal (ahí compite por su comisión), pero se puede elegir en la caja de cualquier sucursal. Mientras no haya ninguna cargada, la caja cobra sin pedir vendedor.</p>
+      <p className="aviso">Las personas que aparecen en la caja como «¿Quién vendió?». Cada una pertenece a una sucursal (ahí compite por su comisión), pero se puede elegir en la caja de cualquier sucursal. Elegir vendedor es opcional: si el cliente se atiende solo, la venta queda sin vendedor y no suma comisión a nadie.</p>
       {msg && <p className={msg.mala ? "error" : "ok"} role="status">{msg.texto}</p>}
 
       <form onSubmit={cargar} className="tarjeta" style={{ display: "grid", gap: 8, marginBottom: 16 }}>
