@@ -12,6 +12,7 @@ import { panelCompleto, validarParams } from "@/lib/informes";
 import { crearToken } from "@/lib/seguridad/token";
 import { crearPromo, desactivarPromo, descuentosEspeciales, listarPromos, type PromoNueva } from "@/lib/promosAdmin";
 import { listarTipos, retirosEmpresa } from "@/lib/repo";
+import * as repo from "@/lib/repo";
 
 // Acciones del panel de administracion: SOLO administradores (se verifica en cada una, no en la pantalla).
 type Resultado<T> = ({ ok: true } & T) | { ok: false; motivo: string };
@@ -237,6 +238,25 @@ export async function desactivarPromoAdmin(id: number) {
   return admin(async () => {
     const r = await desactivarPromo(Number(id));
     await auditar("promo_desactivada", r);
+    return {};
+  });
+}
+
+// ---- Vendedores (comisiones) ----
+export async function listarVendedoresAdmin() {
+  return admin(async () => ({ vendedores: await repo.vendedoresListado(false) }));
+}
+export async function cargarVendedores(sucursalId: string, nombres: string) {
+  return admin(async () => {
+    const r = await repo.vendedoresCargar(txt(sucursalId), txt(nombres).split(/[\n,;]+/));
+    await auditar("vendedores_cargados", { sucursal: txt(sucursalId), ...r });
+    return r;
+  });
+}
+export async function actualizarVendedor(id: number, datos: { nombre: string; sucursalId: string; activo: boolean }) {
+  return admin(async () => {
+    await repo.vendedorActualizar(Number(id), { nombre: txt(datos.nombre), sucursalId: txt(datos.sucursalId), activo: !!datos.activo });
+    await auditar("vendedor_actualizado", { id: Number(id), nombre: txt(datos.nombre), sucursal: txt(datos.sucursalId), activo: !!datos.activo });
     return {};
   });
 }

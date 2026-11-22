@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buscarProductos, cajaDeHoy, cobrarVenta, marcarRegaloAccion, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion } from "@/app/actions";
+import { buscarProductos, cajaDeHoy, cobrarVenta, marcarRegaloAccion, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion, vendedoresDeCaja } from "@/app/actions";
+import type { Vendedor } from "@/lib/repo";
 import { Ticket, TicketCortesia, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import { ticketCortesiaEscpos, ticketsVentaEscpos } from "@/lib/escpos";
@@ -90,12 +91,35 @@ export default function VentaPage() {
   const [verEsp, setVerEsp] = useState(false);
   const [errEsp, setErrEsp] = useState("");
   const [recargaPromos, setRecargaPromos] = useState(0);
+  // Vendedor (comision): los de este local primero; se acuerda del ultimo que se uso en este equipo para no elegirlo en cada venta.
+  const [vend, setVend] = useState<{ suc: string; lista: Vendedor[]; obligatorio: boolean } | null>(null);
+  const [vendedorId, setVendedorId] = useState<number | null>(null);
+  const [verOtros, setVerOtros] = useState(false);
   const [sel, setSel] = useState(-1);
   const lineasRef = useRef<Linea[]>([]);
   // Identifica este intento de cobro: si hay que reintentarlo tras un corte, el servidor no duplica la venta.
   const claveCobro = useRef(crypto.randomUUID());
 
   useEffect(() => { lineasRef.current = lineas; }, [lineas]);
+
+  useEffect(() => {
+    let vivo = true;
+    vendedoresDeCaja(sucursal).then((r) => {
+      if (!vivo || !r.ok) return;
+      setVend({ suc: sucursal, lista: r.vendedores, obligatorio: r.obligatorio });
+      let guardado: number | null = null;
+      try { guardado = Number(localStorage.getItem(`vendedor-${sucursal}`)) || null; } catch { /* sin almacenamiento */ }
+      setVendedorId(guardado && r.vendedores.some((v) => v.id === guardado) ? guardado : null);
+      setVerOtros(false);
+    });
+    return () => { vivo = false; };
+  }, [sucursal]);
+  const elegirVendedor = (id: number) => {
+    setVendedorId(id);
+    try { localStorage.setItem(`vendedor-${sucursal}`, String(id)); } catch { /* sin almacenamiento */ }
+  };
+  const vendedoresCaja = vend && vend.suc === sucursal ? vend : null;
+  const faltaVendedor = !!vendedoresCaja?.obligatorio && vendedorId === null;
 
   useEffect(() => {
     let vivo = true;
@@ -363,10 +387,11 @@ export default function VentaPage() {
 
   async function cobrar() {
     if (cobrando || !calc || !calc.ok) return;
+    if (faltaVendedor) return setAviso("Elegí quién hizo la venta (Vendedor)");
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
     const cobradas = pagas.filter((l) => l.cant > 0);
-    const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null]), pagos, especial, calc.total, regalosCarrito]))}`, especial, calc.total, regalosCarrito);
+    const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null]), pagos, especial, calc.total, regalosCarrito, vendedorId]))}`, especial, calc.total, regalosCarrito, vendedorId);
     setCobrando(false);
     // Si fallo (por ejemplo, cambiaron las promos), se vuelven a pedir: la pantalla muestra el total nuevo.
     if (!r.ok) { setRecargaPromos((x) => x + 1); return setAviso(r.motivo); }
@@ -426,6 +451,7 @@ export default function VentaPage() {
   const textoCobrar = !lineas.length ? "Cobrar"
     : !calc ? (mixto ? "Escribí cuánto entrega el cliente" : "Elegí cómo paga")
     : !calc.ok ? "Completá el pago"
+    : faltaVendedor ? "Elegí quién vendió"
     : `Cobrar ${pesos(calc.total)} · ${calc.pagos.map((p) => p.nombre).join(" + ")}`;
 
   function aplicarEspecial(e: React.FormEvent) {
@@ -734,12 +760,39 @@ export default function VentaPage() {
             </button>
           </div>
         ) : (<>
+        {vendedoresCaja && vendedoresCaja.lista.length > 0 && (() => {
+          const propios = vendedoresCaja.lista.filter((v) => v.sucursalId === sucursal);
+          const otros = vendedoresCaja.lista.filter((v) => v.sucursalId !== sucursal);
+          const elegidoOtro = otros.find((v) => v.id === vendedorId);
+          return (
+            <div className="vendedor-caja" style={{ margin: "8px 0" }}>
+              <strong style={{ fontSize: 15 }}>¿Quién vendió?</strong>
+              <div className="fila" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                {propios.map((v) => (
+                  <button key={v.id} type="button" className={vendedorId === v.id ? "principal chico" : "chico"} onClick={() => elegirVendedor(v.id)}>{v.nombre}</button>
+                ))}
+                {otros.length > 0 && (
+                  <select value={elegidoOtro ? elegidoOtro.id : ""} onChange={(e) => e.target.value && elegirVendedor(Number(e.target.value))}
+                    title="Alguien de otra sucursal que vendió acá" style={verOtros || elegidoOtro ? undefined : { opacity: 0.8 }}
+                    onFocus={() => setVerOtros(true)}>
+                    <option value="">{elegidoOtro ? elegidoOtro.nombre : "Otra sucursal…"}</option>
+                    {empresa.sucursales.filter((x) => x.id !== sucursal && otros.some((v) => v.sucursalId === x.id)).map((x) => (
+                      <optgroup key={x.id} label={x.nombre}>
+                        {otros.filter((v) => v.sucursalId === x.id).map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         <label className={`regalo-tilde${esRegalo ? " activo" : ""}`}>
           <input type="checkbox" checked={esRegalo} onChange={(e) => setEsRegalo(e.target.checked)} />
           <span>🎁 <strong>Es regalo</strong> <span className="aviso">· salen dos tickets: el del cliente con el importe y uno de regalo sin precios ❤</span></span>
         </label>
         <button className="principal boton-cobrar" onClick={cobrar}
-          disabled={lineas.length === 0 || !calc || !calc.ok || cobrando}>
+          disabled={lineas.length === 0 || !calc || !calc.ok || cobrando || faltaVendedor}>
           {cobrando ? "Registrando…" : textoCobrar}
         </button>
         </>)}

@@ -559,10 +559,62 @@ export const ORIGENES_DEPOSITO = [DEPOSITO, "sanlorenzo"];
 //   traer      = el sistema la tiene en otra sucursal: se pasa de alla a este local.
 //   sin_cargar = no estaba cargada: se suma al stock de este local con un ajuste.
 export type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
+// ---- Vendedores (comisiones) ----
+// Personas que cobran: una persona puede vender en cualquier sucursal; la comision se cuenta por la sucursal a la que pertenece.
+export type Vendedor = { id: number; nombre: string; sucursalId: string; activo: boolean };
+const limpiarNombre = (n: string) => n.trim().replace(/\s+/g, " ").slice(0, 80);
+
+export async function vendedoresListado(soloActivos = true, db: Pick<typeof pool, "query"> = pool) {
+  const r = await db.query<Vendedor>(
+    `select id::int as id, nombre, sucursal_id as "sucursalId", activo from vendedores ${soloActivos ? "where activo" : ""} order by activo desc, sucursal_id, nombre`);
+  return r.rows;
+}
+
+// Los de la sucursal donde se esta cobrando van primero; los demas siguen disponibles (se puede cargar la venta a cualquiera).
+export async function vendedoresParaCaja(sucursal: string) {
+  const todos = await vendedoresListado(true);
+  const propios = todos.filter((v) => v.sucursalId === sucursal);
+  return { vendedores: [...propios, ...todos.filter((v) => v.sucursalId !== sucursal)], obligatorio: todos.length > 0 };
+}
+
+// Si ya hay vendedores cargados, cada venta tiene que decir quien la hizo. Si todavia no hay ninguno, se puede cobrar sin eso (no se frena la caja).
+async function vendedorDeVenta(c: Pick<typeof pool, "query">, vendedorId: number | null | undefined) {
+  if (vendedorId === null || vendedorId === undefined) {
+    if ((await c.query("select 1 from vendedores where activo limit 1")).rowCount) falla("Elegí quién hizo la venta (Vendedor)");
+    return null;
+  }
+  const r = await c.query<{ id: number; nombre: string; sucursalId: string }>(
+    `select id::int as id, nombre, sucursal_id as "sucursalId" from vendedores where id = $1 and activo`, [vendedorId]);
+  if (!r.rows[0]) falla("Ese vendedor ya no está activo. Elegí otro.");
+  return r.rows[0];
+}
+
+export async function vendedoresCargar(sucursalId: string, nombres: string[]) {
+  if (!esSucursal(sucursalId)) falla("Sucursal inexistente");
+  const limpios = [...new Set(nombres.map(limpiarNombre).filter((n) => n.length >= 2))].slice(0, 100);
+  if (!limpios.length) falla("Escribí al menos un nombre");
+  let nuevos = 0;
+  for (const n of limpios) {
+    const r = await pool.query(
+      "insert into vendedores (nombre, sucursal_id) values ($1, $2) on conflict (lower(btrim(nombre)), sucursal_id) do update set activo = true returning (xmax = 0) as nuevo", [n, sucursalId]);
+    if (r.rows[0]?.nuevo) nuevos++;
+  }
+  return { nuevos, total: limpios.length };
+}
+
+export async function vendedorActualizar(id: number, datos: { nombre: string; sucursalId: string; activo: boolean }) {
+  const nombre = limpiarNombre(datos.nombre);
+  if (nombre.length < 2) falla("El nombre es muy corto");
+  if (!esSucursal(datos.sucursalId)) falla("Sucursal inexistente");
+  const r = await pool.query("update vendedores set nombre = $2, sucursal_id = $3, activo = $4 where id = $1", [id, nombre, datos.sucursalId, !!datos.activo])
+    .catch((e: { code?: string }) => { if (e.code === "23505") falla("Ya hay un vendedor con ese nombre en esa sucursal"); throw e; });
+  if (!r.rowCount) falla("Ese vendedor no existe");
+}
+
 // regalosPedidos: prendas que la empresa le regala al cliente CON esta compra (salen sin cobrar, como retiro de la empresa ligado a la
 // venta; salen en el ticket como REGALO). Tiene que haber al menos una prenda paga: no se puede regalar todo.
 export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string; faltante?: Faltante | null }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number,
-  regalosPedidos: { sku: string; cant: number; origen?: string }[] = [], permitidos?: string[] | null) {
+  regalosPedidos: { sku: string; cant: number; origen?: string }[] = [], permitidos?: string[] | null, vendedorId?: number | null) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
   const especial = especialPedido ? validarEspecial(especialPedido, sucursal) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
@@ -592,6 +644,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
         return { ...(await ticketDeVenta(c, previa.rows[0].id)), nueva: false };
       }
     }
+    const vend = await vendedorDeVenta(c, vendedorId);
     const mr = await c.query<MedioPago>('select id, nombre, ajuste_pct::float8 as "ajustePct" from medios_pago where activo');
     const prods: Producto[] = [];
     for (const i of items) {
@@ -668,10 +721,11 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     const unico = calc.pagos.length === 1 ? calc.pagos[0] : null;
     const v = await c.query<{ id: number; codigo: string; creado_en: Date }>(
       `insert into ventas (sucursal_id, subtotal_lista, medio_pago_id, ajuste_medio_pago, ajuste_pct_usado, total, clave, usuario_id,
-         descuento_promo, promo_id, promo_nombre, especial_pct, especial_motivo, especial_autorizo)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id, codigo, creado_en`,
+         descuento_promo, promo_id, promo_nombre, especial_pct, especial_motivo, especial_autorizo, vendedor_id, vendedor_nombre, vendedor_sucursal_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) returning id, codigo, creado_en`,
       [sucursal, subtotal, unico ? (unico.medioId.startsWith("nota:") ? "nota_credito" : unico.medioId) : null, total - neto, unico?.pct ?? null, total, clave ?? null, usuarioEnCurso()?.id ?? null,
-        descuento, auto.promo?.id ?? null, promoNombre, especial?.pct ?? null, especial?.motivo ?? null, especial?.autorizo ?? null],
+        descuento, auto.promo?.id ?? null, promoNombre, especial?.pct ?? null, especial?.motivo ?? null, especial?.autorizo ?? null,
+        vend?.id ?? null, vend?.nombre ?? null, vend?.sucursalId ?? null],
     );
     const ventaId = Number(v.rows[0].id);
     for (const p of calc.pagos) {

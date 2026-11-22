@@ -180,6 +180,7 @@ export async function cobrarVenta(
   especial?: { pct: number; motivo: string; autorizo: string; curvaPlus?: boolean } | null,
   totalEsperado?: number,
   regalos?: { sku: string; cant: number; origen?: string }[],
+  vendedorId?: number | null,
 ) {
   return seguro("vender", async (u) => {
     const regalosOk = (Array.isArray(regalos) ? regalos : []).map((g) => ({ sku: txt(g.sku), cant: ent(g.cant), origen: g.origen ? txt(g.origen) : undefined }));
@@ -199,11 +200,17 @@ export async function cobrarVenta(
       typeof totalEsperado === "number" && Number.isInteger(totalEsperado) ? totalEsperado : undefined,
       regalosOk,
       origenesStock(u.rol, u.sucursalId),
+      Number.isInteger(vendedorId) && (vendedorId as number) > 0 ? (vendedorId as number) : null,
     );
     const { nueva: _nueva, ...datos } = venta;
     void _nueva;
     return { venta: datos };
   });
+}
+
+// Quienes pueden figurar como vendedor en la caja: primero los de este local, despues los de las otras sucursales.
+export async function vendedoresDeCaja(sucursal: string) {
+  return seguro("vender", async (u) => ({ ...(await repo.vendedoresParaCaja(suc(u, txt(sucursal)))) }));
 }
 
 // Promos que valen hoy en el local (la caja las usa para mostrar el total antes de cobrar; al cobrar, el servidor recalcula).

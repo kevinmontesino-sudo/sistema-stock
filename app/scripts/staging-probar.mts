@@ -690,6 +690,30 @@ try {
     const cl = await pool.connect();
     try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from cierres_caja where cerrado_por = 'ZZ Staging' and dia = '2020-01-05'"); await cl.query("commit"); } finally { cl.release(); }
   });
+  await paso("Vendedores (comisiones): quien vendio y de que sucursal es", async () => {
+    await pool.query("update vendedores set activo = false");
+    const sinVend = await repo.vendedoresParaCaja("sanlorenzo");
+    igual("Vendedores: sin ninguno cargado no se frena la caja", sinVend.obligatorio, false);
+    await debeFallar("Vendedores: una sucursal inexistente no se carga", () => repo.vendedoresCargar("xx", ["ZZ Nadie"]), /Sucursal inexistente/);
+    const r = await repo.vendedoresCargar("sanlorenzo", ["ZZ Candela", "ZZ  Candela", "ZZ Santiago"]);
+    igual("Vendedores: carga sin duplicar (mismo nombre con espacios de mas = una persona)", [r.total, r.nuevos <= 2], [2, true]);
+    igual("Vendedores: recargar los mismos no crea otros", (await repo.vendedoresCargar("sanlorenzo", ["ZZ Candela"])).nuevos, 0);
+    await repo.vendedoresCargar("deposito", ["ZZ Kevin"]);
+    const caja = await repo.vendedoresParaCaja("sanlorenzo");
+    igual("Vendedores: con alguno cargado la caja lo exige", caja.obligatorio, true);
+    igual("Vendedores: los de la sucursal van primero", caja.vendedores.slice(0, 2).every((v) => v.sucursalId === "sanlorenzo") && caja.vendedores.some((v) => v.nombre === "ZZ Kevin"), true);
+    const cand = caja.vendedores.find((v) => v.nombre === "ZZ Candela")!;
+    const kev = caja.vendedores.find((v) => v.nombre === "ZZ Kevin")!;
+    if ((await stockDe(A, LOCAL)) >= 3) {
+      await debeFallar("Vendedores: cobrar sin decir quien vendio", () => repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "transferencia", monto: null }]), /Elegí quién/);
+      const v = await repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "transferencia", monto: null }], undefined, undefined, undefined, [], null, kev.id);
+      const f = (await pool.query("select sucursal_id, vendedor_id::int, vendedor_nombre, vendedor_sucursal_id from ventas where codigo = $1", [v.codigo])).rows[0];
+      igual("Vendedores: vende en White alguien de Deposito y queda registrado", [f.sucursal_id, f.vendedor_id, f.vendedor_nombre, f.vendedor_sucursal_id], [LOCAL, kev.id, "ZZ Kevin", "deposito"]);
+      await repo.vendedorActualizar(cand.id, { nombre: "ZZ Candela", sucursalId: "sanlorenzo", activo: false });
+      await debeFallar("Vendedores: uno dado de baja no puede figurar", () => repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "transferencia", monto: null }], undefined, undefined, undefined, [], null, cand.id), /ya no está activo/);
+    }
+    await pool.query("update vendedores set activo = false"); // las demas pruebas cobran sin vendedor
+  });
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;
     igual("Toda venta: pagos = total", await q(`select count(*)::int as n from ventas v
