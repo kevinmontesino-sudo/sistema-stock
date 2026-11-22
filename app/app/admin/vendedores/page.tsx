@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { actualizarVendedor, cargarVendedores, listarVendedoresAdmin } from "@/app/admin/acciones";
+import { actualizarVendedor, cargarVendedores, importarVendedoresDeFicha, listarVendedoresAdmin } from "@/app/admin/acciones";
 import { empresa } from "@/lib/empresa.config";
 import type { Vendedor } from "@/lib/repo";
 import { nombreSucursal } from "@/lib/util";
@@ -35,6 +35,15 @@ export default function Vendedores() {
     setNombres("");
     recargar();
   }
+  const [trayendo, setTrayendo] = useState(false);
+  async function traerDeFicha() {
+    setTrayendo(true);
+    const r = await importarVendedoresDeFicha();
+    setTrayendo(false);
+    if (!r.ok) return setMsg({ texto: r.motivo, mala: true });
+    setMsg({ texto: `Ficha: ${r.total} empleados activos. ${r.nuevos} nuevos, ${r.actualizados} ya estaban.${r.sinSucursal.length ? ` No se pudieron ubicar en una sucursal: ${r.sinSucursal.join(", ")}.` : ""}`, mala: r.sinSucursal.length > 0 });
+    recargar();
+  }
   async function guardar(id: number) {
     const r = await actualizarVendedor(id, edit);
     if (!r.ok) return setMsg({ texto: r.motivo, mala: true });
@@ -48,6 +57,12 @@ export default function Vendedores() {
       <h1>Vendedores y comisiones</h1>
       <p className="aviso">Las personas que aparecen en la caja como «¿Quién vendió?». Cada una pertenece a una sucursal (ahí compite por su comisión), pero se puede elegir en la caja de cualquier sucursal. Elegir vendedor es opcional: si el cliente se atiende solo, la venta queda sin vendedor y no suma comisión a nadie.</p>
       {msg && <p className={msg.mala ? "error" : "ok"} role="status">{msg.texto}</p>}
+
+      <div className="tarjeta" style={{ marginBottom: 16, display: "grid", gap: 6 }}>
+        <strong>Traer de la ficha</strong>
+        <span className="aviso">Carga a todos los empleados activos con la sucursal que tienen en la ficha. Se puede repetir cuando entre alguien nuevo o cambie de sucursal: no duplica ni reactiva a quien diste de baja acá.</span>
+        <button className="principal" onClick={traerDeFicha} disabled={trayendo}>{trayendo ? "Trayendo…" : "Traer empleados de la ficha"}</button>
+      </div>
 
       <form onSubmit={cargar} className="tarjeta" style={{ display: "grid", gap: 8, marginBottom: 16 }}>
         <strong>Agregar personas</strong>

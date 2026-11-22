@@ -599,6 +599,33 @@ export async function vendedoresCargar(sucursalId: string, nombres: string[]) {
   return { nuevos, total: limpios.length };
 }
 
+// Importa empleados de la ficha {id, nombre, sucursal}. Reconoce a la misma persona por su id de la ficha (si cambio de sucursal se la mueve,
+// no se duplica) y, si no, por nombre + sucursal. Nunca reactiva a alguien que la oficina dio de baja. La sucursal de la ficha se asocia por nombre.
+const sinTildes = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+const SUCURSAL_DE_FICHA: Record<string, string> = { "ingeniero white": "white" };
+export function sucursalDeFicha(nombre: string): string | null {
+  const n = sinTildes(nombre);
+  if (SUCURSAL_DE_FICHA[n]) return SUCURSAL_DE_FICHA[n];
+  return empresa.sucursales.find((s) => sinTildes(s.nombre) === n || s.id === n)?.id ?? null;
+}
+export async function vendedoresImportar(lista: { id: number; nombre: string; sucursal: string }[]) {
+  const r = { nuevos: 0, actualizados: 0, sinSucursal: [] as string[] };
+  for (const e of lista) {
+    const suc = sucursalDeFicha(e.sucursal);
+    const nombre = limpiarNombre(e.nombre);
+    if (!suc || nombre.length < 2) { r.sinSucursal.push(`${nombre || e.id} (${e.sucursal || "sin sucursal"})`); continue; }
+    const porFicha = await pool.query("update vendedores set nombre = $2, sucursal_id = $3 where ficha_id = $1 returning id", [e.id, nombre, suc])
+      .catch((x: { code?: string }) => { if (x.code === "23505") return null; throw x; });
+    if (porFicha === null) { r.sinSucursal.push(`${nombre} (ya hay otra persona con ese nombre en esa sucursal)`); continue; }
+    if (porFicha.rowCount) { r.actualizados++; continue; }
+    const porNombre = await pool.query("update vendedores set ficha_id = $3 where lower(btrim(nombre)) = lower($1) and sucursal_id = $2 and ficha_id is null returning id", [nombre, suc, e.id]);
+    if (porNombre.rowCount) { r.actualizados++; continue; }
+    await pool.query("insert into vendedores (nombre, sucursal_id, ficha_id) values ($1, $2, $3)", [nombre, suc, e.id]);
+    r.nuevos++;
+  }
+  return r;
+}
+
 export async function vendedorActualizar(id: number, datos: { nombre: string; sucursalId: string; activo: boolean }) {
   const nombre = limpiarNombre(datos.nombre);
   if (nombre.length < 2) falla("El nombre es muy corto");

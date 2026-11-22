@@ -260,3 +260,14 @@ export async function actualizarVendedor(id: number, datos: { nombre: string; su
     return {};
   });
 }
+
+// Trae los empleados activos de la ficha (con su sucursal) y los deja como vendedores. Se puede repetir sin duplicar.
+export async function importarVendedoresDeFicha() {
+  return admin(async () => {
+    const { empleadosActivos } = await import("@/lib/ficha");
+    const lista = await empleadosActivos(true);
+    const r = await repo.vendedoresImportar(lista);
+    await auditar("vendedores_importados", { desdeFicha: lista.length, nuevos: r.nuevos, actualizados: r.actualizados, sinSucursal: r.sinSucursal.length });
+    return { ...r, total: lista.length };
+  });
+}

@@ -710,6 +710,17 @@ try {
       await repo.vendedorActualizar(cand.id, { nombre: "ZZ Candela", sucursalId: "sanlorenzo", activo: false });
       await debeFallar("Vendedores: uno dado de baja no puede figurar", () => repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "transferencia", monto: null }], undefined, undefined, undefined, [], null, cand.id), /ya no está activo/);
     }
+    const imp = await repo.vendedoresImportar([
+      { id: 990001, nombre: "ZZ Ficha Uno", sucursal: "Zelarrayán" }, { id: 990002, nombre: "ZZ Ficha Dos", sucursal: "Ingeniero White" },
+      { id: 990003, nombre: "ZZ Ficha Tres", sucursal: "Depósito" }, { id: 990004, nombre: "ZZ Ficha Perdido", sucursal: "Mar del Plata" }]);
+    igual("Ficha->vendedores: ubica las sucursales por nombre y avisa la que no conoce", [imp.nuevos + imp.actualizados, imp.sinSucursal.length], [3, 1]);
+    const mov = await repo.vendedoresImportar([{ id: 990001, nombre: "ZZ Ficha Uno", sucursal: "San Lorenzo" }]);
+    const uno = (await pool.query("select sucursal_id, count(*) over ()::int as n from vendedores where ficha_id = 990001")).rows;
+    igual("Ficha->vendedores: si cambia de sucursal se mueve, no se duplica", [mov.actualizados, uno.length, uno[0]?.sucursal_id], [1, 1, "sanlorenzo"]);
+    igual("Ficha->vendedores: White = Ingeniero White", (await pool.query("select sucursal_id from vendedores where ficha_id = 990002")).rows[0].sucursal_id, "white");
+    await pool.query("update vendedores set activo = false where ficha_id = 990003");
+    await repo.vendedoresImportar([{ id: 990003, nombre: "ZZ Ficha Tres", sucursal: "Depósito" }]);
+    igual("Ficha->vendedores: no reactiva a quien la oficina dio de baja", (await pool.query("select activo from vendedores where ficha_id = 990003")).rows[0].activo, false);
     await pool.query("update vendedores set activo = false"); // las demas pruebas cobran sin vendedor
   });
   await paso("Controles de toda la base", async () => {
