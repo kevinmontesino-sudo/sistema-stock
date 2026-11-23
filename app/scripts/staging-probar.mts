@@ -25,6 +25,7 @@ if (!u || u.hostname !== "127.0.0.1" || (u.port || "5432") !== "5432" || u.pathn
 }
 
 const repo = await import("../lib/repo");
+const { comisiones } = await import("../lib/comisiones");
 const promosAdmin = await import("../lib/promosAdmin");
 const inf = await import("../lib/informes");
 const { montoNotaAplicable, preciosDe, textoPrecioEtiqueta } = await import("../lib/util");
@@ -721,6 +722,15 @@ try {
     await pool.query("update vendedores set activo = false where ficha_id = 990003");
     await repo.vendedoresImportar([{ id: 990003, nombre: "ZZ Ficha Tres", sucursal: "Depósito" }]);
     igual("Ficha->vendedores: no reactiva a quien la oficina dio de baja", (await pool.query("select activo from vendedores where ficha_id = 990003")).rows[0].activo, false);
+    const com = await comisiones({});
+    const sem = com.semanas[0];
+    igual("Comisiones: la semana va de domingo a sabado y la actual es la primera", [new Date(`${sem.desde}T12:00:00Z`).getUTCDay(), new Date(`${sem.hasta}T12:00:00Z`).getUTCDay()], [0, 6]);
+    const filas = com.semanas.flatMap((x) => x.grupos.flatMap((g) => g.vendedores));
+    const filaKev = sem.grupos.flatMap((g) => g.vendedores).find((f) => f.nombre === "ZZ Kevin");
+    igual("Comisiones: aparece quien vendio (ZZ Kevin) con su sucursal de origen", [filaKev?.sucursal, (filaKev?.ventas ?? 0) >= 1], ["deposito", true]);
+    igual("Comisiones: el % es 1 o 1,5 y la comision = neto x % (redondeada)", filas.every((f) => (f.pct === 1 || f.pct === 1.5) && f.comision === Math.max(0, Math.round(f.neto * f.pct / 100))), true);
+    igual("Comisiones: en cada sucursal y semana gana quien mas vendio (1,5%) y nadie mas", com.semanas.every((x) => x.grupos.every((g) => { const mx = Math.max(...g.vendedores.map((f) => f.neto)); return g.vendedores.every((f) => f.ganador === (f.neto > 0 && f.neto === mx) && f.pct === (f.ganador ? 1.5 : 1)); })), true);
+    await debeFallar("Comisiones: rango de fechas invalido", () => comisiones({ desde: "2026-12-01", hasta: "2026-11-01" }), /posterior/);
     await pool.query("update vendedores set activo = false"); // las demas pruebas cobran sin vendedor
   });
   await paso("Controles de toda la base", async () => {

@@ -39,6 +39,8 @@ export const empresa = {
   // CURVA PLUS: descuento mayorista que SOLO se aplica en la caja de Deposito, despues de pickear todo. Reemplaza a la promo del dia
   // (no se suman) y sobre el precio que queda se aplican los medios de pago como siempre (efectivo -20%, tarjeta +20%).
   curvaPlus: { nombre: "Curva Plus", pct: 25 },
+  // Comisiones de los vendedores: % de lo vendido en la semana (domingo a sabado, cierra el sabado). El que mas vendio de su sucursal en la semana cobra pctGanador EN LUGAR de pct (no se suman).
+  comision: { pct: 1, pctGanador: 1.5 },
   // Etiquetas: "agente" (recomendado) usa el agente de impresion instalado en esa PC (Windows o Mac); "servidor" imprime desde la maquina donde corre el sistema (solo sirve en desarrollo local); "directa" manda la etiqueta en el lenguaje de la impresora (TSPL) con QZ Tray; "ventana" usa la ventana de impresion del navegador.
   impresionEtiquetas: "agente" as "agente" | "directa" | "ventana" | "servidor",
   // Parte del nombre de la impresora de etiquetas tal como la ve el sistema (ej. "Xprinter XP-410B" o "Xprinter_XP_410B").

@@ -13,6 +13,7 @@ import { crearToken } from "@/lib/seguridad/token";
 import { crearPromo, desactivarPromo, descuentosEspeciales, listarPromos, type PromoNueva } from "@/lib/promosAdmin";
 import { listarTipos, retirosEmpresa } from "@/lib/repo";
 import * as repo from "@/lib/repo";
+import { comisiones } from "@/lib/comisiones";
 
 // Acciones del panel de administracion: SOLO administradores (se verifica en cada una, no en la pantalla).
 type Resultado<T> = ({ ok: true } & T) | { ok: false; motivo: string };
@@ -243,6 +244,9 @@ export async function desactivarPromoAdmin(id: number) {
 }
 
 // ---- Vendedores (comisiones) ----
+export async function obtenerComisiones(desde: string, hasta: string, ganador: string) {
+  return admin(async () => comisiones({ desde: txt(desde), hasta: txt(hasta), ganador: txt(ganador) }));
+}
 export async function listarVendedoresAdmin() {
   return admin(async () => ({ vendedores: await repo.vendedoresListado(false) }));
 }
