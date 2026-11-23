@@ -736,6 +736,22 @@ try {
     igual("Ficha->vendedores: gerencia no se importa", [exc.excluidos.length, exc.nuevos, (await pool.query("select 1 from vendedores where ficha_id = 990010")).rowCount], [1, 0, 0]);
     await pool.query("update vendedores set activo = false"); // las demas pruebas cobran sin vendedor
   });
+  await paso("Caja fuerte: retiros con responsable", async () => {
+    const antes = (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!;
+    await debeFallar("Caja fuerte: monto en cero no se anota", () => repo.cajaFuerteRetirar(LOCAL, 0, "ZZ Hugo", ""), /monto/);
+    await debeFallar("Caja fuerte: sin responsable no se anota", () => repo.cajaFuerteRetirar(LOCAL, 1000, " ", ""), /quién/);
+    await debeFallar("Caja fuerte: sucursal inexistente", () => repo.cajaFuerteRetirar("xx", 1000, "ZZ Hugo", ""), /Sucursal inexistente/);
+    await repo.cajaFuerteRetirar(LOCAL, 7400000, "ZZ  Hugo", "ZZ prueba");
+    const desp = (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!;
+    igual("Caja fuerte: el retiro baja lo que tendria que haber", [desp.retirado - antes.retirado, antes.saldo - desp.saldo], [7400000, 7400000]);
+    const mov = (await repo.cajaFuerteMovimientos(LOCAL, 1))[0];
+    igual("Caja fuerte: queda quien se lo llevo y el monto", [mov.retiradoPor, mov.monto, mov.motivo], ["ZZ Hugo", 7400000, "ZZ prueba"]);
+    let borro = true;
+    try { await pool.query("delete from retiros_caja_fuerte where id = $1", [mov.id]); } catch (e) { borro = !/no se editan ni se borran/.test((e as Error).message); }
+    igual("Caja fuerte: un retiro no se puede borrar", borro, false);
+    const cl = await pool.connect();
+    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from retiros_caja_fuerte where retirado_por = 'ZZ Hugo'"); await cl.query("commit"); } finally { cl.release(); }
+  });
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;
     igual("Toda venta: pagos = total", await q(`select count(*)::int as n from ventas v

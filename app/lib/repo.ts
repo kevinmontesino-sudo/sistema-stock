@@ -1256,3 +1256,34 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     return aNota(r.rows[0]);
   });
 }
+
+// ---- Caja fuerte de la empresa ----
+// Entra lo que cada cierre de caja manda a la caja fuerte (efectivo contado - lo que queda para el vuelto; solo cierres con ese dato, desde el 16/11).
+// Sale lo que se anota como retiro (quien se lo llevo). Saldo = entradas - retiros: es "lo que tendria que haber", no un conteo.
+export async function cajaFuerteResumen() {
+  const r = await pool.query<{ sucursal: string; entradas: number; retirado: number }>(
+    `select s.id as sucursal,
+       coalesce((select sum(c.efectivo_contado - c.fondo_siguiente) from cierres_caja c where c.sucursal_id = s.id and c.fondo_siguiente is not null), 0)::float8 as entradas,
+       coalesce((select sum(x.monto) from retiros_caja_fuerte x where x.sucursal_id = s.id), 0)::float8 as retirado
+     from sucursales s order by s.id`);
+  return r.rows.map((x) => ({ sucursal: x.sucursal, entradas: x.entradas, retirado: x.retirado, saldo: x.entradas - x.retirado }));
+}
+export async function cajaFuerteMovimientos(sucursal: string | null, limite = 100) {
+  const r = await pool.query<{ id: number; sucursal: string; creado: Date; monto: number; retirado_por: string; motivo: string | null; registrado_por: string }>(
+    `select id::int, sucursal_id as sucursal, creado_en as creado, monto, retirado_por, motivo, registrado_por from retiros_caja_fuerte
+     where ($1::text is null or sucursal_id = $1) order by creado_en desc, id desc limit $2`, [sucursal, Math.min(Math.max(limite, 1), 500)]);
+  return r.rows.map((x) => ({ id: x.id, sucursal: x.sucursal, creado: x.creado.toISOString(), monto: x.monto, retiradoPor: x.retirado_por, motivo: x.motivo, registradoPor: x.registrado_por }));
+}
+export async function cajaFuerteRetirar(sucursal: string, monto: number, retiradoPor: string, motivo: string) {
+  if (!esSucursal(sucursal)) falla("Sucursal inexistente");
+  if (!Number.isInteger(monto) || monto < 1 || monto > 2_000_000_000) falla("El monto tiene que ser un número entero mayor a 0");
+  const quien = limpiarNombre(retiradoPor);
+  if (quien.length < 2 || quien.length > 80) falla("Poné quién se lleva la plata");
+  const mot = motivo.trim();
+  if (mot.length > 200) falla("El motivo es muy largo (máximo 200 letras)");
+  const yo = usuarioEnCurso();
+  const r = await pool.query<{ id: number }>(
+    "insert into retiros_caja_fuerte (sucursal_id, monto, retirado_por, motivo, registrado_por, usuario_id) values ($1, $2, $3, $4, $5, $6) returning id::int as id",
+    [sucursal, monto, quien, mot || null, yo?.nombre ?? "sistema", yo?.id ?? null]);
+  return { id: r.rows[0].id };
+}

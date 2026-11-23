@@ -275,3 +275,15 @@ export async function importarVendedoresDeFicha() {
     return { ...r, total: lista.length };
   });
 }
+
+// ---- Caja fuerte: retiros de efectivo ----
+export async function cajaFuerteDatos(sucursal: string) {
+  return admin(async () => ({ resumen: await repo.cajaFuerteResumen(), movimientos: await repo.cajaFuerteMovimientos(txt(sucursal) || null, 100) }));
+}
+export async function retirarDeCajaFuerte(sucursal: string, monto: number, retiradoPor: string, motivo: string) {
+  return admin(async () => {
+    const r = await repo.cajaFuerteRetirar(txt(sucursal), Number(monto), txt(retiradoPor), txt(motivo));
+    await auditar("caja_fuerte_retiro", { sucursal: txt(sucursal), monto: Number(monto), retiradoPor: txt(retiradoPor), motivo: txt(motivo) });
+    return r;
+  });
+}
