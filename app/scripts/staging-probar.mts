@@ -731,6 +731,9 @@ try {
     igual("Comisiones: el % es 1 o 1,5 y la comision = neto x % (redondeada)", filas.every((f) => (f.pct === 1 || f.pct === 1.5) && f.comision === Math.max(0, Math.round(f.neto * f.pct / 100))), true);
     igual("Comisiones: en cada sucursal y semana gana quien mas vendio (1,5%) y nadie mas", com.semanas.every((x) => x.grupos.every((g) => { const mx = Math.max(...g.vendedores.map((f) => f.neto)); return g.vendedores.every((f) => f.ganador === (f.neto > 0 && f.neto === mx) && f.pct === (f.ganador ? 1.5 : 1)); })), true);
     await debeFallar("Comisiones: rango de fechas invalido", () => comisiones({ desde: "2026-12-01", hasta: "2026-11-01" }), /posterior/);
+    igual("Sin comision: Cesar, Guille y Guillermo Ramirez no son vendedores; otras personas si", ["César Gómez", "GUILLE", "Guillermo Ramírez"].map(repo.sinComision).concat(["Cesarina Paz", "Guillermina Paz", "Guillermo Pérez"].map(repo.sinComision)), [true, true, true, false, false, false]);
+    const exc = await repo.vendedoresImportar([{ id: 990010, nombre: "César Prueba", sucursal: "Depósito" }]);
+    igual("Ficha->vendedores: gerencia no se importa", [exc.excluidos.length, exc.nuevos, (await pool.query("select 1 from vendedores where ficha_id = 990010")).rowCount], [1, 0, 0]);
     await pool.query("update vendedores set activo = false"); // las demas pruebas cobran sin vendedor
   });
   await paso("Controles de toda la base", async () => {

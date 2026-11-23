@@ -41,7 +41,7 @@ export default function Vendedores() {
     const r = await importarVendedoresDeFicha();
     setTrayendo(false);
     if (!r.ok) return setMsg({ texto: r.motivo, mala: true });
-    setMsg({ texto: `Ficha: ${r.total} empleados activos. ${r.nuevos} nuevos, ${r.actualizados} ya estaban.${r.sinSucursal.length ? ` No se pudieron ubicar en una sucursal: ${r.sinSucursal.join(", ")}.` : ""}`, mala: r.sinSucursal.length > 0 });
+    setMsg({ texto: `Ficha: ${r.total} empleados activos. ${r.nuevos} nuevos, ${r.actualizados} ya estaban.${r.excluidos.length ? ` Sin comisión (gerencia): ${r.excluidos.join(", ")}.` : ""}${r.sinSucursal.length ? ` No se pudieron ubicar en una sucursal: ${r.sinSucursal.join(", ")}.` : ""}`, mala: r.sinSucursal.length > 0 });
     recargar();
   }
   async function guardar(id: number) {

@@ -608,9 +608,18 @@ export function sucursalDeFicha(nombre: string): string | null {
   if (SUCURSAL_DE_FICHA[n]) return SUCURSAL_DE_FICHA[n];
   return empresa.sucursales.find((s) => sinTildes(s.nombre) === n || s.id === n)?.id ?? null;
 }
+export const sinComision = (nombre: string) => {
+  const palabras = sinTildes(nombre).split(" ");
+  return empresa.comision.sinComision.some((req) => req.every((w) => palabras.includes(w)));
+};
 export async function vendedoresImportar(lista: { id: number; nombre: string; sucursal: string }[]) {
-  const r = { nuevos: 0, actualizados: 0, sinSucursal: [] as string[] };
+  const r = { nuevos: 0, actualizados: 0, sinSucursal: [] as string[], excluidos: [] as string[] };
   for (const e of lista) {
+    if (sinComision(e.nombre)) {
+      r.excluidos.push(limpiarNombre(e.nombre));
+      await pool.query("update vendedores set activo = false where ficha_id = $1", [e.id]);
+      continue;
+    }
     const suc = sucursalDeFicha(e.sucursal);
     const nombre = limpiarNombre(e.nombre);
     if (!suc || nombre.length < 2) { r.sinSucursal.push(`${nombre || e.id} (${e.sucursal || "sin sucursal"})`); continue; }
