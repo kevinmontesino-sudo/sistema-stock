@@ -7,7 +7,16 @@ import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import type { CierreCaja, ResumenDia } from "@/lib/cierre";
 import { nombreSucursal, pesos } from "@/lib/util";
 
-const num = (s: string) => (s.trim() === "" ? null : Number(s.replace(/\./g, "").replace(",", ".")));
+// Acepta "16000", "16.000", "$16.000" y "16000,50". Vacio = null. Si hay letras u otra cosa (ej. el detalle de un gasto) da NaN: se avisa en pantalla y no deja cerrar.
+const num = (s: string) => {
+  const t = s.trim();
+  if (t === "") return null;
+  const limpio = t.replace(/[$\s.]/g, "").replace(",", ".");
+  return /^\d+(\.\d+)?$/.test(limpio) ? Number(limpio) : NaN;
+};
+const n0 = (s: string) => { const v = num(s); return v === null || Number.isNaN(v) ? 0 : v; };
+const malo = (s: string) => Number.isNaN(num(s));
+const AVISO_NUMERO = "Acá va solo el número (ej. 16000). El detalle se escribe en «¿Para qué fueron?».";
 const fechaLarga = (dia: string) => { const [a, m, d] = dia.split("-"); return `${d}/${m}/${a}`; };
 const signo = (n: number) => (n === 0 ? "OK, sin diferencia" : n > 0 ? `Sobran ${pesos(n)}` : `Faltan ${pesos(-n)}`);
 
@@ -52,10 +61,10 @@ export default function CierrePage() {
   }, [sucursal, dia, version]);
 
   const k = (n: number) => (r && r.retirosParciales.total > 0 && n >= 3 ? n + 1 : n); // el paso de cierres parciales aparece solo si hubo
-  const esperadoEfectivo = (num(fondo) ?? 0) + (r?.medios.find((m) => m.id === "efectivo")?.monto ?? 0) - (num(retiros) ?? 0) - (r?.retirosParciales.total ?? 0);
-  const contado = num(efectivo);
+  const esperadoEfectivo = n0(fondo) + (r?.medios.find((m) => m.id === "efectivo")?.monto ?? 0) - n0(retiros) - (r?.retirosParciales.total ?? 0);
+  const contado = malo(efectivo) ? null : num(efectivo);
   const dif = contado === null ? null : contado - esperadoEfectivo;
-  const dejadoN = num(dejado);
+  const dejadoN = malo(dejado) ? null : num(dejado);
   const cajaFuerte = contado !== null && dejadoN !== null ? contado - dejadoN : null;
 
   async function imprimir(c: CierreCaja, medios: ResumenDia["medios"]) {
@@ -82,6 +91,7 @@ export default function CierrePage() {
 
   async function cerrar() {
     if (!r) return;
+    if (malo(fondo) || malo(retiros) || malo(efectivo) || malo(dejado)) return setError("Hay un campo con letras donde va un número. Revisá los marcados en rojo.");
     if (contado === null) return setError("Contá el efectivo de la caja y escribilo.");
     if (dejadoN === null) return setError("Escribí cuánto dejás en la caja para mañana (si no dejás nada, poné 0).");
     if (dejadoN > contado) return setError("No podés dejar en la caja más de lo que contaste.");
@@ -90,7 +100,7 @@ export default function CierrePage() {
     setGuardando(true);
     setError("");
     const x = await cerrarCajaAccion(sucursal, r.dia, {
-      fondoInicial: num(fondo) ?? 0, retiros: num(retiros) ?? 0, retirosMotivo: motivo, efectivoContado: contado, fondoSiguiente: dejadoN,
+      fondoInicial: n0(fondo), retiros: n0(retiros), retirosMotivo: motivo, efectivoContado: contado, fondoSiguiente: dejadoN,
       otrosContados: Object.fromEntries(Object.entries(otros).filter(([, v]) => v.trim() !== "").map(([k, v]) => [k, num(v)])), observaciones: obs,
     });
     setGuardando(false);
@@ -197,6 +207,7 @@ export default function CierrePage() {
               <div style={{ display: "grid", gap: 12, maxWidth: 460 }}>
                 <label className="campo"><span><strong>1. Con cuánto abriste la caja</strong> (el cambio con el que arrancaste)</span>
                   <input inputMode="numeric" value={fondo} onChange={(e) => { setFondo(e.target.value); setFondoTocado(true); }} placeholder="0" />
+                  {malo(fondo) && <small className="error">{AVISO_NUMERO}</small>}
                   {r.fondoSugerido !== null && !fondoTocado && <small className="aviso">Es lo que dejó el último cierre.</small>}
                   {r.fondoSugerido !== null && fondoTocado && num(fondo) !== r.fondoSugerido && <small className="error">El último cierre dejó {pesos(r.fondoSugerido)}: revisá este número.</small>}
                 </label>
@@ -210,16 +221,19 @@ export default function CierrePage() {
                   </div>
                 )}
                 <label className="campo"><span><strong>{k(3)}. Pagos o gastos que salieron de la caja</strong> (si no hubo, dejalo vacío)</span>
-                  <input inputMode="numeric" value={retiros} onChange={(e) => setRetiros(e.target.value)} placeholder="0" />
+                  <input inputMode="numeric" value={retiros} onChange={(e) => setRetiros(e.target.value)} placeholder="0" aria-invalid={malo(retiros)} />
+                  {malo(retiros) && <small className="error">{AVISO_NUMERO}</small>}
                 </label>
-                {(num(retiros) ?? 0) > 0 && <label className="campo"><span>¿Para qué fueron?</span><input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="ej. pago a proveedor" /></label>}
+                {(n0(retiros) > 0 || malo(retiros)) && <label className="campo"><span>¿Para qué fueron?</span><input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="ej. pago a proveedor" /></label>}
                 <div className="caja-esperada"><span>Con eso, en la caja tendría que haber</span><div className="monto-verde grande">{pesos(esperadoEfectivo)}</div></div>
                 <label className="campo"><span><strong>{k(4)}. Cuánto hay en la caja al cerrar</strong> (contá TODO, incluso el cambio con el que abriste, antes de sacar nada)</span>
-                  <input inputMode="numeric" value={efectivo} onChange={(e) => setEfectivo(e.target.value)} placeholder="0" style={{ fontSize: 22, maxWidth: 260 }} />
+                  <input inputMode="numeric" value={efectivo} onChange={(e) => setEfectivo(e.target.value)} placeholder="0" style={{ fontSize: 22, maxWidth: 260 }} aria-invalid={malo(efectivo)} />
+                  {malo(efectivo) && <small className="error">{AVISO_NUMERO}</small>}
                 </label>
                 {dif !== null && <p style={{ margin: 0 }}><strong className={dif === 0 ? "ok" : "error"}>{signo(dif)}</strong></p>}
                 <label className="campo"><span><strong>{k(5)}. Cuánto dejás en la caja para el vuelto de mañana</strong></span>
-                  <input inputMode="numeric" value={dejado} onChange={(e) => setDejado(e.target.value)} placeholder="ej. 100000" style={{ fontSize: 22, maxWidth: 260 }} />
+                  <input inputMode="numeric" value={dejado} onChange={(e) => setDejado(e.target.value)} placeholder="ej. 100000" style={{ fontSize: 22, maxWidth: 260 }} aria-invalid={malo(dejado)} />
+                  {malo(dejado) && <small className="error">{AVISO_NUMERO}</small>}
                 </label>
                 {cajaFuerte !== null && (cajaFuerte >= 0
                   ? <p style={{ margin: 0 }}><strong>El resto, {pesos(cajaFuerte)}, va a la caja fuerte de la empresa.</strong></p>

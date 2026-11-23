@@ -79,6 +79,7 @@ button.chico { min-height: 32px; padding: 0 10px; font-size: 14px; }
 .fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .campo { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .campo > span, .rotulo { font-size: 13px; color: var(--suave); }
+input[aria-invalid="true"] { border-color: var(--error); }
 .monto-verde { font-size: 22px; font-weight: 600; color: #15803d; }
 @media (prefers-color-scheme: dark) { .monto-verde { color: #4ade80; } }
 .monto-verde.grande { font-size: 30px; }
