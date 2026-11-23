@@ -465,7 +465,36 @@ export default function VentaPage() {
 
   return (
     <>
-      <h1>Venta · {nombreSucursal(sucursal)}</h1>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+      <h1 style={{ margin: 0 }}>Venta · {nombreSucursal(sucursal)}</h1>
+        {vendedoresCaja && vendedoresCaja.lista.length > 0 && (() => {
+          const propios = vendedoresCaja.lista.filter((v) => v.sucursalId === sucursal);
+          const otros = vendedoresCaja.lista.filter((v) => v.sucursalId !== sucursal);
+          const elegidoOtro = otros.find((v) => v.id === vendedorId);
+          return (
+            <div className="vendedor-caja" style={{ margin: "0 0 0 auto", maxWidth: 620, textAlign: "right" }}>
+              <strong style={{ fontSize: 15 }}>¿Quién vendió?</strong> <span className="aviso">· opcional</span>
+              <div className="fila" style={{ gap: 6, flexWrap: "wrap", marginTop: 6, justifyContent: "flex-end" }}>
+                {propios.map((v) => (
+                  <button key={v.id} type="button" className={vendedorId === v.id ? "principal chico" : "chico"} onClick={() => elegirVendedor(v.id)}>{v.nombre}</button>
+                ))}
+                {otros.length > 0 && (
+                  <select value={elegidoOtro ? elegidoOtro.id : ""} onChange={(e) => e.target.value && elegirVendedor(Number(e.target.value))}
+                    title="Alguien de otra sucursal que vendió acá" style={verOtros || elegidoOtro ? undefined : { opacity: 0.8 }}
+                    onFocus={() => setVerOtros(true)}>
+                    <option value="">{elegidoOtro ? elegidoOtro.nombre : "Otra sucursal…"}</option>
+                    {empresa.sucursales.filter((x) => x.id !== sucursal && otros.some((v) => v.sucursalId === x.id)).map((x) => (
+                      <optgroup key={x.id} label={x.nombre}>
+                        {otros.filter((v) => v.sucursalId === x.id).map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
       {promos.length > 0 && (
         <p className="alerta no-print" style={{ margin: "-4px 0 12px" }}>
           <strong>Promos de hoy:</strong> {promos.map((p) => `${descripcionPromo(p)} (hasta el ${p.hasta.slice(8, 10)}/${p.hasta.slice(5, 7)})`).join(" · ")}. Se aplican solas al escanear.
@@ -754,33 +783,6 @@ export default function VentaPage() {
             </button>
           </div>
         ) : (<>
-        {vendedoresCaja && vendedoresCaja.lista.length > 0 && (() => {
-          const propios = vendedoresCaja.lista.filter((v) => v.sucursalId === sucursal);
-          const otros = vendedoresCaja.lista.filter((v) => v.sucursalId !== sucursal);
-          const elegidoOtro = otros.find((v) => v.id === vendedorId);
-          return (
-            <div className="vendedor-caja" style={{ margin: "8px 0" }}>
-              <strong style={{ fontSize: 15 }}>¿Quién vendió?</strong> <span className="aviso">· si el cliente se atendió solo, dejalo sin elegir</span>
-              <div className="fila" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                {propios.map((v) => (
-                  <button key={v.id} type="button" className={vendedorId === v.id ? "principal chico" : "chico"} onClick={() => elegirVendedor(v.id)}>{v.nombre}</button>
-                ))}
-                {otros.length > 0 && (
-                  <select value={elegidoOtro ? elegidoOtro.id : ""} onChange={(e) => e.target.value && elegirVendedor(Number(e.target.value))}
-                    title="Alguien de otra sucursal que vendió acá" style={verOtros || elegidoOtro ? undefined : { opacity: 0.8 }}
-                    onFocus={() => setVerOtros(true)}>
-                    <option value="">{elegidoOtro ? elegidoOtro.nombre : "Otra sucursal…"}</option>
-                    {empresa.sucursales.filter((x) => x.id !== sucursal && otros.some((v) => v.sucursalId === x.id)).map((x) => (
-                      <optgroup key={x.id} label={x.nombre}>
-                        {otros.filter((v) => v.sucursalId === x.id).map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
-                )}
-              </div>
-            </div>
-          );
-        })()}
         <label className={`regalo-tilde${esRegalo ? " activo" : ""}`}>
           <input type="checkbox" checked={esRegalo} onChange={(e) => setEsRegalo(e.target.checked)} />
           <span>🎁 <strong>Es regalo</strong> <span className="aviso">· salen dos tickets: el del cliente con el importe y uno de regalo sin precios ❤</span></span>
