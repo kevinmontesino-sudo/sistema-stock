@@ -688,8 +688,11 @@ try {
     igual("Cierre: sin ventas ese dia, debe haber = fondo", [c.efectivoEsperado, c.diferencia], [100000, 0]);
     const sig = await ci.resumenDia(LOCAL, "2020-01-06");
     igual("Cierre: el dia siguiente abre con lo que se dejo", sig.fondoSugerido, 80000);
+    await pool.query("insert into retiros_efectivo (sucursal_id, creado_en, monto, origen, retirado_por, destino, registrado_por) values ($1, '2020-01-07 12:00-03', 30000, 'caja', 'ZZ Hugo', 'Depósito', 'ZZ Staging')", [LOCAL]);
+    const cp = await ci.cerrarCaja(LOCAL, "2020-01-07", { ...base, efectivoContado: 70000, fondoSiguiente: 50000 }, u);
+    igual("Cierre: el cierre parcial se descuenta solo del efectivo esperado", [cp.efectivoEsperado, cp.diferencia], [70000, 0]);
     const cl = await pool.connect();
-    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from cierres_caja where cerrado_por = 'ZZ Staging' and dia = '2020-01-05'"); await cl.query("commit"); } finally { cl.release(); }
+    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from cierres_caja where cerrado_por = 'ZZ Staging' and dia in ('2020-01-05', '2020-01-07')"); await cl.query("delete from retiros_efectivo where registrado_por = 'ZZ Staging' and retirado_por = 'ZZ Hugo'"); await cl.query("commit"); } finally { cl.release(); }
   });
   await paso("Vendedores (comisiones): quien vendio y de que sucursal es", async () => {
     await pool.query("update vendedores set activo = false");
@@ -736,21 +739,32 @@ try {
     igual("Ficha->vendedores: gerencia no se importa", [exc.excluidos.length, exc.nuevos, (await pool.query("select 1 from vendedores where ficha_id = 990010")).rowCount], [1, 0, 0]);
     await pool.query("update vendedores set activo = false"); // las demas pruebas cobran sin vendedor
   });
-  await paso("Caja fuerte: retiros con responsable", async () => {
+  await paso("Retiros de efectivo: cierre parcial y caja fuerte, con responsable", async () => {
+    const yo = { id: (await pool.query("select id::int from usuarios order by id limit 1")).rows[0].id as number, nombre: "ZZ Staging" };
+    const cierreMod = await import("../lib/cierre");
     const antes = (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!;
-    await debeFallar("Caja fuerte: monto en cero no se anota", () => repo.cajaFuerteRetirar(LOCAL, 0, "ZZ Hugo", ""), /monto/);
-    await debeFallar("Caja fuerte: sin responsable no se anota", () => repo.cajaFuerteRetirar(LOCAL, 1000, " ", ""), /quién/);
-    await debeFallar("Caja fuerte: sucursal inexistente", () => repo.cajaFuerteRetirar("xx", 1000, "ZZ Hugo", ""), /Sucursal inexistente/);
-    await repo.cajaFuerteRetirar(LOCAL, 7400000, "ZZ  Hugo", "ZZ prueba");
+    await debeFallar("Retiros: monto en cero no se anota", () => cierreMod.retirarEfectivo(LOCAL, "caja_fuerte", 0, "ZZ Hugo", "", "", yo), /monto/);
+    await debeFallar("Retiros: sin responsable no se anota", () => cierreMod.retirarEfectivo(LOCAL, "caja_fuerte", 1000, " ", "", "", yo), /quién/);
+    await debeFallar("Retiros: sucursal inexistente", () => cierreMod.retirarEfectivo("xx", "caja_fuerte", 1000, "ZZ Hugo", "", "", yo), /Sucursal inexistente/);
+    await debeFallar("Retiros: origen invalido", () => cierreMod.retirarEfectivo(LOCAL, "bolsillo", 1000, "ZZ Hugo", "", "", yo), /de dónde/);
+    await cierreMod.retirarEfectivo(LOCAL, "caja_fuerte", 7400000, "ZZ  Hugo", "Depósito", "ZZ prueba", yo);
     const desp = (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!;
     igual("Caja fuerte: el retiro baja lo que tendria que haber", [desp.retirado - antes.retirado, antes.saldo - desp.saldo], [7400000, 7400000]);
-    const mov = (await repo.cajaFuerteMovimientos(LOCAL, 1))[0];
-    igual("Caja fuerte: queda quien se lo llevo y el monto", [mov.retiradoPor, mov.monto, mov.motivo], ["ZZ Hugo", 7400000, "ZZ prueba"]);
+    const mov = (await repo.retirosEfectivoLista(LOCAL, 1))[0];
+    igual("Caja fuerte: queda quien se lo llevo, a donde y el monto", [mov.retiradoPor, mov.monto, mov.destino, mov.origen], ["ZZ Hugo", 7400000, "Depósito", "caja_fuerte"]);
+    // Cierre parcial: baja el efectivo esperado del dia y no toca la caja fuerte
+    const hoyAr = await cierreMod.hoyAR();
+    const sin = await cierreMod.resumenDia(LOCAL, hoyAr);
+    if (!sin.cierre) {
+      await cierreMod.retirarEfectivo(LOCAL, "caja", 500000, "ZZ Esteban", "Depósito", "", yo);
+      const con = await cierreMod.resumenDia(LOCAL, hoyAr);
+      igual("Cierre parcial: el dia lo suma y no es de la caja fuerte", [con.retirosParciales.total - sin.retirosParciales.total, con.retirosParciales.lista.at(-1)?.retiradoPor, (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!.retirado], [500000, "ZZ Esteban", desp.retirado]);
+    }
     let borro = true;
-    try { await pool.query("delete from retiros_caja_fuerte where id = $1", [mov.id]); } catch (e) { borro = !/no se editan ni se borran/.test((e as Error).message); }
-    igual("Caja fuerte: un retiro no se puede borrar", borro, false);
+    try { await pool.query("delete from retiros_efectivo where id = $1", [mov.id]); } catch (e) { borro = !/no se editan ni se borran/.test((e as Error).message); }
+    igual("Retiros: no se pueden borrar", borro, false);
     const cl = await pool.connect();
-    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from retiros_caja_fuerte where retirado_por = 'ZZ Hugo'"); await cl.query("commit"); } finally { cl.release(); }
+    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from retiros_efectivo where retirado_por in ('ZZ Hugo', 'ZZ Esteban')"); await cl.query("commit"); } finally { cl.release(); }
   });
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;

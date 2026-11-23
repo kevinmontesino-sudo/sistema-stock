@@ -415,6 +415,16 @@ export async function cerrarCajaAccion(sucursal: string, dia: string, d: { fondo
   });
 }
 
+// Retiro de efectivo: cierre parcial (sale de la caja durante el día) o de la caja fuerte. Cada local anota solo los suyos.
+export async function retirarEfectivoAccion(sucursal: string, origen: string, monto: unknown, retiradoPor: string, destino: string, motivo: string) {
+  return seguro("vender", async (u) => {
+    const sucId = suc(u, txt(sucursal));
+    const r = await cierre.retirarEfectivo(sucId, txt(origen), ent(monto), txt(retiradoPor), txt(destino), txt(motivo), { id: u.id, nombre: u.nombre });
+    await auditar("retiro_efectivo", { sucursal: sucId, origen: txt(origen), monto: ent(monto), retiradoPor: txt(retiradoPor), destino: txt(destino), motivo: txt(motivo) });
+    return r;
+  });
+}
+
 // Informe de control del día (solo administradores): lo imprime la oficina en A4.
 export async function controlDelDia(dia: string) {
   return seguro("admin", async () => ({ control: await cierre.controlDiario(txt(dia) || (await cierre.hoyAR())) }));

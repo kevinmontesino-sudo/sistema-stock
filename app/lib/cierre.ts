@@ -17,7 +17,10 @@ export type CierreCaja = {
   notasEmitidas: number; notasMonto: number; observaciones: string | null;
 };
 export type MedioDia = { id: string; nombre: string; ventas: number; monto: number };
+export type RetiroEfectivo = { id: number; creado: string; monto: number; origen: "caja" | "caja_fuerte"; destino: string | null; retiradoPor: string; motivo: string | null; registradoPor: string };
 export type ResumenDia = {
+  retirosParciales: { total: number; lista: RetiroEfectivo[] }; // cierres parciales del dia: plata sacada de la caja durante el dia (ya descontada del efectivo esperado)
+  retirosCajaFuerte: RetiroEfectivo[]; // retiros de la caja fuerte de ese local ese dia (informativo)
   sucursal: string; dia: string; ventas: number; unidades: number; totalCobrado: number; medios: MedioDia[];
   pagadoConNotas: number; notasEmitidas: number; notasMonto: number;
   cierre: CierreCaja | null; ventasDespuesDelCierre: number;
@@ -68,10 +71,16 @@ export async function resumenDia(sucursal: string, dia: string): Promise<Resumen
   const despues = cierre
     ? (await pool.query<{ n: number }>(`select count(*)::int as n from ventas v where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and v.creado_en > $3`, [sucursal, dia, cierre.creado])).rows[0].n
     : 0;
+  const rt = await pool.query<{ id: number; creado: Date; monto: number; origen: "caja" | "caja_fuerte"; destino: string | null; retirado_por: string; motivo: string | null; registrado_por: string }>(
+    `select id::int, creado_en as creado, monto, origen, destino, retirado_por, motivo, registrado_por from retiros_efectivo x
+     where x.sucursal_id = $1 and ${rango("x.creado_en")} order by x.creado_en, x.id`, [sucursal, dia]);
+  const retiros = rt.rows.map((x) => ({ id: x.id, creado: x.creado.toISOString(), monto: x.monto, origen: x.origen, destino: x.destino, retiradoPor: x.retirado_por, motivo: x.motivo, registradoPor: x.registrado_por }));
+  const parciales = retiros.filter((x) => x.origen === "caja");
   const ant = await pool.query<{ f: number | null }>(
     "select fondo_siguiente as f from cierres_caja where sucursal_id = $1 and dia < $2::date and fondo_siguiente is not null order by dia desc limit 1", [sucursal, dia]);
   return {
     fondoSugerido: ant.rows[0]?.f ?? null,
+    retirosParciales: { total: parciales.reduce((t, x) => t + x.monto, 0), lista: parciales }, retirosCajaFuerte: retiros.filter((x) => x.origen === "caja_fuerte"),
     sucursal, dia, ventas: v.rows[0].ventas, unidades: v.rows[0].unidades, medios: m.rows, totalCobrado: m.rows.reduce((s, x) => s + x.monto, 0),
     pagadoConNotas: n.rows[0].monto, notasEmitidas: e.rows[0].n, notasMonto: e.rows[0].monto, cierre, ventasDespuesDelCierre: despues,
   };
@@ -117,7 +126,7 @@ async function cerrarCajaConCandado(sucursal: string, dia: string, d: DatosCierr
     if (id === "efectivo" || !(id in esperado) || v === null || (v as unknown) === "") continue;
     otros[id] = monto(v, `lo contado en ${id}`);
   }
-  const efectivoEsperado = fondo + (esperado.efectivo ?? 0) - retiros;
+  const efectivoEsperado = fondo + (esperado.efectivo ?? 0) - retiros - r.retirosParciales.total;
   const diferencia = contado - efectivoEsperado;
   try {
     const x = await pool.query<FilaCierre>(
@@ -196,3 +205,35 @@ export async function controlDiario(dia: string, sucursal: string | null = null)
   };
 }
 export type Control = Awaited<ReturnType<typeof controlDiario>>;
+
+
+// ---- Retiros de efectivo (cierres parciales y caja fuerte) ----
+// origen "caja": cierre parcial, se saca plata de la caja durante el dia y se descuenta sola del cierre de ese dia; no se puede anotar si la caja de hoy ya se cerro.
+// origen "caja_fuerte": plata que sale de la caja fuerte del local. En los dos casos queda quien se la lleva (responsable), a donde va y quien lo anoto.
+// Usa el mismo candado que el cierre del dia, asi un retiro no se cuela justo mientras se cierra.
+export async function retirarEfectivo(sucursal: string, origen: string, montoPedido: number, retiradoPor: string, destino: string, motivo: string, usuario: { id: number; nombre: string }) {
+  sucOk(sucursal);
+  if (origen !== "caja" && origen !== "caja_fuerte") throw new ErrorNegocio("Elegí de dónde sale la plata: la caja o la caja fuerte.");
+  if (!Number.isInteger(montoPedido) || montoPedido < 1 || montoPedido > 2_000_000_000) throw new ErrorNegocio("El monto tiene que ser un número entero mayor a 0.");
+  const quien = retiradoPor.replace(/\s+/g, " ").trim();
+  if (quien.length < 2 || quien.length > 80) throw new ErrorNegocio("Poné quién se lleva la plata.");
+  const dest = destino.replace(/\s+/g, " ").trim().slice(0, 60);
+  const mot = motivo.trim();
+  if (mot.length > 200) throw new ErrorNegocio("El motivo es muy largo (máximo 200 letras).");
+  const hoy = await hoyAR();
+  const clave = `caja:${sucursal}:${hoy}`;
+  const c = await pool.connect();
+  try {
+    await c.query("select pg_advisory_lock(hashtext($1))", [clave]);
+    if (origen === "caja" && (await c.query("select 1 from cierres_caja where sucursal_id = $1 and dia = $2::date", [sucursal, hoy])).rowCount) {
+      throw new ErrorNegocio("La caja de hoy ya está cerrada: este retiro tiene que anotarse como retiro de la caja fuerte.");
+    }
+    const r = await c.query<{ id: number }>(
+      `insert into retiros_efectivo (sucursal_id, origen, monto, retirado_por, destino, motivo, registrado_por, usuario_id) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id::int as id`,
+      [sucursal, origen, montoPedido, quien, dest || null, mot || null, usuario.nombre, usuario.id]);
+    return { id: r.rows[0].id };
+  } finally {
+    await c.query("select pg_advisory_unlock(hashtext($1))", [clave]).catch(() => {});
+    c.release();
+  }
+}

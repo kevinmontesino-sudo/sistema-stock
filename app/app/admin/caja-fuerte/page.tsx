@@ -5,7 +5,7 @@ import { empresa } from "@/lib/empresa.config";
 import { nombreSucursal, pesos } from "@/lib/util";
 
 // Caja fuerte de la empresa: cuanta plata tendria que haber (lo que mandan los cierres de caja menos lo que se retiro) y quien se llevo cada retiro.
-type Datos = { resumen: { sucursal: string; entradas: number; retirado: number; saldo: number }[]; movimientos: { id: number; sucursal: string; creado: string; monto: number; retiradoPor: string; motivo: string | null; registradoPor: string }[] };
+type Datos = { resumen: { sucursal: string; entradas: number; retirado: number; saldo: number }[]; movimientos: { id: number; sucursal: string; creado: string; monto: number; origen: "caja" | "caja_fuerte"; destino: string | null; retiradoPor: string; motivo: string | null; registradoPor: string }[] };
 const fecha = (iso: string) => new Date(iso).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "short" });
 
 export default function CajaFuerte() {
@@ -13,6 +13,8 @@ export default function CajaFuerte() {
   const [filtro, setFiltro] = useState("");
   const [suc, setSuc] = useState(empresa.sucursales[0].id);
   const [monto, setMonto] = useState("");
+  const [origen, setOrigen] = useState<"caja_fuerte" | "caja">("caja_fuerte");
+  const [destino, setDestino] = useState("Depósito");
   const [quien, setQuien] = useState("");
   const [motivo, setMotivo] = useState("");
   const [msg, setMsg] = useState<{ texto: string; mala: boolean } | null>(null);
@@ -37,12 +39,12 @@ export default function CajaFuerte() {
     e.preventDefault();
     if (!montoOk) return setMsg({ texto: "Poné el monto en números (ej. 7400000).", mala: true });
     if (quien.trim().length < 2) return setMsg({ texto: "Poné quién se lleva la plata.", mala: true });
-    if (!window.confirm(`¿Confirmás que ${quien.trim()} se lleva ${pesos(n)} de la caja fuerte de ${nombreSucursal(suc)}? No se puede borrar después.`)) return;
+    if (!window.confirm(`¿Confirmás que ${quien.trim()} se lleva ${pesos(n)} de ${origen === "caja" ? "la caja" : "la caja fuerte"} de ${nombreSucursal(suc)}${destino.trim() ? ` (va a ${destino.trim()})` : ""}? No se puede borrar después.`)) return;
     setGuardando(true);
-    const r = await retirarDeCajaFuerte(suc, n, quien, motivo);
+    const r = await retirarDeCajaFuerte(suc, origen, n, quien, destino, motivo);
     setGuardando(false);
     if (!r.ok) return setMsg({ texto: r.motivo, mala: true });
-    setMsg({ texto: `Anotado: ${quien.trim()} retiró ${pesos(n)} de ${nombreSucursal(suc)}.`, mala: false });
+    setMsg({ texto: `Anotado: ${quien.trim()} retiró ${pesos(n)} de ${origen === "caja" ? "la caja" : "la caja fuerte"} de ${nombreSucursal(suc)}.`, mala: false });
     setMonto(""); setQuien(""); setMotivo("");
     setVersion((v) => v + 1);
   }
@@ -51,7 +53,7 @@ export default function CajaFuerte() {
     <div style={{ display: "grid", gap: 16 }}>
       <div>
         <h1>Caja fuerte</h1>
-        <p className="aviso" style={{ marginTop: -8 }}>Entra lo que cada cierre de caja manda a la caja fuerte (desde el 16/11) y sale lo que se anota acá. El saldo es lo que <strong>tendría que haber</strong>, no un conteo.</p>
+        <p className="aviso" style={{ marginTop: -8 }}>Entra lo que cada cierre de caja manda a la caja fuerte (desde el 16/11) y sale lo que se anota como retiro de la caja fuerte. Los retiros de la caja del día (cierres parciales) se descuentan del cierre de ese día. El saldo es lo que <strong>tendría que haber</strong>, no un conteo.</p>
       </div>
       {msg && <p className={msg.mala ? "error" : "aviso"} role="alert">{msg.texto}</p>}
 
@@ -70,18 +72,27 @@ export default function CajaFuerte() {
 
       <form className="tarjeta" onSubmit={retirar} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
         <strong>Anotar un retiro</strong>
-        <label className="campo"><span><strong>1. De qué caja fuerte sale</strong></span>
+        <label className="campo"><span><strong>1. De qué sucursal sale</strong></span>
           <select value={suc} onChange={(e) => setSuc(e.target.value)}>{empresa.sucursales.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
-          <small className="aviso">Ahí tendría que haber {pesos(saldoSuc)}.</small>
         </label>
-        <label className="campo"><span><strong>2. Cuánta plata se lleva</strong></span>
+        <label className="campo"><span><strong>2. De dónde sale la plata</strong></span>
+          <select value={origen} onChange={(e) => setOrigen(e.target.value as "caja" | "caja_fuerte")}>
+            <option value="caja_fuerte">De la caja fuerte (ahí tendría que haber {pesos(saldoSuc)})</option>
+            <option value="caja">De la caja del día (cierre parcial)</option>
+          </select>
+        </label>
+        <label className="campo"><span><strong>3. Cuánta plata se lleva</strong></span>
           <input inputMode="numeric" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="ej. 7400000" style={{ fontSize: 22 }} />
           {montoOk && <small className="aviso">{pesos(n)}{n > saldoSuc ? " — es más de lo que tendría que haber" : ""}</small>}
         </label>
-        <label className="campo"><span><strong>3. Quién se la lleva</strong> (el responsable)</span>
+        <label className="campo"><span><strong>4. Quién se la lleva</strong> (el responsable)</span>
           <input value={quien} onChange={(e) => setQuien(e.target.value)} placeholder="ej. Hugo" maxLength={80} />
         </label>
-        <label className="campo"><span><strong>4. Para qué</strong> (opcional)</span>
+        <label className="campo"><span><strong>5. A dónde va</strong></span>
+          <input value={destino} onChange={(e) => setDestino(e.target.value)} placeholder="ej. Depósito, banco" maxLength={60} list="destinos" />
+          <datalist id="destinos"><option value="Depósito" /><option value="Banco" /></datalist>
+        </label>
+        <label className="campo"><span><strong>6. Para qué</strong> (opcional)</span>
           <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="ej. depósito en el banco" maxLength={200} />
         </label>
         <button className="principal" disabled={guardando || !montoOk || quien.trim().length < 2}>{guardando ? "Anotando…" : "Anotar retiro"}</button>
@@ -94,10 +105,10 @@ export default function CajaFuerte() {
         </div>
         {datos && datos.movimientos.length === 0 ? <p className="aviso">Todavía no hay retiros anotados.</p> : (
           <table>
-            <thead><tr><th>Cuándo</th><th>Sucursal</th><th>Se lo llevó</th><th className="der">Monto</th><th>Para qué</th><th>Lo anotó</th></tr></thead>
+            <thead><tr><th>Cuándo</th><th>Sucursal</th><th>Sale de</th><th>Se lo llevó</th><th>A dónde</th><th className="der">Monto</th><th>Para qué</th><th>Lo anotó</th></tr></thead>
             <tbody>
               {datos?.movimientos.map((m) => (
-                <tr key={m.id}><td>{fecha(m.creado)}</td><td>{nombreSucursal(m.sucursal)}</td><td><strong>{m.retiradoPor}</strong></td><td className="der">{pesos(m.monto)}</td><td>{m.motivo ?? "—"}</td><td>{m.registradoPor}</td></tr>
+                <tr key={m.id}><td>{fecha(m.creado)}</td><td>{nombreSucursal(m.sucursal)}</td><td>{m.origen === "caja" ? "Caja (parcial)" : "Caja fuerte"}</td><td><strong>{m.retiradoPor}</strong></td><td>{m.destino ?? "—"}</td><td className="der">{pesos(m.monto)}</td><td>{m.motivo ?? "—"}</td><td>{m.registradoPor}</td></tr>
               ))}
             </tbody>
           </table>
