@@ -139,12 +139,14 @@ export default function CierrePage() {
                   {r.fondoSugerido !== null && !fondoTocado && <small className="aviso">Es lo que dejó el último cierre.</small>}
                   {r.fondoSugerido !== null && fondoTocado && num(fondo) !== r.fondoSugerido && <small className="error">El último cierre dejó {pesos(r.fondoSugerido)}: revisá este número.</small>}
                 </label>
-                <p style={{ margin: 0 }}><strong>2. Cobrado en efectivo hoy:</strong> {pesos(r.medios.find((m) => m.id === "efectivo")?.monto ?? 0)} <span className="aviso">(lo calcula el sistema)</span></p>
+                <div className="campo"><span><strong>2. Cobrado en efectivo hoy</strong> (lo calcula el sistema, no hay que escribir nada)</span>
+                  <div className="monto-verde">{pesos(r.medios.find((m) => m.id === "efectivo")?.monto ?? 0)}</div>
+                </div>
                 <label className="campo"><span><strong>3. Pagos o gastos que salieron de la caja</strong> (si no hubo, dejalo vacío)</span>
                   <input inputMode="numeric" value={retiros} onChange={(e) => setRetiros(e.target.value)} placeholder="0" />
                 </label>
                 {(num(retiros) ?? 0) > 0 && <label className="campo"><span>¿Para qué fueron?</span><input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="ej. pago a proveedor" /></label>}
-                <p style={{ margin: 0 }}>Con eso, en la caja tendría que haber: <strong>{pesos(esperadoEfectivo)}</strong></p>
+                <div className="caja-esperada"><span>Con eso, en la caja tendría que haber</span><div className="monto-verde grande">{pesos(esperadoEfectivo)}</div></div>
                 <label className="campo"><span><strong>4. Cuánto hay en la caja al cerrar</strong> (contá TODO, incluso el cambio con el que abriste, antes de sacar nada)</span>
                   <input inputMode="numeric" value={efectivo} onChange={(e) => setEfectivo(e.target.value)} placeholder="0" style={{ fontSize: 22, maxWidth: 260 }} />
                 </label>
