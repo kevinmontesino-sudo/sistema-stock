@@ -151,7 +151,7 @@ export default function Promos() {
             Llevando <input type="number" min={2} max={100} value={form.n} onChange={(e) => setForm({ ...form, n: Number(e.target.value) })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 80 }} /> o más,
           </>}
           {tipo === "precio" && <>
-            cada prenda a $ <input type="number" min={1} step={100} value={form.precio || ""} placeholder="4500" onChange={(e) => setForm({ ...form, precio: Number(e.target.value) })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 120 }} required />
+            cada prenda a $ <input type="number" inputMode="numeric" min={1} step={1} value={form.precio || ""} placeholder="4500" onChange={(e) => setForm({ ...form, precio: Number(e.target.value) })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 120 }} required />
           </>}
         </div>
 
