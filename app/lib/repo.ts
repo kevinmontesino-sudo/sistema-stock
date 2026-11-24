@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { DEPOSITO, empresa } from "./empresa.config";
 import { type Db, pool, tx } from "./db";
 import { usuarioEnCurso } from "./seguridad/contexto";
-import { descuentoEspecial, esManualNxm, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, TOPE_PCT, valeConMedios, type Promo } from "./promos";
+import { aplicaManual, descuentoEspecial, esManualNxm, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, TOPE_PCT, valeConMedios, type Promo } from "./promos";
 import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, tipoDesdeNombre, totalReparto,
@@ -714,7 +714,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     const manuales = items.map((it, i) => {
       if (!it.promoManualId) return null;
       if (especial) return falla("El descuento especial no se suma a una promo a mano: sacá una de las dos.");
-      const pm = vigentes.find((x) => x.id === it.promoManualId && x.manual && x.skus.includes(prods[i].sku));
+      const pm = vigentes.find((x) => x.id === it.promoManualId && aplicaManual(x, { sku: prods[i].sku, tipo: prods[i].tipo }));
       if (!pm) return falla(`La promo a mano ya no vale para ${prods[i].nombre}. Sacala de la prenda y volvé a cobrar.`);
       if (prods[i].preciosMedio) return falla(`${prods[i].nombre} tiene precios propios por medio de pago: no admite promo a mano.`);
       if (!valeConMedios(pm, pagos.map((x) => x.medioId))) return falla(`La promo ${pm.nombre} vale solo con ${pm.medios.join(" o ")}.`);

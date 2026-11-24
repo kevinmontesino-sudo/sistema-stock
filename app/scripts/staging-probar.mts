@@ -777,8 +777,6 @@ try {
     const llega = async (sku: string) => { for (const t of (await repo.listarPendientes(LOCAL)).filter((x) => x.sku === sku)) await repo.recibirTraslado(t.id, LOCAL); };
     const B = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Mano B ${sello}`, precio: 6000, cantidad: 6, reparto: { [LOCAL]: 6 } })).sku;
     await llega(A); await llega(B);
-    await debeFallar("Promo a mano: sin productos no se puede", () => promosAdmin.crearPromo({ nombre: "ZZ mano", tipo: "porcentaje", pct: 30, manual: true, desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /productos/);
-    await debeFallar("Promo a mano NxM: sin productos no se puede", () => promosAdmin.crearPromo({ nombre: "ZZ mano", tipo: "nxm", n: 3, m: 2, manual: true, desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /productos/);
     await debeFallar("Promo por producto: SKU inexistente", () => promosAdmin.crearPromo({ nombre: "ZZ mano", tipo: "porcentaje", pct: 30, skus: ["XXX9999999"], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /inexistente/);
     const p = await promosAdmin.crearPromo({ nombre: `ZZ Liquidacion ${sello}`, tipo: "porcentaje", pct: 30, skus: [A], manual: true, sucursales: [LOCAL], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" });
     check("Promo a mano: queda manual y con el producto", p.manual && p.skus.length === 1 && p.productos?.length === 1, JSON.stringify([p.manual, p.skus, p.productos]));
@@ -819,6 +817,17 @@ try {
     const fila3 = (await promosAdmin.listarPromos()).find((x) => x.id === p3.id);
     igual("3x2 a mano: estadistica (ventas con descuento y plata descontada)", [fila3?.ventas, fila3?.descontado], [4, 40000]);
     await promosAdmin.desactivarPromo(p3.id);
+    // A mano SIN productos: vale en cualquier prenda y el vendedor decide en cual (A a 10.000, B a 6.000).
+    const p4 = await promosAdmin.crearPromo({ nombre: `ZZ Libre ${sello}`, tipo: "porcentaje", pct: 50, manual: true, sucursales: [LOCAL], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" });
+    check("A mano sin productos: se crea", p4.manual && p4.skus.length === 0, JSON.stringify([p4.manual, p4.skus]));
+    await vender("A mano sin productos: sin tocar no se aplica sola", [{ sku: A, cant: 1 }, { sku: B, cant: 1 }], [{ medioId: "transferencia", monto: null }], pc(16000, "transferencia"));
+    await vender("A mano sin productos: el vendedor la pone solo en B", [{ sku: A, cant: 1 }, { sku: B, cant: 1, promoManualId: p4.id }], [{ medioId: "transferencia", monto: null }], pc(13000, "transferencia"));
+    await vender("A mano sin productos: tambien en A", [{ sku: A, cant: 1, promoManualId: p4.id }], [{ medioId: "transferencia", monto: null }], pc(5000, "transferencia"));
+    await promosAdmin.desactivarPromo(p4.id);
+    // NxM a mano sin productos: 3x2 entre las prendas marcadas de cualquier producto (A, A, B marcadas: B, la mas barata, gratis).
+    const p5 = await promosAdmin.crearPromo({ nombre: `ZZ 3x2 libre ${sello}`, tipo: "nxm", n: 3, m: 2, manual: true, sucursales: [LOCAL], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" });
+    await vender("3x2 a mano sin productos: marcadas A, A y B, la mas barata gratis", [{ sku: A, cant: 2, promoManualId: p5.id }, { sku: B, cant: 1, promoManualId: p5.id }], [{ medioId: "transferencia", monto: null }], pc(20000, "transferencia"));
+    await promosAdmin.desactivarPromo(p5.id);
   });
 
   await paso("Controles de toda la base", async () => {

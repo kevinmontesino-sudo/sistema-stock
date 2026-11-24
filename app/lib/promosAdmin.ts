@@ -15,7 +15,7 @@ export type PromoNueva = {
   sucursales?: string[]; tipos?: string[]; desde: string; hasta: string;
   descuento_efectivo?: boolean; sin_cambio?: boolean;
   skus?: string[];   // vale solo para estos productos (codigos SKU); vacio o sin poner = todos los de las categorias
-  manual?: boolean;  // "a mano": no se aplica sola, el vendedor la toca en la fila de la prenda (con productos; porcentaje, precio o NxM)
+  manual?: boolean;  // "a mano": no se aplica sola, el vendedor la toca en la fila de la prenda (porcentaje, precio o NxM; con productos solo en esos, sin productos en cualquier prenda)
   medios?: string[]; // medios de pago con los que vale (efectivo, transferencia, tarjeta); vacio o sin poner = todos
 };
 const HOY_SQL = "(now() at time zone 'America/Argentina/Buenos_Aires')::date";
@@ -92,7 +92,6 @@ export async function crearPromo(a: PromoNueva, quien: { usuarioId: number | nul
   }
   const manual = a.manual === true;
   if (manual) {
-    if (!skus.length) falla('Una promo "a mano" tiene que tener productos: elegí cuáles');
     if (tipo !== "nxm" && n !== null) falla('Una promo "a mano" de porcentaje o precio no lleva mínimo de prendas');
   }
   const mediosPedidos = [...new Set(lista(a.medios, "medios").map((x) => x.trim().toLowerCase()).filter(Boolean))];

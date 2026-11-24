@@ -82,7 +82,7 @@ export default function Promos() {
   };
   const cats = form.tipos.map((c) => categorias.find((x) => x.codigo === c)?.nombre ?? c);
   const skus = form.productos.map((x) => x.sku);
-  const puedeManual = (tipo === "nxm" || !plantilla.minimo) && skus.length > 0;
+  const puedeManual = tipo === "nxm" || !plantilla.minimo;
   const manual = form.manual && puedeManual;
   const frase = descripcionPromo({ ...datos, categorias: cats, sinCambio: form.sinCambio, descuentoEfectivo: form.efectivo, medios: form.medios, skus, productos: form.productos.map((x) => x.nombre), manual });
   const tildar = (x: { sku: string; nombre: string; precio: number }) => setForm((f) => ({ ...f, productos: f.productos.some((y) => y.sku === x.sku) ? f.productos.filter((y) => y.sku !== x.sku) : [...f.productos, x] }));
@@ -185,13 +185,13 @@ export default function Promos() {
           {form.productos.length > 0 && (
             <div className="fila" style={{ gap: 6, flexWrap: "wrap" }}>
               {form.productos.map((x) => <button key={x.sku} type="button" className="chico on" onClick={() => tildar(x)} title="Sacar">{x.nombre} ✕</button>)}
-              <button type="button" className="chico" onClick={() => setForm({ ...form, productos: [], manual: false })}>Sacar todos</button>
+              <button type="button" className="chico" onClick={() => setForm({ ...form, productos: [] })}>Sacar todos</button>
             </div>
           )}
           {puedeManual && (
             <label className="fila" style={{ gap: 8 }}>
               <input type="checkbox" checked={form.manual} onChange={(e) => setForm({ ...form, manual: e.target.checked })} />
-              <span><strong>A mano en la caja</strong> <span className="aviso">(para cuando solo algunos talles entran: no se aplica sola, el vendedor toca «Aplicar» en la fila de cada prenda que entra{tipo === "nxm" ? "; el NxM cuenta solo las que marque" : ""})</span></span>
+              <span><strong>A mano en la caja</strong> <span className="aviso">(no se aplica sola: en la caja sale «Aplicar» al lado de la prenda y el vendedor lo toca solo en las que corresponden, por ejemplo por talle{tipo === "nxm" ? "; el NxM cuenta solo las que marque" : ""}. {skus.length ? "Sale solo en los productos que elegiste." : "Si no elegís productos, sale al lado de CUALQUIER prenda."})</span></span>
             </label>
           )}
         </div>

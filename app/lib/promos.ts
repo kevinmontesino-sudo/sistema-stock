@@ -46,7 +46,9 @@ const entra = (p: Pick<Promo, "tipos"> & { skus?: string[] }, i: ItemPromo) =>
   (p.tipos.length === 0 || p.tipos.includes(i.tipo)) && (!p.skus || p.skus.length === 0 || (!!i.sku && p.skus.includes(i.sku)));
 
 // Promos "a mano" que se pueden tocar en la fila de una prenda (las automaticas no).
-export const manualesDe = (promos: Promo[], sku: string) => promos.filter((p) => p.manual && p.skus.includes(sku));
+// Sin productos elegidos, la promo a mano sale en cualquier prenda (de sus categorias, si tiene) y el vendedor decide en cual la aplica.
+export const aplicaManual = (p: Pick<Promo, "manual" | "tipos" | "skus">, prod: { sku: string; tipo: string }) => p.manual && entra(p, { tipo: prod.tipo, sku: prod.sku, precio: 0, cant: 1 });
+export const manualesDe = (promos: Promo[], prod: { sku: string; tipo: string }) => promos.filter((p) => aplicaManual(p, prod));
 export const automaticas = (promos: Promo[]) => promos.filter((p) => !p.manual);
 // Promo a mano NxM (ej. 3x2 solo en los jeans talle 36): el vendedor marca cada prenda que entra y el descuento se calcula entre las marcadas.
 export const esManualNxm = (p: Pick<Promo, "manual" | "tipo">) => p.manual && p.tipo === "nxm";
@@ -78,7 +80,8 @@ export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "pr
   }
   if (!p.descuentoEfectivo) s += " (precio único, sin descuento por medio de pago)";
   if (p.medios?.length) s += ` · SOLO pagando con ${textoMedios(p.medios)}`;
-  if (p.manual) s += p.tipo === "nxm" ? " · A MANO: el vendedor marca en la fila de cada prenda que entra (talle) y se cuentan solo esas" : " · A MANO: el vendedor la aplica en la fila de la prenda";
+  if (p.manual) s += p.tipo === "nxm" ? " · A MANO: el vendedor marca en la fila de cada prenda que entra y se cuentan solo esas" : " · A MANO: el vendedor la aplica en la fila de la prenda que corresponde";
+  if (p.manual && !p.skus?.length && !p.categorias?.length) s = s.replace(/^Llevando (\d+) prendas, /, "Llevando $1 prendas marcadas, ");
   if (p.sinCambio) s += " · SIN CAMBIO";
   return s;
 }

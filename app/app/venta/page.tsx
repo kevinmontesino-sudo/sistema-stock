@@ -9,7 +9,7 @@ import type { DatosCortesia } from "@/lib/ticketRenglones";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { compartirTicketPdf } from "@/lib/ticketPdf";
 import { usePuede, useSesion } from "@/components/SesionContext";
-import { automaticas, descripcionPromo, descuentoEspecial, esManualNxm, manualesDe, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, valeConMedios, type Promo } from "@/lib/promos";
+import { aplicaManual, automaticas, descripcionPromo, descuentoEspecial, esManualNxm, manualesDe, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, valeConMedios, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
   calcularPagos, mediosDelCarrito, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
@@ -312,7 +312,7 @@ export default function VentaPage() {
   const autos = automaticas(promos);
   // Promo "a mano": el vendedor la toco en la fila de la prenda (solo para productos de esa promo). Cuenta si vale con el medio elegido y no hay descuento especial.
   const manualPromo = (l: Linea) => (!especial && l.promoManual && !l.producto.preciosMedio
-    ? promos.find((p) => p.id === l.promoManual && p.manual && p.skus.includes(l.producto.sku) && valeConMedios(p, idsElegidos)) ?? null : null);
+    ? promos.find((p) => p.id === l.promoManual && aplicaManual(p, l.producto) && valeConMedios(p, idsElegidos)) ?? null : null);
   const precioEf = (l: Linea) => { const m = manualPromo(l); return m ? precioConManual(m, l.producto.precio) : l.producto.precio; };
   const subtotal = pagas.reduce((s, f) => s + precioEf(f) * f.cant, 0);
   // Las promos NxM a mano no cambian el precio: cuentan solo las prendas marcadas (manualId). Las de % o precio fijo salen de las automaticas (cant 0).
@@ -480,7 +480,7 @@ export default function VentaPage() {
       )}
       {promos.some((p) => p.manual) && (
         <p className="alerta no-print" style={{ margin: "-4px 0 12px" }}>
-          <strong>Promos a mano:</strong> {promos.filter((p) => p.manual).map((p) => `${p.nombre} (${p.productos?.slice(0, 2).join(", ") ?? ""}${(p.productos?.length ?? 0) > 2 ? "…" : ""})`).join(" · ")}. Aparecen en la fila de la prenda: tocá «Aplicar» solo si corresponde.
+          <strong>Promos a mano:</strong> {promos.filter((p) => p.manual).map((p) => p.skus.length ? `${p.nombre} (${p.productos?.slice(0, 2).join(", ") ?? ""}${(p.productos?.length ?? 0) > 2 ? "…" : ""})` : p.nombre).join(" · ")}. Aparecen en la fila de la prenda: tocá «Aplicar» solo en las que corresponden.
         </p>
       )}
       <div className="no-print" style={{ marginBottom: 12 }}>
@@ -549,7 +549,7 @@ export default function VentaPage() {
                         </select>
                       </label></>
                     )}
-                    {!especial && !f.producto.preciosMedio && manualesDe(promos, f.producto.sku).map((p) => {
+                    {!especial && !f.producto.preciosMedio && manualesDe(promos, f.producto).map((p) => {
                       const puesta = f.promoManual === p.id;
                       const nxm = esManualNxm(p);
                       const nuevo = precioConManual(p, f.producto.precio);
