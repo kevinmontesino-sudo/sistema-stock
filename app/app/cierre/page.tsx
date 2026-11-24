@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { cerrarCajaAccion, datosCierre, retirarEfectivoAccion } from "@/app/actions";
+import { cerrarCajaAccion, datosCierre } from "@/app/actions";
 import { ticketCierreEscpos } from "@/lib/escpos";
 import { useSucursal } from "@/lib/hooks";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
@@ -36,12 +36,6 @@ export default function CierrePage() {
   const [fondoTocado, setFondoTocado] = useState(false);
   const [otros, setOtros] = useState<Record<string, string>>({});
   const [obs, setObs] = useState("");
-  const [retOrigen, setRetOrigen] = useState<"caja" | "caja_fuerte">("caja");
-  const [retMonto, setRetMonto] = useState("");
-  const [retQuien, setRetQuien] = useState("");
-  const [retDestino, setRetDestino] = useState("Depósito");
-  const [retMotivo, setRetMotivo] = useState("");
-  const [retEnviando, setRetEnviando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [paraImprimir, setParaImprimir] = useState<CierreCaja | null>(null);
 
@@ -72,22 +66,6 @@ export default function CierrePage() {
     setParaImprimir(c);
     const m = await imprimirTicketPreferido(() => ticketCierreEscpos(c, medios));
     setAviso(m || "Ticket del cierre impreso.");
-  }
-
-  async function retirar(e: React.FormEvent) {
-    e.preventDefault();
-    const m = num(retMonto);
-    if (m === null || !Number.isInteger(m) || m < 1) return setError("Poné cuánta plata se lleva, en números.");
-    if (retQuien.trim().length < 2) return setError("Poné quién se lleva la plata.");
-    if (!window.confirm(`¿Confirmás que ${retQuien.trim()} se lleva ${pesos(m)} de ${retOrigen === "caja" ? "la caja" : "la caja fuerte"} de ${nombreSucursal(sucursal)}${retDestino.trim() ? ` (va a ${retDestino.trim()})` : ""}? No se puede borrar después.`)) return;
-    setRetEnviando(true);
-    setError("");
-    const x = await retirarEfectivoAccion(sucursal, retOrigen, m, retQuien, retDestino, retMotivo);
-    setRetEnviando(false);
-    if (!x.ok) return setError(x.motivo);
-    setAviso(`Anotado: ${retQuien.trim()} se lleva ${pesos(m)}.`);
-    setRetMonto(""); setRetQuien(""); setRetMotivo("");
-    cargar();
   }
 
   async function cerrar() {
@@ -144,44 +122,6 @@ export default function CierrePage() {
             {r.pagadoConNotas > 0 && <p className="aviso">Pagado con notas de crédito (no es plata en caja): {pesos(r.pagadoConNotas)}.</p>}
             {r.notasEmitidas > 0 && <p className="aviso">Notas de crédito emitidas hoy: {r.notasEmitidas} por {pesos(r.notasMonto)} (no mueven plata).</p>}
           </div>
-
-          {r.dia === hoy && (
-            <form className="tarjeta no-print" onSubmit={retirar} style={{ marginTop: 12, display: "grid", gap: 10, maxWidth: 520 }}>
-              <p style={{ margin: 0 }}><strong>Retiro de efectivo</strong> <span className="aviso">· cada vez que alguien se lleva plata (cierre parcial, o de la caja fuerte)</span></p>
-              <label className="campo"><span><strong>1. De dónde sale la plata</strong></span>
-                <select value={c ? "caja_fuerte" : retOrigen} onChange={(e) => setRetOrigen(e.target.value as "caja" | "caja_fuerte")} disabled={!!c}>
-                  <option value="caja">De la caja del día (cierre parcial)</option>
-                  <option value="caja_fuerte">De la caja fuerte</option>
-                </select>
-                {c && <small className="aviso">La caja de hoy ya está cerrada: solo se puede retirar de la caja fuerte.</small>}
-              </label>
-              <label className="campo"><span><strong>2. Cuánta plata se lleva</strong></span>
-                <input inputMode="numeric" value={retMonto} onChange={(e) => setRetMonto(fmtMonto(e.target.value))} placeholder="ej. 500000" style={{ fontSize: 22 }} />
-              </label>
-              <label className="campo"><span><strong>3. Quién se la lleva</strong> (el responsable)</span>
-                <input value={retQuien} onChange={(e) => setRetQuien(e.target.value)} placeholder="ej. Hugo" maxLength={80} />
-              </label>
-              <label className="campo"><span><strong>4. A dónde va</strong></span>
-                <input value={retDestino} onChange={(e) => setRetDestino(e.target.value)} maxLength={60} list="destinos-retiro" />
-                <datalist id="destinos-retiro"><option value="Depósito" /><option value="Banco" /></datalist>
-              </label>
-              <label className="campo"><span><strong>5. Para qué</strong> (opcional)</span>
-                <input value={retMotivo} onChange={(e) => setRetMotivo(e.target.value)} maxLength={200} />
-              </label>
-              <button disabled={retEnviando || num(retMonto) === null || retQuien.trim().length < 2}>{retEnviando ? "Anotando…" : "Anotar retiro"}</button>
-              {r.retirosParciales.lista.length + r.retirosCajaFuerte.length > 0 && (
-                <table>
-                  <thead><tr><th>Hora</th><th>Sale de</th><th>Se lo llevó</th><th>A dónde</th><th className="der">Monto</th></tr></thead>
-                  <tbody>
-                    {[...r.retirosParciales.lista, ...r.retirosCajaFuerte].sort((x, y) => x.creado.localeCompare(y.creado)).map((x) => (
-                      <tr key={x.id}><td>{new Date(x.creado).toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" })}</td>
-                        <td>{x.origen === "caja" ? "Caja" : "Caja fuerte"}</td><td><strong>{x.retiradoPor}</strong></td><td>{x.destino ?? "—"}</td><td className="der">{pesos(x.monto)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </form>
-          )}
 
           {c ? (
             <div className="tarjeta no-print" style={{ marginTop: 12 }}>
