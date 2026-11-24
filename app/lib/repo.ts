@@ -1262,12 +1262,18 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
 // Sale lo que se anota como retiro de la caja fuerte (quien se lo llevo). Saldo = entradas - retiros: es "lo que tendria que haber", no un conteo.
 // Los cierres parciales (plata sacada de la caja durante el dia) no tocan la caja fuerte: se descuentan del cierre de ese dia (lib/cierre.ts).
 export async function cajaFuerteResumen() {
-  const r = await pool.query<{ sucursal: string; entradas: number; retirado: number }>(
+  const r = await pool.query<{ sucursal: string; entradas: number; ajustes: number; retirado: number }>(
     `select s.id as sucursal,
        coalesce((select sum(c.efectivo_contado - c.fondo_siguiente) from cierres_caja c where c.sucursal_id = s.id and c.fondo_siguiente is not null), 0)::float8 as entradas,
+       coalesce((select sum(a.monto) from ajustes_caja_fuerte a where a.sucursal_id = s.id), 0)::float8 as ajustes,
        coalesce((select sum(x.monto) from retiros_efectivo x where x.sucursal_id = s.id and x.origen = 'caja_fuerte'), 0)::float8 as retirado
      from sucursales s order by s.id`);
-  return r.rows.map((x) => ({ sucursal: x.sucursal, entradas: x.entradas, retirado: x.retirado, saldo: x.entradas - x.retirado }));
+  return r.rows.map((x) => ({ sucursal: x.sucursal, entradas: x.entradas, ajustes: x.ajustes, retirado: x.retirado, saldo: x.entradas + x.ajustes - x.retirado }));
+}
+export async function ajustesCajaFuerteLista(limite = 30) {
+  const r = await pool.query<{ id: number; sucursal: string; creado: Date; monto: number; contado: number; motivo: string | null; registrado_por: string }>(
+    `select id::int, sucursal_id as sucursal, creado_en as creado, monto, contado, motivo, registrado_por from ajustes_caja_fuerte order by creado_en desc, id desc limit $1`, [limite]);
+  return r.rows.map((x) => ({ id: x.id, sucursal: x.sucursal, creado: x.creado.toISOString(), monto: x.monto, contado: x.contado, motivo: x.motivo, registradoPor: x.registrado_por }));
 }
 export async function retirosEfectivoLista(sucursal: string | null, limite = 100) {
   const r = await pool.query<{ id: number; sucursal: string; creado: Date; monto: number; origen: string; destino: string | null; retirado_por: string; motivo: string | null; registrado_por: string }>(

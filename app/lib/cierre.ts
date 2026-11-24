@@ -237,3 +237,22 @@ export async function retirarEfectivo(sucursal: string, origen: string, montoPed
     c.release();
   }
 }
+
+// Conteo de la caja fuerte: se cuenta la plata que hay de verdad y se guarda la diferencia contra lo que el sistema decia (ajuste + o -).
+export async function contarCajaFuerte(sucursal: string, contadoPedido: number, motivo: string, usuario: { id: number; nombre: string }) {
+  sucOk(sucursal);
+  if (!Number.isInteger(contadoPedido) || contadoPedido < 0 || contadoPedido > 2_000_000_000) throw new ErrorNegocio("Lo contado tiene que ser un número entero (0 o más).");
+  const mot = motivo.trim();
+  if (mot.length > 200) throw new ErrorNegocio("El motivo es muy largo (máximo 200 letras).");
+  const r = await pool.query<{ id: number | null; diferencia: number }>(
+    `with saldo as (
+       select coalesce((select sum(c.efectivo_contado - c.fondo_siguiente) from cierres_caja c where c.sucursal_id = $1 and c.fondo_siguiente is not null), 0)
+            + coalesce((select sum(a.monto) from ajustes_caja_fuerte a where a.sucursal_id = $1), 0)
+            - coalesce((select sum(x.monto) from retiros_efectivo x where x.sucursal_id = $1 and x.origen = 'caja_fuerte'), 0) as v),
+     ins as (
+       insert into ajustes_caja_fuerte (sucursal_id, monto, contado, motivo, registrado_por, usuario_id)
+       select $1, $2::int - saldo.v, $2, $3, $4, $5 from saldo where $2::int - saldo.v <> 0 returning id, monto)
+     select (select id::int from ins) as id, ($2::int - (select v from saldo))::float8 as diferencia`,
+    [sucursal, contadoPedido, mot || null, usuario.nombre, usuario.id]);
+  return { id: r.rows[0].id, diferencia: r.rows[0].diferencia };
+}

@@ -763,8 +763,14 @@ try {
     let borro = true;
     try { await pool.query("delete from retiros_efectivo where id = $1", [mov.id]); } catch (e) { borro = !/no se editan ni se borran/.test((e as Error).message); }
     igual("Retiros: no se pueden borrar", borro, false);
+    const saldoAntes = (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!.saldo;
+    await debeFallar("Conteo: monto negativo no se anota", () => cierreMod.contarCajaFuerte(LOCAL, -5, "", yo), /entero/);
+    const cnt = await cierreMod.contarCajaFuerte(LOCAL, 1234567, "ZZ conteo", yo);
+    igual("Conteo caja fuerte: el saldo pasa a lo contado", [cnt.diferencia, (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!.saldo], [1234567 - saldoAntes, 1234567]);
+    const cnt2 = await cierreMod.contarCajaFuerte(LOCAL, 1234567, "ZZ conteo", yo);
+    igual("Conteo caja fuerte: si coincide no anota nada", [cnt2.id, cnt2.diferencia], [null, 0]);
     const cl = await pool.connect();
-    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from retiros_efectivo where retirado_por in ('ZZ Hugo', 'ZZ Esteban')"); await cl.query("commit"); } finally { cl.release(); }
+    try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from retiros_efectivo where retirado_por in ('ZZ Hugo', 'ZZ Esteban')"); await cl.query("delete from ajustes_caja_fuerte where motivo = 'ZZ conteo'"); await cl.query("commit"); } finally { cl.release(); }
   });
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;

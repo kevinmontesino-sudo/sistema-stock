@@ -14,7 +14,7 @@ import { crearPromo, desactivarPromo, descuentosEspeciales, listarPromos, type P
 import { listarTipos, retirosEmpresa } from "@/lib/repo";
 import * as repo from "@/lib/repo";
 import { comisiones } from "@/lib/comisiones";
-import { retirarEfectivo } from "@/lib/cierre";
+import { retirarEfectivo, contarCajaFuerte } from "@/lib/cierre";
 
 // Acciones del panel de administracion: SOLO administradores (se verifica en cada una, no en la pantalla).
 type Resultado<T> = ({ ok: true } & T) | { ok: false; motivo: string };
@@ -279,12 +279,19 @@ export async function importarVendedoresDeFicha() {
 
 // ---- Caja fuerte: retiros de efectivo ----
 export async function cajaFuerteDatos(sucursal: string) {
-  return admin(async () => ({ resumen: await repo.cajaFuerteResumen(), movimientos: await repo.retirosEfectivoLista(txt(sucursal) || null, 100) }));
+  return admin(async () => ({ resumen: await repo.cajaFuerteResumen(), movimientos: await repo.retirosEfectivoLista(txt(sucursal) || null, 100), conteos: await repo.ajustesCajaFuerteLista(30) }));
 }
 export async function retirarDeCajaFuerte(sucursal: string, origen: string, monto: number, retiradoPor: string, destino: string, motivo: string) {
   return admin(async (yo) => {
     const r = await retirarEfectivo(txt(sucursal), txt(origen), Number(monto), txt(retiradoPor), txt(destino), txt(motivo), { id: yo.id, nombre: yo.nombre });
     await auditar("retiro_efectivo", { sucursal: txt(sucursal), origen: txt(origen), monto: Number(monto), retiradoPor: txt(retiradoPor), destino: txt(destino), motivo: txt(motivo) });
+    return r;
+  });
+}
+export async function contarCajaFuerteAccion(sucursal: string, contado: number, motivo: string) {
+  return admin(async (yo) => {
+    const r = await contarCajaFuerte(txt(sucursal), Number(contado), txt(motivo), { id: yo.id, nombre: yo.nombre });
+    await auditar("conteo_caja_fuerte", { sucursal: txt(sucursal), contado: Number(contado), diferencia: r.diferencia, motivo: txt(motivo) });
     return r;
   });
 }

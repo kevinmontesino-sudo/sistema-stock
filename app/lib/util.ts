@@ -189,3 +189,10 @@ export function preciosDe(precio: number, medios: MedioPago[], fijos?: PreciosMe
   if (mc && cantidad > 0) p.push({ nombre: `${cantidad} cuotas`, valor: Math.round(precioDeMedio({ precio, preciosMedio: fijos }, mc) / cantidad), cuotas: cantidad } );
   return p.length ? p : [{ nombre: "Precio", valor: precio }];
 }
+
+// Campo de plata: mientras se escribe pone los puntos de miles (16000 -> 16.000) y saca el $. Si hay letras u otros signos lo deja como esta para que se vea el aviso en rojo (nunca junta numeros de un texto).
+export function fmtMonto(s: string): string {
+  const t = s.replace(/\$/g, "").trim();
+  if (t === "" || /[^\d.]/.test(t)) return s;
+  return t.replace(/\./g, "").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
