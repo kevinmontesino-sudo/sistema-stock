@@ -174,7 +174,7 @@ export async function resumenDeSucursal(sucursal: string) {
 // ---- Ventas, devoluciones y notas de credito ----
 export async function cobrarVenta(
   sucursal: string,
-  items: { sku: string; cant: number; origen?: string; faltante?: repo.Faltante | null }[],
+  items: { sku: string; cant: number; origen?: string; faltante?: repo.Faltante | null; promoManualId?: number | null }[],
   pagos: { medioId: string; monto: number | null }[],
   clave?: string,
   especial?: { pct: number; motivo: string; autorizo: string; curvaPlus?: boolean } | null,
@@ -190,7 +190,7 @@ export async function cobrarVenta(
     const venta = await repo.registrarVenta(
       suc(u, txt(sucursal)),
       (Array.isArray(items) ? items : []).map((i) => ({
-        sku: txt(i.sku), cant: ent(i.cant), origen: i.origen ? txt(i.origen) : undefined,
+        sku: txt(i.sku), cant: ent(i.cant), origen: i.origen ? txt(i.origen) : undefined, promoManualId: i.promoManualId ? ent(i.promoManualId) : null,
         faltante: i.faltante?.modo === "traer" ? { modo: "traer" as const, desde: txt(i.faltante.desde) } : i.faltante?.modo === "sin_cargar" ? { modo: "sin_cargar" as const } : null,
       })),
       (Array.isArray(pagos) ? pagos : []).map((p) => ({ medioId: txt(p.medioId), monto: p.monto === null ? null : ent(p.monto) })),

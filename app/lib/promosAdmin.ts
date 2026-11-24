@@ -14,6 +14,8 @@ export type PromoNueva = {
   nombre?: string; tipo: string; n?: number | null; m?: number | null; pct?: number | null; precio?: number | null;
   sucursales?: string[]; tipos?: string[]; desde: string; hasta: string;
   descuento_efectivo?: boolean; sin_cambio?: boolean;
+  skus?: string[];   // vale solo para estos productos (codigos SKU); vacio o sin poner = todos los de las categorias
+  manual?: boolean;  // "a mano": no se aplica sola, el vendedor la toca en la fila de la prenda (solo porcentaje o precio, y con productos)
   medios?: string[]; // medios de pago con los que vale (efectivo, transferencia, tarjeta); vacio o sin poner = todos
 };
 const HOY_SQL = "(now() at time zone 'America/Argentina/Buenos_Aires')::date";
@@ -31,11 +33,14 @@ const hoyAR = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/
 export async function listarPromos(f: { soloVigentes?: boolean } = {}): Promise<PromoFila[]> {
   const r = await pool.query<Promo & { activa: boolean; origen: string; creada: Date; ventas: number; descontado: number; hoy: string }>(
     `select p.id::int as id, p.nombre, p.tipo, p.n, p.m, p.pct::float8 as pct, p.precio, p.tipos, p.sucursales, p.desde::text as desde, p.hasta::text as hasta,
-       p.descuento_efectivo as "descuentoEfectivo", p.sin_cambio as "sinCambio", p.medios,
+       p.descuento_efectivo as "descuentoEfectivo", p.sin_cambio as "sinCambio", p.medios, p.skus, p.manual,
        (select coalesce(array_agg(t.nombre order by t.nombre), '{}') from tipos t where t.codigo = any(p.tipos)) as categorias,
+       (select coalesce(array_agg(pr.nombre order by pr.nombre), '{}') from productos pr where pr.sku = any(p.skus)) as productos,
        p.activa, p.origen, p.creado_en as creada,
-       (select count(*)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) as ventas,
-       (select coalesce(sum(v.descuento_promo), 0)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) as descontado
+       case when p.manual then (select count(*)::int from venta_items vi join ventas v on v.id = vi.venta_id where vi.promo_manual_id = p.id and ${NO_ANULADA})
+            else (select count(*)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) end as ventas,
+       case when p.manual then (select coalesce(sum((vi.precio_original - vi.precio_lista) * vi.cantidad), 0)::int from venta_items vi join ventas v on v.id = vi.venta_id where vi.promo_manual_id = p.id and ${NO_ANULADA})
+            else (select coalesce(sum(v.descuento_promo), 0)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) end as descontado
      from promos p
      where ($1::boolean is not true or (p.activa and p.hasta >= (now() at time zone 'America/Argentina/Buenos_Aires')::date))
      order by (p.activa and p.hasta >= (now() at time zone 'America/Argentina/Buenos_Aires')::date) desc, p.desde desc, p.id desc limit 300`,
@@ -78,6 +83,19 @@ export async function crearPromo(a: PromoNueva, quien: { usuarioId: number | nul
     const faltan = tiposPedidos.filter((t) => !ok.rows.some((x) => x.codigo === t));
     if (faltan.length) falla(`Categoría inexistente: ${faltan.join(", ")}`);
   }
+  const skus = [...new Set(lista(a.skus, "skus").map((x) => x.trim().toUpperCase()).filter(Boolean))];
+  if (skus.length > 300) falla("Una promo puede tener hasta 300 productos");
+  if (skus.length) {
+    const ok = await pool.query<{ sku: string }>("select sku from productos where sku = any($1)", [skus]);
+    const faltan = skus.filter((x) => !ok.rows.some((y) => y.sku === x));
+    if (faltan.length) falla(`Producto inexistente: ${faltan.slice(0, 5).join(", ")}`);
+  }
+  const manual = a.manual === true;
+  if (manual) {
+    if (tipo === "nxm") falla('Una promo "a mano" tiene que ser de porcentaje o de precio (no NxM)');
+    if (!skus.length) falla('Una promo "a mano" tiene que tener productos: elegí cuáles');
+    if (n !== null) falla('Una promo "a mano" no lleva mínimo de prendas');
+  }
   const mediosPedidos = [...new Set(lista(a.medios, "medios").map((x) => x.trim().toLowerCase()).filter(Boolean))];
   let medios: string[] = [];
   if (mediosPedidos.length) {
@@ -97,9 +115,9 @@ export async function crearPromo(a: PromoNueva, quien: { usuarioId: number | nul
   const vigentes = await pool.query<{ n: number }>(`select count(*)::int as n from promos where activa and hasta >= ${HOY_SQL}`);
   if (vigentes.rows[0].n >= 30) falla("Hay demasiadas promos activas: desactivá alguna antes de crear otra");
   const r = await pool.query<{ id: number }>(
-    `insert into promos (nombre, tipo, n, m, pct, precio, sucursales, tipos, desde, hasta, origen, creado_por, descuento_efectivo, sin_cambio, medios)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) returning id::int as id`,
-    [nombre, tipo, n, m, pct, precio, sucursales, tiposPedidos, desde, hasta, quien.origen.slice(0, 80), quien.usuarioId, descuentoEfectivo, sinCambio, medios],
+    `insert into promos (nombre, tipo, n, m, pct, precio, sucursales, tipos, desde, hasta, origen, creado_por, descuento_efectivo, sin_cambio, medios, skus, manual)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) returning id::int as id`,
+    [nombre, tipo, n, m, pct, precio, sucursales, tiposPedidos, desde, hasta, quien.origen.slice(0, 80), quien.usuarioId, descuentoEfectivo, sinCambio, medios, skus, manual],
   );
   return (await listarPromos()).find((p) => p.id === r.rows[0].id)!;
 }

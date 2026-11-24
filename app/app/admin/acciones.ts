@@ -228,6 +228,10 @@ export async function promosAdmin() {
   }));
 }
 
+// Buscador de productos para elegir a cuales vale una promo (hasta 80 resultados).
+export async function buscarProductosPromo(q: string) {
+  return admin(async () => ({ productos: (await repo.listar({ q: txt(q), limite: 80 })).map((p) => ({ sku: p.sku, nombre: p.nombre, precio: p.precio })) }));
+}
 export async function crearPromoAdmin(a: PromoNueva) {
   return admin(async (yo) => {
     const promo = await crearPromo(a, { usuarioId: yo.id, origen: "sistema" });

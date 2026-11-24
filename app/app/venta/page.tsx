@@ -9,7 +9,7 @@ import type { DatosCortesia } from "@/lib/ticketRenglones";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { compartirTicketPdf } from "@/lib/ticketPdf";
 import { usePuede, useSesion } from "@/components/SesionContext";
-import { descripcionPromo, descuentoEspecial, mediosParaPromo, mejorPromo, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, type Promo } from "@/lib/promos";
+import { automaticas, descripcionPromo, descuentoEspecial, manualesDe, mediosParaPromo, mejorPromo, precioConManual, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, valeConMedios, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
   calcularPagos, mediosDelCarrito, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
@@ -20,7 +20,7 @@ import {
 // faltante: la prenda esta en el local pero el sistema no la tiene; al cobrar se corrige el stock (traer de otra sucursal o sumarla).
 type Faltante = { modo: "traer"; desde: string } | { modo: "sin_cargar" };
 // regalo: cuantas unidades de este renglon van como cortesia empresarial (sin cobrar). Las demas se cobran.
-type Linea = { producto: Producto; cant: number; origen: string; faltante?: Faltante; regalo?: number };
+type Linea = { producto: Producto; cant: number; origen: string; faltante?: Faltante; regalo?: number; promoManual?: number };
 // Cuantas se pueden vender en una linea: lo que hay en su stock, mas lo que se puede pasar de la otra sucursal (o sin tope si no estaba cargada).
 const topeLinea = (l: Linea) => (l.faltante?.modo === "sin_cargar" ? 999 : (l.producto.stock[l.origen] ?? 0) + (l.faltante?.modo === "traer" ? l.producto.stock[l.faltante.desde] ?? 0 : 0));
 const ORIGEN_SL = "sanlorenzo";
@@ -281,7 +281,7 @@ export default function VentaPage() {
     if (primero) return agregarProducto(primero);
     const todas = await buscarProductos({ q: t });
     if (todas.ok && todas.productos[0]) return agregarProducto(todas.productos[0]);
-    setAviso(`No hay ninguna prenda cargada que coincida con "${t}". Si no está cargada, tocá «Vender una prenda que no está cargada».`);
+    setAviso(`No hay ninguna prenda cargada que coincida con "${t}". Si no está cargada, abrí «Más opciones» (abajo) y tocá «Vender una prenda que no está cargada».`);
     setSinCargar({ nombre: t, precio: "" });
   }
 
@@ -305,32 +305,37 @@ export default function VentaPage() {
   const regalosCarrito = lineas.filter((l) => (l.regalo ?? 0) > 0).map((l) => ({ sku: l.producto.sku, cant: Math.min(l.regalo!, l.cant), origen: l.origen }));
   const unidadesRegalo = regalosCarrito.reduce((s, g) => s + g.cant, 0);
   const soloCortesia = lineas.length > 0 && unidadesRegalo > 0 && pagas.every((l) => l.cant === 0);
-  const subtotal = pagas.reduce((s, f) => s + f.producto.precio * f.cant, 0);
   const cantidadTotal = pagas.reduce((s, f) => s + f.cant, 0);
   // Promo: la mejor de las de hoy (no se acumulan). El descuento especial la reemplaza. Al cobrar, el servidor recalcula todo.
+  const idsElegidos = mixto ? ((parseInt(entrega1) || 0) > 0 ? [pago1, pago2] : []) : medioSel ? [medioSel] : [];
   const promos = promosHoy.suc === sucursal ? promosHoy.promos : [];
-  const itemsPromo = pagas.map((l) => ({ tipo: l.producto.tipo, precio: l.producto.precio, cant: l.cant }));
+  const autos = automaticas(promos);
+  // Promo "a mano": el vendedor la toco en la fila de la prenda (solo para productos de esa promo). Cuenta si vale con el medio elegido y no hay descuento especial.
+  const manualPromo = (l: Linea) => (!especial && l.promoManual && !l.producto.preciosMedio
+    ? promos.find((p) => p.id === l.promoManual && p.manual && p.skus.includes(l.producto.sku) && valeConMedios(p, idsElegidos)) ?? null : null);
+  const precioEf = (l: Linea) => { const m = manualPromo(l); return m ? precioConManual(m, l.producto.precio) : l.producto.precio; };
+  const subtotal = pagas.reduce((s, f) => s + precioEf(f) * f.cant, 0);
+  const itemsPromo = pagas.map((l) => ({ tipo: l.producto.tipo, sku: l.producto.sku, precio: precioEf(l), cant: manualPromo(l) ? 0 : l.cant }));
   // Promos que valen solo con ciertos medios de pago (ej. solo credito): cuentan unicamente si TODO el pago va con esos medios.
   // Si la nota de credito cubre todo, el sistema completa con transferencia (ver `pagos` mas abajo): se calcula igual que en el servidor.
-  const idsElegidos = mixto ? ((parseInt(entrega1) || 0) > 0 ? [pago1, pago2] : []) : medioSel ? [medioSel] : [];
   const idsPago = (n: number) => {
     const m = nota && n > 0 ? montoNotaAplicable(n, nota.saldo, nota.ajustePct) : 0;
     return nota && m > 0 && Math.max(0, n - Math.round(m / (1 + nota.ajustePct / 100))) === 0 ? ["transferencia"] : idsElegidos;
   };
-  const auto1 = mejorPromo(promosParaMedios(promos, idsElegidos), itemsPromo);
-  const auto = mejorPromo(promosParaMedios(promos, idsPago(subtotal - auto1.descuento)), itemsPromo);
+  const auto1 = mejorPromo(promosParaMedios(autos, idsElegidos), itemsPromo);
+  const auto = mejorPromo(promosParaMedios(autos, idsPago(subtotal - auto1.descuento)), itemsPromo);
   // La mejor promo de todas (sin mirar el medio): si es una que exige otro medio de pago, se le avisa al cajero.
-  const mejorSinMedio = mejorPromo(promos, itemsPromo);
+  const mejorSinMedio = mejorPromo(autos, itemsPromo);
   const promoPorOtroMedio = !especial && mejorSinMedio.promo && mejorSinMedio.promo.medios.length > 0 && mejorSinMedio.descuento > auto.descuento ? mejorSinMedio : null;
   const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
   const nombrePromo = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
   const neto = subtotal - descuento;
-  const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promosParaMedios(promos, idsElegidos), itemsPromo, auto.descuento) : null;
+  const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promosParaMedios(autos, idsElegidos), itemsPromo, auto.descuento) : null;
   // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), los medios con descuento pasan a 0%: se paga el precio de la promo.
   // Productos unicos (efectivo cargado a mano): cada medio toma el % que da el carrito, igual que en el servidor.
-  const sinDescEfvo = !especial && !!auto.promo && !auto.promo.descuentoEfectivo;
-  const mediosVenta = sinDescEfvo ? mediosParaPromo(medios, auto.promo)
-    : mediosDelCarrito(medios, pagas.map((l) => ({ precio: l.producto.precio, preciosMedio: l.producto.preciosMedio, cant: l.cant })));
+  const sinDescEfvo = (!especial && !!auto.promo && !auto.promo.descuentoEfectivo) || pagas.some((l) => { const m = manualPromo(l); return !!m && !m.descuentoEfectivo; });
+  const mediosVenta = sinDescEfvo ? mediosParaPromo(medios, { descuentoEfectivo: false })
+    : mediosDelCarrito(medios, pagas.map((l) => ({ precio: precioEf(l), preciosMedio: l.producto.preciosMedio, cant: l.cant })));
   const promoAplicada = especial ? null : auto.promo;
 
   // Pagos: un solo medio (paga todo) o dos (el primero entrega un monto y el segundo paga lo que falta).
@@ -385,7 +390,7 @@ export default function VentaPage() {
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
     setCobrando(true);
     const cobradas = pagas.filter((l) => l.cant > 0);
-    const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null]), pagos, especial, calc.total, regalosCarrito, vendedorId]))}`, especial, calc.total, regalosCarrito, vendedorId);
+    const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null, promoManualId: manualPromo(l)?.id ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null, manualPromo(l)?.id ?? null]), pagos, especial, calc.total, regalosCarrito, vendedorId]))}`, especial, calc.total, regalosCarrito, vendedorId);
     setCobrando(false);
     // Si fallo (por ejemplo, cambiaron las promos), se vuelven a pedir: la pantalla muestra el total nuevo.
     if (!r.ok) { setRecargaPromos((x) => x + 1); return setAviso(r.motivo); }
@@ -466,9 +471,14 @@ export default function VentaPage() {
   return (
     <>
       <h1>Venta · {nombreSucursal(sucursal)}</h1>
-      {promos.length > 0 && (
+      {autos.length > 0 && (
         <p className="alerta no-print" style={{ margin: "-4px 0 12px" }}>
-          <strong>Promos de hoy:</strong> {promos.map((p) => `${descripcionPromo(p)} (hasta el ${p.hasta.slice(8, 10)}/${p.hasta.slice(5, 7)})`).join(" · ")}. Se aplican solas al escanear.
+          <strong>Promos de hoy:</strong> {autos.map((p) => `${descripcionPromo(p)} (hasta el ${p.hasta.slice(8, 10)}/${p.hasta.slice(5, 7)})`).join(" · ")}. Se aplican solas al escanear.
+        </p>
+      )}
+      {promos.some((p) => p.manual) && (
+        <p className="alerta no-print" style={{ margin: "-4px 0 12px" }}>
+          <strong>Promos a mano:</strong> {promos.filter((p) => p.manual).map((p) => `${p.nombre} (${p.productos?.slice(0, 2).join(", ") ?? ""}${(p.productos?.length ?? 0) > 2 ? "…" : ""})`).join(" · ")}. Aparecen en la fila de la prenda: tocá «Aplicar» solo si corresponde.
         </p>
       )}
       <div className="no-print" style={{ marginBottom: 12 }}>
@@ -478,20 +488,6 @@ export default function VentaPage() {
             placeholder="Escaneá una prenda, o escribí el nombre o el SKU" style={{ flex: 1, minWidth: 200 }} />
           <button type="submit">Agregar</button>
         </form>
-        {!sinCargar ? (
-          <button type="button" className="chico" style={{ marginTop: 6 }} onClick={() => { setSinCargar({ nombre: "", precio: "" }); setAviso(""); }}>Vender una prenda que no está cargada</button>
-        ) : (
-          <form className="fila tarjeta" style={{ gap: 8, marginTop: 8, flexWrap: "wrap", padding: 10 }} onSubmit={(e) => { e.preventDefault(); agregarSinCargar(); }}>
-            <strong style={{ width: "100%" }}>Prenda que no está cargada</strong>
-            <input type="text" value={sinCargar.nombre} autoFocus placeholder="Nombre (ej: remera basquet negra)" maxLength={120}
-              onChange={(e) => setSinCargar({ ...sinCargar, nombre: e.target.value })} style={{ flex: 2, minWidth: 180 }} />
-            <input type="number" inputMode="numeric" min={0} value={sinCargar.precio} placeholder="Precio de lista"
-              onChange={(e) => setSinCargar({ ...sinCargar, precio: e.target.value })} style={{ flex: 1, minWidth: 120 }} />
-            <button type="submit" className="principal">Agregar a la venta</button>
-            <button type="button" className="chico" onClick={() => setSinCargar(null)}>Cancelar</button>
-            <p className="aviso" style={{ width: "100%", margin: 0 }}>Se crea la prenda en el sistema (con código propio) y al cobrar se suma al stock de este local. Queda registrado para la oficina. El precio es el de lista (transferencia); efectivo y tarjeta se calculan como siempre.</p>
-          </form>
-        )}
         {lista.length > 0 && (
           <div className="sugerencias" role="listbox" aria-label="Prendas con stock en este local">
             {lista.map((p, i) => (
@@ -551,6 +547,18 @@ export default function VentaPage() {
                         </select>
                       </label></>
                     )}
+                    {!especial && !f.producto.preciosMedio && manualesDe(promos, f.producto.sku).map((p) => {
+                      const puesta = f.promoManual === p.id;
+                      const nuevo = precioConManual(p, f.producto.precio);
+                      return (
+                        <div key={p.id} style={{ marginTop: 6 }}>
+                          {puesta
+                            ? <><strong className="vuelto-monto" style={{ fontSize: 14 }}>✔ {p.nombre}: {pesos(nuevo)} c/u{p.sinCambio ? " · SIN CAMBIO" : ""}</strong> <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (claveLinea(x) === claveLinea(f) ? { ...x, promoManual: undefined } : x)))}>Sacar promo</button></>
+                            : <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (claveLinea(x) === claveLinea(f) ? { ...x, promoManual: p.id } : x)))}>{p.nombre} → {pesos(nuevo)} c/u · Aplicar</button>}
+                          {puesta && !manualPromo(f) && <><br /><span className="alerta" style={{ fontSize: 13 }}>Esta promo vale solo pagando con {textoMedios(p.medios)}.</span></>}
+                        </div>
+                      );
+                    })}
                     {promoAplicada && auto.detalle && auto.detalle.porItem[idx] > 0 && (
                       <><br /><strong className="vuelto-monto" style={{ fontSize: 14 }}>
                         {promoAplicada.tipo === "nxm" ? `${auto.detalle.gratis[idx] === 1 ? "1 GRATIS" : `${auto.detalle.gratis[idx]} GRATIS`} por ${textoPromo(promoAplicada)}`
@@ -565,7 +573,8 @@ export default function VentaPage() {
                     <button className="chico" onClick={() => cambiarCantidad(claveLinea(f), 1)} aria-label={`Una más de ${f.producto.nombre}`}>+</button>
                   </td>
                   <td className="der">
-                    <strong>{pesos(f.producto.precio * (f.cant - Math.min(f.regalo ?? 0, f.cant)))}</strong>
+                    {manualPromo(pagas[idx]) && <div className="aviso" style={{ textDecoration: "line-through" }}>{pesos(f.producto.precio * (f.cant - Math.min(f.regalo ?? 0, f.cant)))}</div>}
+                    <strong>{pesos(precioEf(pagas[idx]) * (f.cant - Math.min(f.regalo ?? 0, f.cant)))}</strong>
                     {(f.regalo ?? 0) > 0 && <div style={{ marginTop: 4 }}><span className="tag-empresa">{Math.min(f.regalo!, f.cant)} CORTESÍA EMPRESARIAL</span></div>}
                   </td>
                   <td className="der"><button className="chico" onClick={() => setLineas((l) => l.filter((x) => claveLinea(x) !== claveLinea(f)))}>Quitar</button></td>
@@ -717,32 +726,6 @@ export default function VentaPage() {
           </div>
         )}
 
-        {!soloCortesia && promosHoy.especial && lineas.length > 0 && !especial && (
-          <div style={{ marginTop: 12 }}>
-            {!verEsp ? (
-              <button className="chico" onClick={() => setVerEsp(true)} style={{ opacity: 0.7 }}>Descuento especial (solo si lo consultaste)</button>
-            ) : (
-              <form className="vuelto" onSubmit={aplicarEspecial} style={{ display: "grid", gap: 8 }}>
-                {errEsp && <p className="alerta mala" role="alert" style={{ margin: 0 }}>{errEsp}</p>}
-                <strong>Descuento especial</strong>
-                <span className="aviso">Solo si lo consultaste con la oficina. Reemplaza a la promo del día y queda registrado con tu usuario, el motivo y quién lo autorizó.</span>
-                <div className="fila" style={{ gap: 8, flexWrap: "wrap" }}>
-                  <input type="number" inputMode="decimal" min={1} max={TOPE_PCT} step={0.5} placeholder="%" value={formEsp.pct}
-                    onChange={(e) => setFormEsp({ ...formEsp, pct: e.target.value })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 90 }} required />
-                  <input placeholder="Motivo (ej. clienta mayorista)" value={formEsp.motivo} maxLength={200}
-                    onChange={(e) => setFormEsp({ ...formEsp, motivo: e.target.value })} style={{ flex: 2, minWidth: 200 }} required />
-                  <input placeholder="¿Quién lo autorizó?" value={formEsp.autorizo} maxLength={60}
-                    onChange={(e) => setFormEsp({ ...formEsp, autorizo: e.target.value })} style={{ flex: 1, minWidth: 150 }} required />
-                </div>
-                <div className="fila" style={{ gap: 8 }}>
-                  <button type="submit">Aplicar descuento</button>
-                  <button type="button" className="chico" onClick={() => { setVerEsp(false); setErrEsp(""); }}>Cancelar</button>
-                </div>
-              </form>
-            )}
-          </div>
-        )}
-
         {soloCortesia ? (
           <div className="empresa-opciones" style={{ padding: 14, display: "grid", gap: 10 }}>
             <strong style={{ fontSize: 18 }}>Todo es cortesía empresarial · no se cobra nada</strong>
@@ -794,8 +777,51 @@ export default function VentaPage() {
           <input type="checkbox" checked={autoTicket} onChange={(e) => setAutoTicket(e.target.checked)} />
           <span>Imprimir el ticket automáticamente al cobrar (en esta PC)</span>
         </label>
+        <details className="empresa-opciones mas-opciones" open={unidadesRegalo > 0 || !!sinCargar || verEsp || undefined}>
+          <summary>Más opciones <span className="aviso">· prenda no cargada, descuento especial, cortesía</span></summary>
+          <div className="empresa-cuerpo">
+        {!sinCargar ? (
+          <button type="button" className="chico" style={{ margin: "4px 0" }} onClick={() => { setSinCargar({ nombre: "", precio: "" }); setAviso(""); }}>Vender una prenda que no está cargada</button>
+        ) : (
+          <form className="fila tarjeta" style={{ gap: 8, marginTop: 8, flexWrap: "wrap", padding: 10 }} onSubmit={(e) => { e.preventDefault(); agregarSinCargar(); }}>
+            <strong style={{ width: "100%" }}>Prenda que no está cargada</strong>
+            <input type="text" value={sinCargar.nombre} autoFocus placeholder="Nombre (ej: remera basquet negra)" maxLength={120}
+              onChange={(e) => setSinCargar({ ...sinCargar, nombre: e.target.value })} style={{ flex: 2, minWidth: 180 }} />
+            <input type="number" inputMode="numeric" min={0} value={sinCargar.precio} placeholder="Precio de lista"
+              onChange={(e) => setSinCargar({ ...sinCargar, precio: e.target.value })} style={{ flex: 1, minWidth: 120 }} />
+            <button type="submit" className="principal">Agregar a la venta</button>
+            <button type="button" className="chico" onClick={() => setSinCargar(null)}>Cancelar</button>
+            <p className="aviso" style={{ width: "100%", margin: 0 }}>Se crea la prenda en el sistema (con código propio) y al cobrar se suma al stock de este local. Queda registrado para la oficina. El precio es el de lista (transferencia); efectivo y tarjeta se calculan como siempre.</p>
+          </form>
+        )}
+        {!soloCortesia && promosHoy.especial && lineas.length > 0 && !especial && (
+          <div style={{ marginTop: 12 }}>
+            {!verEsp ? (
+              <button className="chico" onClick={() => setVerEsp(true)} style={{ opacity: 0.7 }}>Descuento especial (solo si lo consultaste)</button>
+            ) : (
+              <form className="vuelto" onSubmit={aplicarEspecial} style={{ display: "grid", gap: 8 }}>
+                {errEsp && <p className="alerta mala" role="alert" style={{ margin: 0 }}>{errEsp}</p>}
+                <strong>Descuento especial</strong>
+                <span className="aviso">Solo si lo consultaste con la oficina. Reemplaza a la promo del día y queda registrado con tu usuario, el motivo y quién lo autorizó.</span>
+                <div className="fila" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <input type="number" inputMode="decimal" min={1} max={TOPE_PCT} step={0.5} placeholder="%" value={formEsp.pct}
+                    onChange={(e) => setFormEsp({ ...formEsp, pct: e.target.value })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 90 }} required />
+                  <input placeholder="Motivo (ej. clienta mayorista)" value={formEsp.motivo} maxLength={200}
+                    onChange={(e) => setFormEsp({ ...formEsp, motivo: e.target.value })} style={{ flex: 2, minWidth: 200 }} required />
+                  <input placeholder="¿Quién lo autorizó?" value={formEsp.autorizo} maxLength={60}
+                    onChange={(e) => setFormEsp({ ...formEsp, autorizo: e.target.value })} style={{ flex: 1, minWidth: 150 }} required />
+                </div>
+                <div className="fila" style={{ gap: 8 }}>
+                  <button type="submit">Aplicar descuento</button>
+                  <button type="button" className="chico" onClick={() => { setVerEsp(false); setErrEsp(""); }}>Cancelar</button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
         {puedeRetiro && lineas.length > 0 && (
-          <details className="empresa-opciones" open={unidadesRegalo > 0 || undefined}>
+          <details className="empresa-opciones" style={{ marginTop: 8 }} open={unidadesRegalo > 0 || undefined}>
             <summary>Cortesía empresarial <span className="aviso">· prendas que no se cobran (solo si la empresa lo decidió)</span></summary>
             <div className="empresa-cuerpo">
               <span className="aviso">Elegí cuáles y cuántas no se cobran. Pueden ser algunas de la compra o todas (ahí no se cobra nada y sale un comprobante). En el ticket salen como «Cortesía de la casa».</span>
@@ -817,6 +843,8 @@ export default function VentaPage() {
             </div>
           </details>
         )}
+          </div>
+        </details>
       </div>
 
       {ultimaCortesia && (

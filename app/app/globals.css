@@ -266,3 +266,5 @@ a.boton.principal { background: var(--acento); border-color: var(--acento); colo
 .empresa-cuerpo { display: grid; gap: 10px; padding: 0 14px 14px; }
 .empresa-cuerpo hr { width: 100%; border: 0; border-top: 1px solid rgba(124, 92, 191, 0.4); margin: 4px 0; }
 .tag-empresa { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #7c5cbf; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
+.mas-opciones { border-color: rgba(128, 128, 128, 0.4); background: transparent; }
+.mas-opciones > summary { color: inherit; font-weight: 500; }

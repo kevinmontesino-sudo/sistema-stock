@@ -14,6 +14,9 @@ export type Promo = {
   sinCambio: boolean;         // las prendas que entran quedan sin cambio
   medios: string[];           // medios de pago con los que vale (ids de medios_pago); vacio = con cualquiera
   categorias?: string[];      // nombres de las categorias (para mostrar)
+  skus: string[];             // vale solo para estos productos (vacio = todos los de las categorias)
+  manual: boolean;            // no se aplica sola: el vendedor la toca en la fila de la prenda (solo porcentaje o precio, y con productos)
+  productos?: string[];       // nombres de los productos (para mostrar)
 };
 // Nombre de cada medio para mostrar en las promos ("tarjeta" es el credito).
 export const NOMBRE_MEDIO_PROMO: Record<string, string> = { efectivo: "efectivo", transferencia: "transferencia", tarjeta: "tarjeta" };
@@ -26,7 +29,7 @@ export function valeConMedios(p: Pick<Promo, "medios">, pagados: string[]) {
   return ids.length > 0 && ids.every((id) => p.medios.includes(id));
 }
 export const promosParaMedios = <T extends Pick<Promo, "medios">>(promos: T[], pagados: string[]) => promos.filter((p) => valeConMedios(p, pagados));
-export type ItemPromo = { tipo: string; precio: number; cant: number };
+export type ItemPromo = { tipo: string; precio: number; cant: number; sku?: string };
 export type Detalle = {
   descuento: number;
   porItem: number[];  // cuanto se descuenta en cada renglon del carrito
@@ -39,7 +42,15 @@ export type PromoAplicada = { promo: Promo | null; descuento: number; detalle: D
 export const TOPE_PCT = 50;
 
 const pesos = (n: number) => "$" + n.toLocaleString("es-AR");
-const entra = (p: Pick<Promo, "tipos">, i: ItemPromo) => p.tipos.length === 0 || p.tipos.includes(i.tipo);
+const entra = (p: Pick<Promo, "tipos"> & { skus?: string[] }, i: ItemPromo) =>
+  (p.tipos.length === 0 || p.tipos.includes(i.tipo)) && (!p.skus || p.skus.length === 0 || (!!i.sku && p.skus.includes(i.sku)));
+
+// Promos "a mano" que se pueden tocar en la fila de una prenda (las automaticas no).
+export const manualesDe = (promos: Promo[], sku: string) => promos.filter((p) => p.manual && p.skus.includes(sku));
+export const automaticas = (promos: Promo[]) => promos.filter((p) => !p.manual);
+// Precio de UNA unidad con la promo a mano: porcentaje (redondeado) o precio fijo (si la prenda ya vale menos, queda igual).
+export const precioConManual = (p: Pick<Promo, "tipo" | "pct" | "precio">, precio: number) =>
+  p.tipo === "porcentaje" ? precio - Math.round((precio * Number(p.pct)) / 100) : Math.min(precio, p.precio ?? precio);
 const cuantas = (n: number, una: string, varias: string) => (n === 1 ? una : varias);
 
 // Rotulo corto: "3x2", "20% off", "$4.500 c/u", "$9.690 c/u x12+".
@@ -50,8 +61,8 @@ export function textoPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "precio">
 }
 
 // Que hace la promo, en una frase para el cajero y para la oficina. Ej.: "Llevando 3 prendas, la más barata va gratis".
-export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "precio" | "sinCambio" | "descuentoEfectivo"> & { medios?: string[]; categorias?: string[] }) {
-  const cats = p.categorias?.length ? p.categorias.join(", ").toLowerCase() : "";
+export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "precio" | "sinCambio" | "descuentoEfectivo"> & { medios?: string[]; categorias?: string[]; productos?: string[]; skus?: string[]; manual?: boolean }) {
+  const cats = p.skus?.length ? (p.productos?.length ? p.productos.slice(0, 3).join(", ").toLowerCase() + (p.productos.length > 3 ? ` y ${p.productos.length - 3} más` : "") : `${p.skus.length} productos`) : p.categorias?.length ? p.categorias.join(", ").toLowerCase() : "";
   const de = cats ? ` (${cats})` : "";
   let s: string;
   if (p.tipo === "nxm") {
@@ -64,6 +75,7 @@ export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "pr
   }
   if (!p.descuentoEfectivo) s += " (precio único, sin descuento por medio de pago)";
   if (p.medios?.length) s += ` · SOLO pagando con ${textoMedios(p.medios)}`;
+  if (p.manual) s += " · A MANO: el vendedor la aplica en la fila de la prenda";
   if (p.sinCambio) s += " · SIN CAMBIO";
   return s;
 }
@@ -120,7 +132,8 @@ export function sugerenciaPromo(promos: Promo[], items: ItemPromo[], actual: num
     if (faltan === 0 || faltan > 4) continue;
     // Solo si sumando esas prendas (de las mas baratas que lleva) el descuento supera al actual.
     const barata = Math.min(...items.filter((i) => entra(p, i)).map((i) => i.precio));
-    const conMas = detalleDe(p, [...items, { tipo: items.find((i) => entra(p, i) && i.precio === barata)!.tipo, precio: barata, cant: faltan }]).descuento;
+    const ref = items.find((i) => entra(p, i) && i.precio === barata)!;
+    const conMas = detalleDe(p, [...items, { tipo: ref.tipo, sku: ref.sku, precio: barata, cant: faltan }]).descuento;
     if (conMas <= actual) continue;
     const que = p.categorias?.length ? p.categorias.join("/").toLowerCase() : cuantas(faltan, "prenda", "prendas");
     const texto = p.tipo === "nxm"

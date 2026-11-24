@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { crearPromoAdmin, desactivarPromoAdmin, promosAdmin } from "@/app/admin/acciones";
+import { buscarProductosPromo, crearPromoAdmin, desactivarPromoAdmin, promosAdmin } from "@/app/admin/acciones";
 import { empresa } from "@/lib/empresa.config";
 import type { PromoFila } from "@/lib/promosAdmin";
 import { descripcionPromo, NOMBRE_MEDIO_PROMO, textoPromo, TOPE_PCT, type TipoPromo } from "@/lib/promos";
@@ -33,7 +33,7 @@ function finde() {
   if (dow === 6) return { desde: h, hasta: masDias(h, 1) };
   return { desde: masDias(h, 6 - dow), hasta: masDias(h, 7 - dow) };
 }
-const VACIO = { plantilla: "3x2", n: 3, m: 2, pct: 20, precio: 0, nombre: "", sucursales: [] as string[], tipos: [] as string[], desde: "", hasta: "", sinCambio: false, efectivo: true, medios: [] as string[] };
+const VACIO = { plantilla: "3x2", n: 3, m: 2, pct: 20, precio: 0, nombre: "", sucursales: [] as string[], tipos: [] as string[], desde: "", hasta: "", sinCambio: false, efectivo: true, medios: [] as string[], manual: false, productos: [] as { sku: string; nombre: string; precio: number }[] };
 
 export default function Promos() {
   const [promos, setPromos] = useState<PromoFila[]>([]);
@@ -44,6 +44,14 @@ export default function Promos() {
   const [form, setForm] = useState(() => ({ ...VACIO, desde: hoy(), hasta: hoy() }));
   const [version, setVersion] = useState(0);
   const [ocupado, setOcupado] = useState(false);
+  const [q, setQ] = useState("");
+  const [hallados, setHallados] = useState<{ sku: string; nombre: string; precio: number }[]>([]);
+  useEffect(() => {
+    if (q.trim().length < 2) { setHallados([]); return; }
+    let vivo = true;
+    const t = setTimeout(() => buscarProductosPromo(q).then((r) => vivo && r.ok && setHallados(r.productos)), 250);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [q]);
 
   useEffect(() => {
     let vivo = true;
@@ -73,7 +81,12 @@ export default function Promos() {
     precio: tipo === "precio" ? form.precio : null,
   };
   const cats = form.tipos.map((c) => categorias.find((x) => x.codigo === c)?.nombre ?? c);
-  const frase = descripcionPromo({ ...datos, categorias: cats, sinCambio: form.sinCambio, descuentoEfectivo: form.efectivo, medios: form.medios });
+  const skus = form.productos.map((x) => x.sku);
+  const puedeManual = tipo !== "nxm" && !plantilla.minimo && skus.length > 0;
+  const manual = form.manual && puedeManual;
+  const frase = descripcionPromo({ ...datos, categorias: cats, sinCambio: form.sinCambio, descuentoEfectivo: form.efectivo, medios: form.medios, skus, productos: form.productos.map((x) => x.nombre), manual });
+  const tildar = (x: { sku: string; nombre: string; precio: number }) => setForm((f) => ({ ...f, productos: f.productos.some((y) => y.sku === x.sku) ? f.productos.filter((y) => y.sku !== x.sku) : [...f.productos, x] }));
+  const tildarTodos = () => setForm((f) => ({ ...f, productos: [...f.productos, ...hallados.filter((x) => !f.productos.some((y) => y.sku === x.sku))] }));
   const donde = form.sucursales.length ? form.sucursales.map(nombreSucursal).join(", ") : "todos los locales";
   const cuando = form.desde === form.hasta ? `El ${diaLindo(form.desde)}` : `Del ${diaLindo(form.desde)} al ${diaLindo(form.hasta)}`;
   const listo = tipo !== "precio" || form.precio > 0;
@@ -89,7 +102,7 @@ export default function Promos() {
     setOcupado(true);
     const r = await crearPromoAdmin({
       ...datos, nombre: form.nombre, desde: form.desde, hasta: form.hasta, sucursales: form.sucursales, tipos: form.tipos,
-      descuento_efectivo: form.efectivo, sin_cambio: form.sinCambio, medios: form.medios,
+      descuento_efectivo: form.efectivo, sin_cambio: form.sinCambio, medios: form.medios, skus, manual,
     });
     setOcupado(false);
     if (!r.ok) return setMsg({ texto: r.motivo, mala: true });
@@ -111,7 +124,7 @@ export default function Promos() {
     <>
       <h1>Promos</h1>
       <p className="aviso" style={{ marginTop: -8 }}>
-        Se aplican solas en la caja al escanear, en los locales y días que elijas. No se suman: si hay varias, va la que más descuenta.
+        Se aplican solas en la caja al escanear, en los locales y días que elijas (las «a mano» las toca el vendedor en la prenda). No se suman: si hay varias, va la que más descuenta.
         En un NxM no se pagan las prendas más baratas. César también las puede cargar desde su Claude.
       </p>
       {msg && <p className={`alerta ${msg.mala ? "mala" : ""}`} role="alert">{msg.texto}</p>}
@@ -154,6 +167,33 @@ export default function Promos() {
           {categorias.map((c) => (
             <button key={c.codigo} type="button" className={`chico ${form.tipos.includes(c.codigo) ? "on" : ""}`} onClick={() => setForm({ ...form, tipos: alternar(form.tipos, c.codigo) })}>{c.nombre}</button>
           ))}
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <strong>Solo para algunos productos <span className="aviso">(opcional: si no elegís ninguno, vale para toda la categoría)</span></strong>
+          <input placeholder="Buscar por nombre o código (ej. short de jean)" value={q} onChange={(e) => setQ(e.target.value)} />
+          {hallados.length > 0 && (
+            <div className="tarjeta" style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 4, padding: 8 }}>
+              <button type="button" className="chico" onClick={tildarTodos} style={{ justifySelf: "start" }}>Tildar los {hallados.length} resultados</button>
+              {hallados.map((x) => (
+                <label key={x.sku} className="fila" style={{ gap: 8 }}>
+                  <input type="checkbox" checked={skus.includes(x.sku)} onChange={() => tildar(x)} />
+                  <span>{x.nombre} <span className="mono interno">{x.sku}</span> · {pesos(x.precio)}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {form.productos.length > 0 && (
+            <div className="fila" style={{ gap: 6, flexWrap: "wrap" }}>
+              {form.productos.map((x) => <button key={x.sku} type="button" className="chico on" onClick={() => tildar(x)} title="Sacar">{x.nombre} ✕</button>)}
+              <button type="button" className="chico" onClick={() => setForm({ ...form, productos: [], manual: false })}>Sacar todos</button>
+            </div>
+          )}
+          {puedeManual && (
+            <label className="fila" style={{ gap: 8 }}>
+              <input type="checkbox" checked={form.manual} onChange={(e) => setForm({ ...form, manual: e.target.checked })} />
+              <span><strong>A mano en la caja</strong> <span className="aviso">(para cuando solo algunos talles entran: no se aplica sola, el vendedor la toca en la fila de la prenda)</span></span>
+            </label>
+          )}
         </div>
         <div className="fila" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <span className="aviso">¿Con qué se paga?</span>

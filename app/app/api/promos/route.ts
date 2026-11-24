@@ -59,6 +59,7 @@ export async function GET(req: Request) {
           { tipo: "precio", precio: 1000, sucursales: ["white"], desde: "2026-11-08", hasta: "2026-11-08", sin_cambio: true, nombre: "Feria todo a $1.000" },
           { tipo: "precio", precio: 4500, tipos: ["BUZ"], sucursales: ["sanlorenzo"], desde: "2026-11-08", hasta: "2026-11-09", nombre: "Feria de buzos" },
           { tipo: "precio", precio: 9690, n: 12, tipos: ["MAL"], desde: "2026-11-06", hasta: "2026-12-31", nombre: "Mallas por docena" },
+          { tipo: "precio", precio: 9000, skus: ["SH0000029"], manual: true, desde: "2026-11-25", hasta: "2026-12-31", nombre: "Short jean talle 38 a $9.000" }, // "skus": solo esos productos; "manual": el vendedor la toca en la fila de la prenda (no se aplica sola)
         ],
       },
       desactivar: "DELETE /api/promos?id=N",
