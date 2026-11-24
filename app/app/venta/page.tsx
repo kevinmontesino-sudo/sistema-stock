@@ -281,7 +281,7 @@ export default function VentaPage() {
     if (primero) return agregarProducto(primero);
     const todas = await buscarProductos({ q: t });
     if (todas.ok && todas.productos[0]) return agregarProducto(todas.productos[0]);
-    setAviso(`No hay ninguna prenda cargada que coincida con "${t}". Si no está cargada, abrí «Más opciones» (abajo) y tocá «Vender una prenda que no está cargada».`);
+    setAviso(`No hay ninguna prenda cargada que coincida con "${t}". Si no está cargada, tocá «Vender una prenda que no está cargada» (debajo del buscador).`);
     setSinCargar({ nombre: t, precio: "" });
   }
 
@@ -501,6 +501,20 @@ export default function VentaPage() {
               </button>
             ))}
           </div>
+        )}
+        {!sinCargar ? (
+          <button type="button" className="chico" style={{ margin: "8px 0 0" }} onClick={() => { setSinCargar({ nombre: "", precio: "" }); setAviso(""); }}>Vender una prenda que no está cargada</button>
+        ) : (
+          <form className="fila tarjeta" style={{ gap: 8, marginTop: 8, flexWrap: "wrap", padding: 10 }} onSubmit={(e) => { e.preventDefault(); agregarSinCargar(); }}>
+            <strong style={{ width: "100%" }}>Prenda que no está cargada</strong>
+            <input type="text" value={sinCargar.nombre} autoFocus placeholder="Nombre (ej: remera basquet negra)" maxLength={120}
+              onChange={(e) => setSinCargar({ ...sinCargar, nombre: e.target.value })} style={{ flex: 2, minWidth: 180 }} />
+            <input type="number" inputMode="numeric" min={0} value={sinCargar.precio} placeholder="Precio de lista"
+              onChange={(e) => setSinCargar({ ...sinCargar, precio: e.target.value })} style={{ flex: 1, minWidth: 120 }} />
+            <button type="submit" className="principal">Agregar a la venta</button>
+            <button type="button" className="chico" onClick={() => setSinCargar(null)}>Cancelar</button>
+            <p className="aviso" style={{ width: "100%", margin: 0 }}>Se crea la prenda en el sistema (con código propio) y al cobrar se suma al stock de este local. Queda registrado para la oficina. El precio es el de lista (transferencia); efectivo y tarjeta se calculan como siempre.</p>
+          </form>
         )}
       </div>
       {aviso && <p className="alerta mala no-print" role="alert" style={{ margin: "0 0 12px", fontSize: 16 }}>{aviso}</p>}
@@ -807,23 +821,10 @@ export default function VentaPage() {
             </div>
           </details>
         )}
-        <details className="empresa-opciones mas-opciones" open={!!sinCargar || verEsp || undefined}>
-          <summary>Más opciones <span className="aviso">· prenda no cargada, descuento especial</span></summary>
+        {!soloCortesia && promosHoy.especial && lineas.length > 0 && !especial && (
+        <details className="empresa-opciones mas-opciones" open={verEsp || undefined}>
+          <summary>Más opciones <span className="aviso">· descuento especial</span></summary>
           <div className="empresa-cuerpo">
-        {!sinCargar ? (
-          <button type="button" className="chico" style={{ margin: "4px 0" }} onClick={() => { setSinCargar({ nombre: "", precio: "" }); setAviso(""); }}>Vender una prenda que no está cargada</button>
-        ) : (
-          <form className="fila tarjeta" style={{ gap: 8, marginTop: 8, flexWrap: "wrap", padding: 10 }} onSubmit={(e) => { e.preventDefault(); agregarSinCargar(); }}>
-            <strong style={{ width: "100%" }}>Prenda que no está cargada</strong>
-            <input type="text" value={sinCargar.nombre} autoFocus placeholder="Nombre (ej: remera basquet negra)" maxLength={120}
-              onChange={(e) => setSinCargar({ ...sinCargar, nombre: e.target.value })} style={{ flex: 2, minWidth: 180 }} />
-            <input type="number" inputMode="numeric" min={0} value={sinCargar.precio} placeholder="Precio de lista"
-              onChange={(e) => setSinCargar({ ...sinCargar, precio: e.target.value })} style={{ flex: 1, minWidth: 120 }} />
-            <button type="submit" className="principal">Agregar a la venta</button>
-            <button type="button" className="chico" onClick={() => setSinCargar(null)}>Cancelar</button>
-            <p className="aviso" style={{ width: "100%", margin: 0 }}>Se crea la prenda en el sistema (con código propio) y al cobrar se suma al stock de este local. Queda registrado para la oficina. El precio es el de lista (transferencia); efectivo y tarjeta se calculan como siempre.</p>
-          </form>
-        )}
         {!soloCortesia && promosHoy.especial && lineas.length > 0 && !especial && (
           <div style={{ marginTop: 12 }}>
             {!verEsp ? (
@@ -852,6 +853,7 @@ export default function VentaPage() {
 
           </div>
         </details>
+        )}
       </div>
 
       {ultimaCortesia && (
