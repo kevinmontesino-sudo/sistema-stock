@@ -82,7 +82,7 @@ export default function Promos() {
   };
   const cats = form.tipos.map((c) => categorias.find((x) => x.codigo === c)?.nombre ?? c);
   const skus = form.productos.map((x) => x.sku);
-  const puedeManual = tipo !== "nxm" && !plantilla.minimo && skus.length > 0;
+  const puedeManual = (tipo === "nxm" || !plantilla.minimo) && skus.length > 0;
   const manual = form.manual && puedeManual;
   const frase = descripcionPromo({ ...datos, categorias: cats, sinCambio: form.sinCambio, descuentoEfectivo: form.efectivo, medios: form.medios, skus, productos: form.productos.map((x) => x.nombre), manual });
   const tildar = (x: { sku: string; nombre: string; precio: number }) => setForm((f) => ({ ...f, productos: f.productos.some((y) => y.sku === x.sku) ? f.productos.filter((y) => y.sku !== x.sku) : [...f.productos, x] }));
@@ -191,7 +191,7 @@ export default function Promos() {
           {puedeManual && (
             <label className="fila" style={{ gap: 8 }}>
               <input type="checkbox" checked={form.manual} onChange={(e) => setForm({ ...form, manual: e.target.checked })} />
-              <span><strong>A mano en la caja</strong> <span className="aviso">(para cuando solo algunos talles entran: no se aplica sola, el vendedor la toca en la fila de la prenda)</span></span>
+              <span><strong>A mano en la caja</strong> <span className="aviso">(para cuando solo algunos talles entran: no se aplica sola, el vendedor toca «Aplicar» en la fila de cada prenda que entra{tipo === "nxm" ? "; el NxM cuenta solo las que marque" : ""})</span></span>
             </label>
           )}
         </div>

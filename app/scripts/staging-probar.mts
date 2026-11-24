@@ -773,12 +773,12 @@ try {
     try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from retiros_efectivo where retirado_por in ('ZZ Hugo', 'ZZ Esteban')"); await cl.query("delete from ajustes_caja_fuerte where motivo = 'ZZ conteo'"); await cl.query("commit"); } finally { cl.release(); }
   });
   await paso("Promo a mano por producto", async () => {
-    const A = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Mano A ${sello}`, precio: 10000, cantidad: 12, reparto: { [LOCAL]: 12 } })).sku;
+    const A = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Mano A ${sello}`, precio: 10000, cantidad: 30, reparto: { [LOCAL]: 30 } })).sku;
     const llega = async (sku: string) => { for (const t of (await repo.listarPendientes(LOCAL)).filter((x) => x.sku === sku)) await repo.recibirTraslado(t.id, LOCAL); };
     const B = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Mano B ${sello}`, precio: 6000, cantidad: 6, reparto: { [LOCAL]: 6 } })).sku;
     await llega(A); await llega(B);
     await debeFallar("Promo a mano: sin productos no se puede", () => promosAdmin.crearPromo({ nombre: "ZZ mano", tipo: "porcentaje", pct: 30, manual: true, desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /productos/);
-    await debeFallar("Promo a mano: NxM no se puede", () => promosAdmin.crearPromo({ nombre: "ZZ mano", tipo: "nxm", n: 3, m: 2, skus: [A], manual: true, desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /porcentaje o de precio/);
+    await debeFallar("Promo a mano NxM: sin productos no se puede", () => promosAdmin.crearPromo({ nombre: "ZZ mano", tipo: "nxm", n: 3, m: 2, manual: true, desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /productos/);
     await debeFallar("Promo por producto: SKU inexistente", () => promosAdmin.crearPromo({ nombre: "ZZ mano", tipo: "porcentaje", pct: 30, skus: ["XXX9999999"], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" }), /inexistente/);
     const p = await promosAdmin.crearPromo({ nombre: `ZZ Liquidacion ${sello}`, tipo: "porcentaje", pct: 30, skus: [A], manual: true, sucursales: [LOCAL], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" });
     check("Promo a mano: queda manual y con el producto", p.manual && p.skus.length === 1 && p.productos?.length === 1, JSON.stringify([p.manual, p.skus, p.productos]));
@@ -800,6 +800,25 @@ try {
     const p2 = await promosAdmin.crearPromo({ nombre: `ZZ Fijo ${sello}`, tipo: "precio", precio: 9000, skus: [A], manual: true, descuento_efectivo: true, sucursales: [LOCAL], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" });
     await vender("Venta con precio fijo a mano", [{ sku: A, cant: 2, promoManualId: p2.id }], [{ medioId: "efectivo", monto: null }], pc(18000, "efectivo"));
     await promosAdmin.desactivarPromo(p2.id);
+    // 3x2 a mano: solo cuentan las prendas que el vendedor marca (como el talle no esta en el sistema). A a 10.000.
+    const p3 = await promosAdmin.crearPromo({ nombre: `ZZ 3x2 mano ${sello}`, tipo: "nxm", n: 3, m: 2, skus: [A], manual: true, sucursales: [LOCAL], desde: hoy, hasta: hoy }, { usuarioId: null, origen: "staging-probar" });
+    check("3x2 a mano: se crea manual y NxM", p3.manual && p3.tipo === "nxm", JSON.stringify([p3.manual, p3.tipo]));
+    const mar = (cant: number) => [{ sku: A, cant, promoManualId: p3.id }];
+    await vender("3x2 a mano: sin marcar no se aplica sola", [{ sku: A, cant: 3 }], [{ medioId: "transferencia", monto: null }], pc(30000, "transferencia"));
+    await vender("3x2 a mano: dos marcadas no descuentan", mar(2), [{ medioId: "transferencia", monto: null }], pc(20000, "transferencia"));
+    await vender("3x2 a mano: tres marcadas, una gratis", mar(3), [{ medioId: "transferencia", monto: null }], pc(20000, "transferencia"));
+    await vender("3x2 a mano: cuatro marcadas, solo una gratis", mar(4), [{ medioId: "transferencia", monto: null }], pc(30000, "transferencia"));
+    await vender("3x2 a mano: el efectivo corre encima", mar(3), [{ medioId: "efectivo", monto: null }], pc(20000, "efectivo"));
+    const v3 = await vender("3x2 a mano: dos marcadas y otra prenda sin marcar no entra", [...mar(2), { sku: B, cant: 1 }], [{ medioId: "transferencia", monto: null }], pc(26000, "transferencia"));
+    const f3 = (await pool.query("select v.descuento_promo, v.promo_nombre, i.precio_lista, i.precio_original from ventas v join venta_items i on i.venta_id = v.id where v.codigo = $1 and i.sku = $2", [v3.codigo, A])).rows[0];
+    igual("3x2 a mano: sin descuento no deja nombre de promo ni toca el precio", [Number(f3.descuento_promo), f3.promo_nombre, f3.precio_lista, f3.precio_original], [0, null, 10000, null]);
+    const v4 = await vender("3x2 a mano: guarda el nombre de la promo", mar(3), [{ medioId: "transferencia", monto: null }], pc(20000, "transferencia"));
+    const f4 = (await pool.query("select descuento_promo, promo_nombre from ventas where codigo = $1", [v4.codigo])).rows[0];
+    igual("3x2 a mano: descuento y nombre en el ticket", [Number(f4.descuento_promo), /a mano/i.test(f4.promo_nombre)], [10000, true]);
+    await debeFallar("3x2 a mano: en un producto que no es de la promo no vale", () => repo.registrarVenta(LOCAL, [{ sku: B, cant: 3, promoManualId: p3.id }], [{ medioId: "transferencia", monto: null }]), /ya no vale/);
+    const fila3 = (await promosAdmin.listarPromos()).find((x) => x.id === p3.id);
+    igual("3x2 a mano: estadistica (ventas con descuento y plata descontada)", [fila3?.ventas, fila3?.descontado], [4, 40000]);
+    await promosAdmin.desactivarPromo(p3.id);
   });
 
   await paso("Controles de toda la base", async () => {

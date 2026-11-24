@@ -9,7 +9,7 @@ import type { DatosCortesia } from "@/lib/ticketRenglones";
 import { imprimirTicketPreferido } from "@/lib/imprimirTicket";
 import { compartirTicketPdf } from "@/lib/ticketPdf";
 import { usePuede, useSesion } from "@/components/SesionContext";
-import { automaticas, descripcionPromo, descuentoEspecial, manualesDe, mediosParaPromo, mejorPromo, precioConManual, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, valeConMedios, type Promo } from "@/lib/promos";
+import { automaticas, descripcionPromo, descuentoEspecial, esManualNxm, manualesDe, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, valeConMedios, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
   calcularPagos, mediosDelCarrito, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
@@ -315,25 +315,27 @@ export default function VentaPage() {
     ? promos.find((p) => p.id === l.promoManual && p.manual && p.skus.includes(l.producto.sku) && valeConMedios(p, idsElegidos)) ?? null : null);
   const precioEf = (l: Linea) => { const m = manualPromo(l); return m ? precioConManual(m, l.producto.precio) : l.producto.precio; };
   const subtotal = pagas.reduce((s, f) => s + precioEf(f) * f.cant, 0);
-  const itemsPromo = pagas.map((l) => ({ tipo: l.producto.tipo, sku: l.producto.sku, precio: precioEf(l), cant: manualPromo(l) ? 0 : l.cant }));
+  // Las promos NxM a mano no cambian el precio: cuentan solo las prendas marcadas (manualId). Las de % o precio fijo salen de las automaticas (cant 0).
+  const itemsPromo = pagas.map((l) => { const m = manualPromo(l); const nxm = !!m && esManualNxm(m); return { tipo: l.producto.tipo, sku: l.producto.sku, precio: precioEf(l), cant: m && !nxm ? 0 : l.cant, manualId: nxm ? m!.id : null }; });
   // Promos que valen solo con ciertos medios de pago (ej. solo credito): cuentan unicamente si TODO el pago va con esos medios.
   // Si la nota de credito cubre todo, el sistema completa con transferencia (ver `pagos` mas abajo): se calcula igual que en el servidor.
   const idsPago = (n: number) => {
     const m = nota && n > 0 ? montoNotaAplicable(n, nota.saldo, nota.ajustePct) : 0;
     return nota && m > 0 && Math.max(0, n - Math.round(m / (1 + nota.ajustePct / 100))) === 0 ? ["transferencia"] : idsElegidos;
   };
-  const auto1 = mejorPromo(promosParaMedios(autos, idsElegidos), itemsPromo);
-  const auto = mejorPromo(promosParaMedios(autos, idsPago(subtotal - auto1.descuento)), itemsPromo);
+  const conNxmManual = promos.filter((p) => !p.manual || esManualNxm(p));
+  const auto1 = mejorPromoConManuales(promosParaMedios(conNxmManual, idsElegidos), itemsPromo);
+  const auto = mejorPromoConManuales(promosParaMedios(conNxmManual, idsPago(subtotal - auto1.descuento)), itemsPromo);
   // La mejor promo de todas (sin mirar el medio): si es una que exige otro medio de pago, se le avisa al cajero.
-  const mejorSinMedio = mejorPromo(autos, itemsPromo);
+  const mejorSinMedio = mejorPromoConManuales(conNxmManual, itemsPromo);
   const promoPorOtroMedio = !especial && mejorSinMedio.promo && mejorSinMedio.promo.medios.length > 0 && mejorSinMedio.descuento > auto.descuento ? mejorSinMedio : null;
   const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
-  const nombrePromo = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo ${auto.promo.nombre}` : "";
+  const nombrePromo = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)` : auto.promo ? `Promo${auto.promo.manual ? " a mano" : ""} ${auto.promo.nombre}` : "";
   const neto = subtotal - descuento;
   const sugerencia = !especial && lineas.length > 0 ? sugerenciaPromo(promosParaMedios(autos, idsElegidos), itemsPromo, auto.descuento) : null;
   // Si la promo que se aplica no lleva el descuento de efectivo (feria, mayorista), los medios con descuento pasan a 0%: se paga el precio de la promo.
   // Productos unicos (efectivo cargado a mano): cada medio toma el % que da el carrito, igual que en el servidor.
-  const sinDescEfvo = (!especial && !!auto.promo && !auto.promo.descuentoEfectivo) || pagas.some((l) => { const m = manualPromo(l); return !!m && !m.descuentoEfectivo; });
+  const sinDescEfvo = (!especial && !!auto.promo && !auto.promo.descuentoEfectivo) || pagas.some((l) => { const m = manualPromo(l); return !!m && !esManualNxm(m) && !m.descuentoEfectivo; });
   const mediosVenta = sinDescEfvo ? mediosParaPromo(medios, { descuentoEfectivo: false })
     : mediosDelCarrito(medios, pagas.map((l) => ({ precio: precioEf(l), preciosMedio: l.producto.preciosMedio, cant: l.cant })));
   const promoAplicada = especial ? null : auto.promo;
@@ -549,12 +551,17 @@ export default function VentaPage() {
                     )}
                     {!especial && !f.producto.preciosMedio && manualesDe(promos, f.producto.sku).map((p) => {
                       const puesta = f.promoManual === p.id;
+                      const nxm = esManualNxm(p);
                       const nuevo = precioConManual(p, f.producto.precio);
                       return (
                         <div key={p.id} style={{ marginTop: 6 }}>
                           {puesta
-                            ? <><strong className="vuelto-monto" style={{ fontSize: 14 }}>✔ {p.nombre}: {pesos(nuevo)} c/u{p.sinCambio ? " · SIN CAMBIO" : ""}</strong> <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (claveLinea(x) === claveLinea(f) ? { ...x, promoManual: undefined } : x)))}>Sacar promo</button></>
-                            : <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (claveLinea(x) === claveLinea(f) ? { ...x, promoManual: p.id } : x)))}>{p.nombre} → {pesos(nuevo)} c/u · Aplicar</button>}
+                            ? <><strong className="vuelto-monto" style={{ fontSize: 14 }}>✔ {nxm ? `${p.nombre} (${textoPromo(p)}): esta prenda entra` : `${p.nombre}: ${pesos(nuevo)} c/u`}{p.sinCambio ? " · SIN CAMBIO" : ""}</strong> <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (claveLinea(x) === claveLinea(f) ? { ...x, promoManual: undefined } : x)))}>Sacar promo</button></>
+                            : <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (claveLinea(x) === claveLinea(f) ? { ...x, promoManual: p.id } : x)))}>{nxm ? `Aplica ${textoPromo(p)} (${p.nombre}) · Aplicar` : `${p.nombre} → ${pesos(nuevo)} c/u · Aplicar`}</button>}
+                          {puesta && nxm && manualPromo(f) && auto.promo?.id !== p.id && (() => {
+                            const marcadas = pagas.reduce((t, l) => t + (l.promoManual === p.id ? l.cant : 0), 0);
+                            return <><br /><span className="aviso" style={{ fontSize: 13 }}>Llevás {marcadas} marcada{marcadas === 1 ? "" : "s"}: marcá {(p.n ?? 0) - (marcadas % (p.n ?? 1)) } más del mismo tipo para que se descuente ({textoPromo(p)}).</span></>;
+                          })()}
                           {puesta && !manualPromo(f) && <><br /><span className="alerta" style={{ fontSize: 13 }}>Esta promo vale solo pagando con {textoMedios(p.medios)}.</span></>}
                         </div>
                       );
@@ -777,8 +784,31 @@ export default function VentaPage() {
           <input type="checkbox" checked={autoTicket} onChange={(e) => setAutoTicket(e.target.checked)} />
           <span>Imprimir el ticket automáticamente al cobrar (en esta PC)</span>
         </label>
-        <details className="empresa-opciones mas-opciones" open={unidadesRegalo > 0 || !!sinCargar || verEsp || undefined}>
-          <summary>Más opciones <span className="aviso">· prenda no cargada, descuento especial, cortesía</span></summary>
+        {puedeRetiro && lineas.length > 0 && (
+          <details className="empresa-opciones" style={{ marginTop: 12 }} open={unidadesRegalo > 0 || undefined}>
+            <summary>Cortesía empresarial <span className="aviso">· prendas que no se cobran (solo si la empresa lo decidió)</span></summary>
+            <div className="empresa-cuerpo">
+              <span className="aviso">Elegí cuáles y cuántas no se cobran. Pueden ser algunas de la compra o todas (ahí no se cobra nada y sale un comprobante). En el ticket salen como «Cortesía de la casa».</span>
+              {lineas.filter((f) => !f.faltante).map((f) => (
+                <div key={claveLinea(f)} className="fila" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <span>{f.producto.nombre} <span className="interno">({f.cant} en el carrito)</span></span>
+                  <span className="fila" style={{ gap: 4, whiteSpace: "nowrap" }}>
+                    <span>Cortesía:</span>
+                    <button className="chico" disabled={(f.regalo ?? 0) <= 0} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.max(0, (x.regalo ?? 0) - 1) } : x))} aria-label="Una menos de cortesía">−</button>
+                    <strong style={{ minWidth: 20, textAlign: "center" }}>{Math.min(f.regalo ?? 0, f.cant)}</strong>
+                    <button className="chico" disabled={(f.regalo ?? 0) >= f.cant} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.min(x.cant, (x.regalo ?? 0) + 1) } : x))} aria-label="Una más de cortesía">+</button>
+                  </span>
+                </div>
+              ))}
+              <div className="fila" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (x.faltante ? x : { ...x, regalo: x.cant })))}>Todo el carrito como cortesía</button>
+                {unidadesRegalo > 0 && <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => ({ ...x, regalo: 0 })))}>Quitar las cortesías</button>}
+              </div>
+            </div>
+          </details>
+        )}
+        <details className="empresa-opciones mas-opciones" open={!!sinCargar || verEsp || undefined}>
+          <summary>Más opciones <span className="aviso">· prenda no cargada, descuento especial</span></summary>
           <div className="empresa-cuerpo">
         {!sinCargar ? (
           <button type="button" className="chico" style={{ margin: "4px 0" }} onClick={() => { setSinCargar({ nombre: "", precio: "" }); setAviso(""); }}>Vender una prenda que no está cargada</button>
@@ -820,29 +850,6 @@ export default function VentaPage() {
           </div>
         )}
 
-        {puedeRetiro && lineas.length > 0 && (
-          <details className="empresa-opciones" style={{ marginTop: 8 }} open={unidadesRegalo > 0 || undefined}>
-            <summary>Cortesía empresarial <span className="aviso">· prendas que no se cobran (solo si la empresa lo decidió)</span></summary>
-            <div className="empresa-cuerpo">
-              <span className="aviso">Elegí cuáles y cuántas no se cobran. Pueden ser algunas de la compra o todas (ahí no se cobra nada y sale un comprobante). En el ticket salen como «Cortesía de la casa».</span>
-              {lineas.filter((f) => !f.faltante).map((f) => (
-                <div key={claveLinea(f)} className="fila" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <span>{f.producto.nombre} <span className="interno">({f.cant} en el carrito)</span></span>
-                  <span className="fila" style={{ gap: 4, whiteSpace: "nowrap" }}>
-                    <span>Cortesía:</span>
-                    <button className="chico" disabled={(f.regalo ?? 0) <= 0} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.max(0, (x.regalo ?? 0) - 1) } : x))} aria-label="Una menos de cortesía">−</button>
-                    <strong style={{ minWidth: 20, textAlign: "center" }}>{Math.min(f.regalo ?? 0, f.cant)}</strong>
-                    <button className="chico" disabled={(f.regalo ?? 0) >= f.cant} onClick={() => setLineas((l) => l.map((x) => claveLinea(x) === claveLinea(f) ? { ...x, regalo: Math.min(x.cant, (x.regalo ?? 0) + 1) } : x))} aria-label="Una más de cortesía">+</button>
-                  </span>
-                </div>
-              ))}
-              <div className="fila" style={{ gap: 8, flexWrap: "wrap" }}>
-                <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => (x.faltante ? x : { ...x, regalo: x.cant })))}>Todo el carrito como cortesía</button>
-                {unidadesRegalo > 0 && <button type="button" className="chico" onClick={() => setLineas((l) => l.map((x) => ({ ...x, regalo: 0 })))}>Quitar las cortesías</button>}
-              </div>
-            </div>
-          </details>
-        )}
           </div>
         </details>
       </div>

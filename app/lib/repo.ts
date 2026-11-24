@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { DEPOSITO, empresa } from "./empresa.config";
 import { type Db, pool, tx } from "./db";
 import { usuarioEnCurso } from "./seguridad/contexto";
-import { descuentoEspecial, mediosParaPromo, mejorPromo, precioConManual, promosParaMedios, TOPE_PCT, valeConMedios, type Promo } from "./promos";
+import { descuentoEspecial, esManualNxm, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, TOPE_PCT, valeConMedios, type Promo } from "./promos";
 import { auditar } from "./seguridad/auditoria";
 import {
   capitalizar, nombreSucursal, normalizar, tipoDesdeNombre, totalReparto,
@@ -718,25 +718,27 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       if (!pm) return falla(`La promo a mano ya no vale para ${prods[i].nombre}. Sacala de la prenda y volvé a cobrar.`);
       if (prods[i].preciosMedio) return falla(`${prods[i].nombre} tiene precios propios por medio de pago: no admite promo a mano.`);
       if (!valeConMedios(pm, pagos.map((x) => x.medioId))) return falla(`La promo ${pm.nombre} vale solo con ${pm.medios.join(" o ")}.`);
-      if (precioConManual(pm, prods[i].precio) >= prods[i].precio) return falla(`La promo ${pm.nombre} no baja el precio de ${prods[i].nombre}.`);
+      if (!esManualNxm(pm) && precioConManual(pm, prods[i].precio) >= prods[i].precio) return falla(`La promo ${pm.nombre} no baja el precio de ${prods[i].nombre}.`);
       return pm;
     });
     const precios = prods.map((p, i) => (manuales[i] ? precioConManual(manuales[i]!, p.precio) : p.precio));
     const subtotal = prods.reduce((s, _p, i) => s + precios[i] * items[i].cant, 0);
     // Promo automatica: la elige el servidor con las promos de la base (lo que diga la pantalla no cuenta). El descuento especial la reemplaza.
     // Las prendas con promo a mano no entran en las automaticas.
-    const auto = especial ? { promo: null, descuento: 0, detalle: null } : mejorPromo(promosParaMedios(vigentes.filter((x) => !x.manual), pagos.map((p) => p.medioId)), prods.map((p, i) => ({ tipo: p.tipo, sku: p.sku, precio: precios[i], cant: manuales[i] ? 0 : items[i].cant })));
+    // Las promos NxM a mano (3x2 solo en algunos talles) cuentan solo las prendas marcadas por el vendedor.
+    const auto = especial ? { promo: null, descuento: 0, detalle: null } : mejorPromoConManuales(promosParaMedios(vigentes, pagos.map((p) => p.medioId)),
+      prods.map((p, i) => ({ tipo: p.tipo, sku: p.sku, precio: precios[i], cant: manuales[i] && !esManualNxm(manuales[i]!) ? 0 : items[i].cant, manualId: manuales[i] && esManualNxm(manuales[i]!) ? manuales[i]!.id : null })));
     const descuento = especial ? descuentoEspecial(subtotal, especial.pct) : auto.descuento;
-    const nombresManual = [...new Set(manuales.filter((x): x is Promo => !!x).map((x) => x.nombre))];
+    const nombresManual = [...new Set(manuales.filter((x): x is Promo => !!x && !esManualNxm(x)).map((x) => x.nombre))];
     const promoNombre = especial?.curvaPlus ? `${empresa.curvaPlus.nombre} (${especial.pct}%)` : especial ? `Descuento especial (${especial.pct}%)`
-      : [auto.promo ? `Promo ${auto.promo.nombre}` : "", ...nombresManual.map((n) => `Promo a mano ${n}`)].filter(Boolean).join(" + ") || null;
+      : [auto.promo ? `Promo${auto.promo.manual ? " a mano" : ""} ${auto.promo.nombre}` : "", ...nombresManual.map((n) => `Promo a mano ${n}`)].filter(Boolean).join(" + ") || null;
     // Lo que se paga a "precio de lista" despues de la promo: sobre eso se aplican los medios de pago.
     const neto = subtotal - descuento;
     // Pagos con nota de credito ("nota:N000001"): se bloquea la nota, se valida y entra como un medio mas con su propio ajuste.
     const notas = new Map<string, { id: number; saldo: number }>();
     // Una promo "sin descuento de efectivo" (feria, mayorista): los medios con descuento pasan a 0% (precio unico; ver mediosParaPromo).
     // Productos unicos (precio a mano por medio): cada medio toma el % que da el carrito. Con una promo de precio unico no se usan.
-    const sinDescEfvo = (!!auto.promo && !auto.promo.descuentoEfectivo) || manuales.some((x) => x && !x.descuentoEfectivo);
+    const sinDescEfvo = (!!auto.promo && !auto.promo.descuentoEfectivo) || manuales.some((x) => x && !esManualNxm(x) && !x.descuentoEfectivo);
     const medios = sinDescEfvo ? mediosParaPromo(mr.rows, { descuentoEfectivo: false })
       : mediosDelCarrito(mr.rows, prods.map((p, i) => ({ precio: precios[i], preciosMedio: p.preciosMedio, cant: items[i].cant })));
     const pagosOk: PagoEntrada[] = [];
@@ -787,13 +789,13 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       );
       if (nota) await c.query("update notas_credito set saldo = saldo - $2 where id = $1", [nota.id, p.monto]);
     }
-    const sinCambio = prods.map((_, i) => !!(auto.promo?.sinCambio && auto.detalle?.entran[i]) || !!manuales[i]?.sinCambio);
+    const sinCambio = prods.map((_, i) => !!(auto.promo?.sinCambio && auto.detalle?.entran[i]) || !!(manuales[i] && !esManualNxm(manuales[i]!) && manuales[i]!.sinCambio));
     for (const [idx, p] of prods.entries()) {
       const cant = items[idx].cant;
       await c.query(
         "insert into venta_items (venta_id, sku, nombre, precio_lista, cantidad, sin_cambio, stock_de, precio_original, promo_manual_id, promo_manual_nombre) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         [ventaId, p.sku, p.nombre, precios[idx], cant, sinCambio[idx], items[idx].origen === sucursal ? null : items[idx].origen,
-          manuales[idx] ? p.precio : null, manuales[idx]?.id ?? null, manuales[idx]?.nombre ?? null],
+          manuales[idx] && !esManualNxm(manuales[idx]!) ? p.precio : null, manuales[idx]?.id ?? null, manuales[idx]?.nombre ?? null],
       );
       await sumarStock(c, p.sku, items[idx].origen, -cant);
       await mov(c, p.sku, cant, items[idx].origen, null, "venta", { ventaId, ...(items[idx].origen !== sucursal ? { motivo: `Vendido desde ${nombreSucursal(sucursal)} con stock de ${nombreSucursal(items[idx].origen)}` } : {}) });

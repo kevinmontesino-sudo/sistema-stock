@@ -15,7 +15,7 @@ export type Promo = {
   medios: string[];           // medios de pago con los que vale (ids de medios_pago); vacio = con cualquiera
   categorias?: string[];      // nombres de las categorias (para mostrar)
   skus: string[];             // vale solo para estos productos (vacio = todos los de las categorias)
-  manual: boolean;            // no se aplica sola: el vendedor la toca en la fila de la prenda (solo porcentaje o precio, y con productos)
+  manual: boolean;            // no se aplica sola: el vendedor la toca en la fila de la prenda (con productos; puede ser porcentaje, precio o NxM)
   productos?: string[];       // nombres de los productos (para mostrar)
 };
 // Nombre de cada medio para mostrar en las promos ("tarjeta" es el credito).
@@ -48,9 +48,12 @@ const entra = (p: Pick<Promo, "tipos"> & { skus?: string[] }, i: ItemPromo) =>
 // Promos "a mano" que se pueden tocar en la fila de una prenda (las automaticas no).
 export const manualesDe = (promos: Promo[], sku: string) => promos.filter((p) => p.manual && p.skus.includes(sku));
 export const automaticas = (promos: Promo[]) => promos.filter((p) => !p.manual);
+// Promo a mano NxM (ej. 3x2 solo en los jeans talle 36): el vendedor marca cada prenda que entra y el descuento se calcula entre las marcadas.
+export const esManualNxm = (p: Pick<Promo, "manual" | "tipo">) => p.manual && p.tipo === "nxm";
 // Precio de UNA unidad con la promo a mano: porcentaje (redondeado) o precio fijo (si la prenda ya vale menos, queda igual).
+// La NxM a mano no cambia el precio de la prenda: el descuento sale del conjunto de prendas marcadas (ver mejorPromoConManuales).
 export const precioConManual = (p: Pick<Promo, "tipo" | "pct" | "precio">, precio: number) =>
-  p.tipo === "porcentaje" ? precio - Math.round((precio * Number(p.pct)) / 100) : Math.min(precio, p.precio ?? precio);
+  p.tipo === "nxm" ? precio : p.tipo === "porcentaje" ? precio - Math.round((precio * Number(p.pct)) / 100) : Math.min(precio, p.precio ?? precio);
 const cuantas = (n: number, una: string, varias: string) => (n === 1 ? una : varias);
 
 // Rotulo corto: "3x2", "20% off", "$4.500 c/u", "$9.690 c/u x12+".
@@ -75,7 +78,7 @@ export function descripcionPromo(p: Pick<Promo, "tipo" | "n" | "m" | "pct" | "pr
   }
   if (!p.descuentoEfectivo) s += " (precio único, sin descuento por medio de pago)";
   if (p.medios?.length) s += ` · SOLO pagando con ${textoMedios(p.medios)}`;
-  if (p.manual) s += " · A MANO: el vendedor la aplica en la fila de la prenda";
+  if (p.manual) s += p.tipo === "nxm" ? " · A MANO: el vendedor marca en la fila de cada prenda que entra (talle) y se cuentan solo esas" : " · A MANO: el vendedor la aplica en la fila de la prenda";
   if (p.sinCambio) s += " · SIN CAMBIO";
   return s;
 }
@@ -113,6 +116,22 @@ export function mejorPromo(promos: Promo[], items: ItemPromo[]): PromoAplicada {
   let mejor: PromoAplicada = { promo: null, descuento: 0, detalle: null };
   for (const p of promos) {
     const d = detalleDe(p, items);
+    if (d.descuento > mejor.descuento) mejor = { promo: p, descuento: d.descuento, detalle: d };
+  }
+  return mejor;
+}
+
+// Igual que mejorPromo, pero tambien entran las promos NxM "a mano": cada una cuenta SOLO las prendas que el vendedor marco con esa promo
+// (item.manualId), y esas prendas dejan de entrar en las automaticas. Lo usan la caja y el servidor, asi calculan lo mismo.
+export type ItemConMarca = ItemPromo & { manualId?: number | null };
+export function mejorPromoConManuales(promos: Promo[], items: ItemConMarca[]): PromoAplicada {
+  const nxmManuales = promos.filter(esManualNxm);
+  const ids = new Set(nxmManuales.map((p) => p.id));
+  const sinMarca = items.map((i) => ({ tipo: i.tipo, sku: i.sku, precio: i.precio, cant: i.manualId && ids.has(i.manualId) ? 0 : i.cant }));
+  let mejor = mejorPromo(promos.filter((p) => !p.manual), sinMarca);
+  for (const p of nxmManuales) {
+    const marcadas = items.map((i) => ({ tipo: i.tipo, sku: i.sku, precio: i.precio, cant: i.manualId === p.id ? i.cant : 0 }));
+    const d = detalleDe(p, marcadas);
     if (d.descuento > mejor.descuento) mejor = { promo: p, descuento: d.descuento, detalle: d };
   }
   return mejor;

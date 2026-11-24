@@ -15,7 +15,7 @@ export type PromoNueva = {
   sucursales?: string[]; tipos?: string[]; desde: string; hasta: string;
   descuento_efectivo?: boolean; sin_cambio?: boolean;
   skus?: string[];   // vale solo para estos productos (codigos SKU); vacio o sin poner = todos los de las categorias
-  manual?: boolean;  // "a mano": no se aplica sola, el vendedor la toca en la fila de la prenda (solo porcentaje o precio, y con productos)
+  manual?: boolean;  // "a mano": no se aplica sola, el vendedor la toca en la fila de la prenda (con productos; porcentaje, precio o NxM)
   medios?: string[]; // medios de pago con los que vale (efectivo, transferencia, tarjeta); vacio o sin poner = todos
 };
 const HOY_SQL = "(now() at time zone 'America/Argentina/Buenos_Aires')::date";
@@ -37,9 +37,9 @@ export async function listarPromos(f: { soloVigentes?: boolean } = {}): Promise<
        (select coalesce(array_agg(t.nombre order by t.nombre), '{}') from tipos t where t.codigo = any(p.tipos)) as categorias,
        (select coalesce(array_agg(pr.nombre order by pr.nombre), '{}') from productos pr where pr.sku = any(p.skus)) as productos,
        p.activa, p.origen, p.creado_en as creada,
-       case when p.manual then (select count(*)::int from venta_items vi join ventas v on v.id = vi.venta_id where vi.promo_manual_id = p.id and ${NO_ANULADA})
+       case when p.manual and p.tipo <> 'nxm' then (select count(*)::int from venta_items vi join ventas v on v.id = vi.venta_id where vi.promo_manual_id = p.id and ${NO_ANULADA})
             else (select count(*)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) end as ventas,
-       case when p.manual then (select coalesce(sum((vi.precio_original - vi.precio_lista) * vi.cantidad), 0)::int from venta_items vi join ventas v on v.id = vi.venta_id where vi.promo_manual_id = p.id and ${NO_ANULADA})
+       case when p.manual and p.tipo <> 'nxm' then (select coalesce(sum((vi.precio_original - vi.precio_lista) * vi.cantidad), 0)::int from venta_items vi join ventas v on v.id = vi.venta_id where vi.promo_manual_id = p.id and ${NO_ANULADA})
             else (select coalesce(sum(v.descuento_promo), 0)::int from ventas v where v.promo_id = p.id and ${NO_ANULADA}) end as descontado
      from promos p
      where ($1::boolean is not true or (p.activa and p.hasta >= (now() at time zone 'America/Argentina/Buenos_Aires')::date))
@@ -92,9 +92,8 @@ export async function crearPromo(a: PromoNueva, quien: { usuarioId: number | nul
   }
   const manual = a.manual === true;
   if (manual) {
-    if (tipo === "nxm") falla('Una promo "a mano" tiene que ser de porcentaje o de precio (no NxM)');
     if (!skus.length) falla('Una promo "a mano" tiene que tener productos: elegí cuáles');
-    if (n !== null) falla('Una promo "a mano" no lleva mínimo de prendas');
+    if (tipo !== "nxm" && n !== null) falla('Una promo "a mano" de porcentaje o precio no lleva mínimo de prendas');
   }
   const mediosPedidos = [...new Set(lista(a.medios, "medios").map((x) => x.trim().toLowerCase()).filter(Boolean))];
   let medios: string[] = [];
