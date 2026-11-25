@@ -6,7 +6,7 @@ import { Etiqueta } from "@/components/Etiqueta";
 import { empresa } from "@/lib/empresa.config";
 import { imprimirConAgente } from "@/lib/agenteImpresion";
 import { useDebounced, useModoEtiquetas, useAltoEtiqueta } from "@/lib/hooks";
-import { fechaCorta, nombreSucursal, pesos, precioDeMedio, preciosDe, type MedioPago, type Producto } from "@/lib/util";
+import { fechaCorta, fmtMonto, nombreSucursal, pesos, precioDeMedio, preciosDe, soloDigitos, type MedioPago, type Producto } from "@/lib/util";
 
 type Panel = "editar" | "ajustar" | "ingresos" | "etiqueta" | null;
 
@@ -248,7 +248,7 @@ export default function Buscar() {
           <h2 style={{ marginTop: 0 }}>Editar {elegido.sku}</h2>
           <div className="campo"><span>Nombre</span><input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} /></div>
           <div className="campo"><span>Precio de lista</span>
-            <input type="number" inputMode="numeric" value={precio} onChange={(e) => setPrecio(e.target.value)} style={{ width: 160 }} />
+            <input type="text" inputMode="numeric" value={fmtMonto(precio)} onChange={(e) => setPrecio(soloDigitos(e.target.value))} style={{ width: 160 }} />
           </div>
           <p className="aviso">Las ventas anteriores conservan el nombre y el precio que tenían.</p>
           <div className="fila">

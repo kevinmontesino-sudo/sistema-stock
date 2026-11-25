@@ -9,7 +9,7 @@ import { useDebounced, useModoEtiquetas, useAltoEtiqueta, type ModoEtiquetas, us
 import { imprimirConAgente } from "@/lib/agenteImpresion";
 import { imprimirDirecto } from "@/lib/qz";
 import { trabajosTspl } from "@/lib/tspl";
-import { capitalizar, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, preciosDe, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo, textoPrecioEtiqueta } from "@/lib/util";
+import { capitalizar, fmtMonto, fechaCorta, nombreSucursal, nombreTipo, normalizar, pesos, precioMedio, preciosDe, soloDigitos, tipoDesdeNombre, type MedioPago, type Producto, type Reparto, type Tipo, textoPrecioEtiqueta } from "@/lib/util";
 
 type FilaLote = { sku: string; nombre: string; precio: number; precios: PrecioEtiqueta[]; ultimoIngreso: string; n: number; reparto: Reparto };
 type Vista = { clave: string; sku: string; existe: boolean; existente: { stockTotal: number; ultimoIngreso: string | null } | null; otrosPrecios: number[]; tipo: { codigo: string; nombre: string; nuevo: boolean } };
@@ -292,13 +292,13 @@ export default function Carga() {
             <div className="fila">
               <label className="fila" style={{ gap: 6 }}>
                 <span style={{ fontSize: 14 }}>Lista (transferencia y tarjeta)</span>
-                <input ref={precioRef} type="number" inputMode="numeric" min={0} step={100} value={precio}
-                  onChange={(e) => setPrecio(e.target.value)} onKeyDown={enter} placeholder="27200" style={{ width: 120 }} />
+                <input ref={precioRef} type="text" inputMode="numeric" value={fmtMonto(precio)}
+                  onChange={(e) => setPrecio(soloDigitos(e.target.value))} onKeyDown={enter} placeholder="27.200" style={{ width: 120 }} />
               </label>
               <label className="fila" style={{ gap: 6 }}>
                 <span style={{ fontSize: 14 }}>Efectivo</span>
-                <input type="number" inputMode="numeric" min={0} step={100} value={efvoUnico}
-                  onChange={(e) => setEfvoUnico(e.target.value)} onKeyDown={enter} placeholder="19000" style={{ width: 120 }} />
+                <input type="text" inputMode="numeric" value={fmtMonto(efvoUnico)}
+                  onChange={(e) => setEfvoUnico(soloDigitos(e.target.value))} onKeyDown={enter} placeholder="19.000" style={{ width: 120 }} />
               </label>
             </div>
             {precioNum > 0 && (
@@ -314,15 +314,15 @@ export default function Carga() {
             <div className="fila">
               <label className="fila" style={{ gap: 6 }}>
                 <span style={{ fontSize: 14 }}>Lista</span>
-                <input ref={precioRef} type="number" inputMode="numeric" min={0} step={500}
-                  value={escribeEfectivo ? (precioNum || "") : precio}
-                  onChange={(e) => { setEscribeEfectivo(false); setPrecio(e.target.value); }} onKeyDown={enter} placeholder="17500" style={{ width: 120 }} />
+                <input ref={precioRef} type="text" inputMode="numeric"
+                  value={fmtMonto(escribeEfectivo ? String(precioNum || "") : precio)}
+                  onChange={(e) => { setEscribeEfectivo(false); setPrecio(soloDigitos(e.target.value)); }} onKeyDown={enter} placeholder="17.500" style={{ width: 120 }} />
               </label>
               <label className="fila" style={{ gap: 6 }}>
                 <span style={{ fontSize: 14 }}>Efectivo</span>
-                <input type="number" inputMode="numeric" min={0} step={500} disabled={ajusteEfectivo === undefined}
-                  value={escribeEfectivo ? precio : (precioNum ? efectivoResultante : "")}
-                  onChange={(e) => { setEscribeEfectivo(true); setPrecio(e.target.value); }} onKeyDown={enter} placeholder="14000" style={{ width: 120 }} />
+                <input type="text" inputMode="numeric" disabled={ajusteEfectivo === undefined}
+                  value={fmtMonto(escribeEfectivo ? precio : String(precioNum ? efectivoResultante : ""))}
+                  onChange={(e) => { setEscribeEfectivo(true); setPrecio(soloDigitos(e.target.value)); }} onKeyDown={enter} placeholder="14.000" style={{ width: 120 }} />
               </label>
             </div>
             <div className="fila" style={{ marginTop: 6 }}>

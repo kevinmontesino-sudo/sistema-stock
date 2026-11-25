@@ -4,7 +4,7 @@ import { buscarProductosPromo, crearPromoAdmin, desactivarPromoAdmin, promosAdmi
 import { empresa } from "@/lib/empresa.config";
 import type { PromoFila } from "@/lib/promosAdmin";
 import { descripcionPromo, NOMBRE_MEDIO_PROMO, textoPromo, TOPE_PCT, type TipoPromo } from "@/lib/promos";
-import { nombreSucursal, pesos } from "@/lib/util";
+import { fmtMonto, nombreSucursal, pesos, soloDigitos } from "@/lib/util";
 
 type Especial = { codigo: string; fecha: string; sucursal: string; usuario: string | null; pct: number; descuento: number; total: number; motivo: string; autorizo: string };
 type Categoria = { codigo: string; nombre: string };
@@ -151,7 +151,7 @@ export default function Promos() {
             Llevando <input type="number" min={2} max={100} value={form.n} onChange={(e) => setForm({ ...form, n: Number(e.target.value) })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 80 }} /> o más,
           </>}
           {tipo === "precio" && <>
-            cada prenda a $ <input type="number" inputMode="numeric" min={1} step={1} value={form.precio || ""} placeholder="4500" onChange={(e) => setForm({ ...form, precio: Number(e.target.value) })} onWheel={(e) => e.currentTarget.blur()} style={{ width: 120 }} required />
+            cada prenda a $ <input type="text" inputMode="numeric" value={form.precio ? fmtMonto(String(form.precio)) : ""} placeholder="4.500" onChange={(e) => setForm({ ...form, precio: Number(soloDigitos(e.target.value)) })} style={{ width: 120 }} required />
           </>}
         </div>
 

@@ -191,6 +191,8 @@ export function preciosDe(precio: number, medios: MedioPago[], fijos?: PreciosMe
 }
 
 // Campo de plata: mientras se escribe pone los puntos de miles (16000 -> 16.000) y saca el $. Si hay letras u otros signos lo deja como esta para que se vea el aviso en rojo (nunca junta numeros de un texto).
+// Para los campos de plata que guardan solo los digitos (el calculo no cambia) y los muestran con puntos: value={fmtMonto(txt)} onChange={(e) => set(soloDigitos(e.target.value))}.
+export const soloDigitos = (s: string) => s.replace(/\D/g, "");
 export function fmtMonto(s: string): string {
   const t = s.replace(/\$/g, "").trim();
   if (t === "" || /[^\d.]/.test(t)) return s;

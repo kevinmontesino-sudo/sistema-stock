@@ -12,7 +12,7 @@ import { usePuede, useSesion } from "@/components/SesionContext";
 import { aplicaManual, automaticas, descripcionPromo, descuentoEspecial, esManualNxm, manualesDe, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, sugerenciaPromo, textoMedios, textoPromo, TOPE_PCT, valeConMedios, type Promo } from "@/lib/promos";
 import { useAutoTicket, useDebounced, useSucursal, useEscaner } from "@/lib/hooks";
 import {
-  calcularPagos, mediosDelCarrito, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio,
+  calcularPagos, fmtMonto, mediosDelCarrito, ES_CODIGO_NOTA, ES_CODIGO_VENTA, montoNotaAplicable, nombreSucursal, pctTexto, pesos, precioMedio, soloDigitos,
   type MedioPago, type NotaCredito, type PagoEntrada, type Producto,
 } from "@/lib/util";
 
@@ -509,8 +509,8 @@ export default function VentaPage() {
             <strong style={{ width: "100%" }}>Prenda que no está cargada</strong>
             <input type="text" value={sinCargar.nombre} autoFocus placeholder="Nombre (ej: remera basquet negra)" maxLength={120}
               onChange={(e) => setSinCargar({ ...sinCargar, nombre: e.target.value })} style={{ flex: 2, minWidth: 180 }} />
-            <input type="number" inputMode="numeric" min={0} value={sinCargar.precio} placeholder="Precio de lista"
-              onChange={(e) => setSinCargar({ ...sinCargar, precio: e.target.value })} style={{ flex: 1, minWidth: 120 }} />
+            <input type="text" inputMode="numeric" value={fmtMonto(sinCargar.precio)} placeholder="Precio de lista"
+              onChange={(e) => setSinCargar({ ...sinCargar, precio: soloDigitos(e.target.value) })} style={{ flex: 1, minWidth: 120 }} />
             <button type="submit" className="principal">Agregar a la venta</button>
             <button type="button" className="chico" onClick={() => setSinCargar(null)}>Cancelar</button>
             <p className="aviso" style={{ width: "100%", margin: 0 }}>Se crea la prenda en el sistema (con código propio) y al cobrar se suma al stock de este local. Queda registrado para la oficina. El precio es el de lista (transferencia); efectivo y tarjeta se calculan como siempre.</p>
@@ -673,8 +673,8 @@ export default function VentaPage() {
                   {m.nombre} <small>({etiquetaPct(m.ajustePct)})</small>
                 </button>
               ))}
-              <input type="number" inputMode="numeric" min={0} placeholder="Entrega $" value={entrega1} autoFocus
-                onChange={(e) => setEntrega1(e.target.value)} style={{ width: 160 }} />
+              <input type="text" inputMode="numeric" placeholder="Entrega $" value={fmtMonto(entrega1)} autoFocus
+                onChange={(e) => setEntrega1(soloDigitos(e.target.value))} style={{ width: 160 }} />
             </div>
             {calc && calc.ok && calc.pagos[0].medioId === pago1 && (
               <p className="nota" style={{ marginTop: 0 }}>Eso cubre <strong>{pesos(calc.pagos[0].valorLista)}</strong> del valor de lista.</p>
@@ -717,8 +717,8 @@ export default function VentaPage() {
             <div className="fila" style={{ justifyContent: "space-between", marginTop: 8 }}>
               <label className="fila" style={{ gap: 8 }}>
                 <span>El cliente entrega</span>
-                <input type="number" inputMode="numeric" min={0} placeholder="$" value={recibido}
-                  onChange={(e) => setRecibido(e.target.value)} style={{ width: 150 }} />
+                <input type="text" inputMode="numeric" placeholder="$" value={fmtMonto(recibido)}
+                  onChange={(e) => setRecibido(soloDigitos(e.target.value))} style={{ width: 150 }} />
               </label>
               <div className="fila" style={{ gap: 6 }}>
                 <button className="chico" onClick={() => setRecibido(String(pagoEfectivo.monto))}>Justo</button>
