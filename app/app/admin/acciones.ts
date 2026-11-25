@@ -285,10 +285,10 @@ export async function importarVendedoresDeFicha() {
 export async function cajaFuerteDatos(sucursal: string) {
   return admin(async () => ({ resumen: await repo.cajaFuerteResumen(), movimientos: await repo.retirosEfectivoLista(txt(sucursal) || null, 100), conteos: await repo.ajustesCajaFuerteLista(30) }));
 }
-export async function retirarDeCajaFuerte(sucursal: string, origen: string, monto: number, retiradoPor: string, destino: string, motivo: string) {
+export async function retirarDeCajaFuerte(sucursal: string, _origen: string, monto: number, retiradoPor: string, destino: string, motivo: string) {
   return admin(async (yo) => {
-    const r = await retirarEfectivo(txt(sucursal), txt(origen), Number(monto), txt(retiradoPor), txt(destino), txt(motivo), { id: yo.id, nombre: yo.nombre });
-    await auditar("retiro_efectivo", { sucursal: txt(sucursal), origen: txt(origen), monto: Number(monto), retiradoPor: txt(retiradoPor), destino: txt(destino), motivo: txt(motivo) });
+    const r = await retirarEfectivo(txt(sucursal), "caja_fuerte", Number(monto), txt(retiradoPor), txt(destino), txt(motivo), { id: yo.id, nombre: yo.nombre });
+    await auditar("retiro_efectivo", { sucursal: txt(sucursal), origen: "caja_fuerte", monto: Number(monto), retiradoPor: txt(retiradoPor), destino: txt(destino), motivo: txt(motivo) });
     return r;
   });
 }

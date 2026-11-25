@@ -1283,13 +1283,15 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
 // Sale lo que se anota como retiro de la caja fuerte (quien se lo llevo). Saldo = entradas - retiros: es "lo que tendria que haber", no un conteo.
 // Los cierres parciales (plata sacada de la caja durante el dia) no tocan la caja fuerte: se descuentan del cierre de ese dia (lib/cierre.ts).
 export async function cajaFuerteResumen() {
-  const r = await pool.query<{ sucursal: string; entradas: number; ajustes: number; retirado: number }>(
+  const r = await pool.query<{ sucursal: string; entradas: number; guardado: number; ajustes: number; retirado: number }>(
     `select s.id as sucursal,
+       coalesce((select sum(p.monto) from retiros_efectivo p where p.sucursal_id = s.id and p.a_caja_fuerte), 0)::float8 as guardado,
        coalesce((select sum(c.efectivo_contado - c.fondo_siguiente) from cierres_caja c where c.sucursal_id = s.id and c.fondo_siguiente is not null), 0)::float8 as entradas,
        coalesce((select sum(a.monto) from ajustes_caja_fuerte a where a.sucursal_id = s.id), 0)::float8 as ajustes,
        coalesce((select sum(x.monto) from retiros_efectivo x where x.sucursal_id = s.id and x.origen = 'caja_fuerte'), 0)::float8 as retirado
      from sucursales s order by s.id`);
-  return r.rows.map((x) => ({ sucursal: x.sucursal, entradas: x.entradas, ajustes: x.ajustes, retirado: x.retirado, saldo: x.entradas + x.ajustes - x.retirado }));
+  // entradas = lo que mandan los cierres de caja; guardado = cierres parciales (plata que se fue guardando en el dia); retirado = lo que salio de la caja fuerte.
+  return r.rows.map((x) => ({ sucursal: x.sucursal, entradas: x.entradas, guardado: x.guardado, ajustes: x.ajustes, retirado: x.retirado, saldo: x.entradas + x.guardado + x.ajustes - x.retirado }));
 }
 export async function ajustesCajaFuerteLista(limite = 30) {
   const r = await pool.query<{ id: number; sucursal: string; creado: Date; monto: number; contado: number; motivo: string | null; registrado_por: string }>(

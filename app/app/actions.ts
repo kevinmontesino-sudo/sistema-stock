@@ -415,12 +415,22 @@ export async function cerrarCajaAccion(sucursal: string, dia: string, d: { fondo
   });
 }
 
-// Retiro de efectivo: cierre parcial (sale de la caja durante el día) o de la caja fuerte. Cada local anota solo los suyos.
-export async function retirarEfectivoAccion(sucursal: string, origen: string, monto: unknown, retiradoPor: string, destino: string, motivo: string) {
+// Retiro de efectivo: sale plata de la CAJA FUERTE hacia donde se diga (Depósito, banco...). Cada local anota solo los suyos.
+export async function retirarEfectivoAccion(sucursal: string, monto: unknown, retiradoPor: string, destino: string, motivo: string) {
   return seguro("vender", async (u) => {
     const sucId = suc(u, txt(sucursal));
-    const r = await cierre.retirarEfectivo(sucId, txt(origen), ent(monto), txt(retiradoPor), txt(destino), txt(motivo), { id: u.id, nombre: u.nombre });
-    await auditar("retiro_efectivo", { sucursal: sucId, origen: txt(origen), monto: ent(monto), retiradoPor: txt(retiradoPor), destino: txt(destino), motivo: txt(motivo) });
+    const r = await cierre.retirarEfectivo(sucId, "caja_fuerte", ent(monto), txt(retiradoPor), txt(destino), txt(motivo), { id: u.id, nombre: u.nombre });
+    await auditar("retiro_efectivo", { sucursal: sucId, origen: "caja_fuerte", monto: ent(monto), retiradoPor: txt(retiradoPor), destino: txt(destino), motivo: txt(motivo) });
+    return r;
+  });
+}
+
+// Cierre parcial: la plata que sale de la caja durante el día y se guarda en la caja fuerte (suma a la caja fuerte; se descuenta del cierre de ese día).
+export async function cierreParcialAccion(sucursal: string, monto: unknown, retiradoPor: string, motivo: string) {
+  return seguro("vender", async (u) => {
+    const sucId = suc(u, txt(sucursal));
+    const r = await cierre.retirarEfectivo(sucId, "caja", ent(monto), txt(retiradoPor), "Caja fuerte", txt(motivo), { id: u.id, nombre: u.nombre });
+    await auditar("cierre_parcial", { sucursal: sucId, monto: ent(monto), retiradoPor: txt(retiradoPor), motivo: txt(motivo) });
     return r;
   });
 }

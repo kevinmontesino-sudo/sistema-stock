@@ -156,7 +156,7 @@ export default function CierrePage() {
                   <div className="monto-verde">{pesos(r.medios.find((m) => m.id === "efectivo")?.monto ?? 0)}</div>
                 </div>
                 {r.retirosParciales.total > 0 && (
-                  <div className="campo"><span><strong>3. Ya retirado durante el día (cierres parciales)</strong> (lo suma el sistema, no hay que escribir nada)</span>
+                  <div className="campo"><span><strong>3. Ya guardado en la caja fuerte durante el día (cierres parciales)</strong> (lo suma el sistema, no hay que escribir nada)</span>
                     <div className="monto-verde" style={{ color: "var(--error)" }}>−{pesos(r.retirosParciales.total)}</div>
                     <small className="aviso">{r.retirosParciales.lista.map((x) => `${x.retiradoPor} ${pesos(x.monto)}${x.destino ? ` → ${x.destino}` : ""}`).join(" · ")}</small>
                   </div>

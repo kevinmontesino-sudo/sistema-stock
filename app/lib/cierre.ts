@@ -211,13 +211,15 @@ export type Control = Awaited<ReturnType<typeof controlDiario>>;
 // origen "caja": cierre parcial, se saca plata de la caja durante el dia y se descuenta sola del cierre de ese dia; no se puede anotar si la caja de hoy ya se cerro.
 // origen "caja_fuerte": plata que sale de la caja fuerte del local. En los dos casos queda quien se la lleva (responsable), a donde va y quien lo anoto.
 // Usa el mismo candado que el cierre del dia, asi un retiro no se cuela justo mientras se cierra.
+// origen "caja" = CIERRE PARCIAL: la plata sale de la caja durante el dia y se guarda en la caja fuerte (suma a la caja fuerte, destino fijo).
+// origen "caja_fuerte" = retiro de la caja fuerte: sale plata de la caja fuerte hacia donde se diga (Deposito, banco...).
 export async function retirarEfectivo(sucursal: string, origen: string, montoPedido: number, retiradoPor: string, destino: string, motivo: string, usuario: { id: number; nombre: string }) {
   sucOk(sucursal);
   if (origen !== "caja" && origen !== "caja_fuerte") throw new ErrorNegocio("Elegí de dónde sale la plata: la caja o la caja fuerte.");
   if (!Number.isInteger(montoPedido) || montoPedido < 1 || montoPedido > 2_000_000_000) throw new ErrorNegocio("El monto tiene que ser un número entero mayor a 0.");
   const quien = retiradoPor.replace(/\s+/g, " ").trim();
   if (quien.length < 2 || quien.length > 80) throw new ErrorNegocio("Poné quién se lleva la plata.");
-  const dest = destino.replace(/\s+/g, " ").trim().slice(0, 60);
+  const dest = origen === "caja" ? "Caja fuerte" : destino.replace(/\s+/g, " ").trim().slice(0, 60);
   const mot = motivo.trim();
   if (mot.length > 200) throw new ErrorNegocio("El motivo es muy largo (máximo 200 letras).");
   const hoy = await hoyAR();
@@ -226,11 +228,11 @@ export async function retirarEfectivo(sucursal: string, origen: string, montoPed
   try {
     await c.query("select pg_advisory_lock(hashtext($1))", [clave]);
     if (origen === "caja" && (await c.query("select 1 from cierres_caja where sucursal_id = $1 and dia = $2::date", [sucursal, hoy])).rowCount) {
-      throw new ErrorNegocio("La caja de hoy ya está cerrada: este retiro tiene que anotarse como retiro de la caja fuerte.");
+      throw new ErrorNegocio("La caja de hoy ya está cerrada: ya no se puede hacer un cierre parcial (el cierre ya mandó todo a la caja fuerte).");
     }
     const r = await c.query<{ id: number }>(
-      `insert into retiros_efectivo (sucursal_id, origen, monto, retirado_por, destino, motivo, registrado_por, usuario_id) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id::int as id`,
-      [sucursal, origen, montoPedido, quien, dest || null, mot || null, usuario.nombre, usuario.id]);
+      `insert into retiros_efectivo (sucursal_id, origen, monto, retirado_por, destino, motivo, registrado_por, usuario_id, a_caja_fuerte) values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id::int as id`,
+      [sucursal, origen, montoPedido, quien, dest || null, mot || null, usuario.nombre, usuario.id, origen === "caja"]);
     return { id: r.rows[0].id };
   } finally {
     await c.query("select pg_advisory_unlock(hashtext($1))", [clave]).catch(() => {});
@@ -247,6 +249,7 @@ export async function contarCajaFuerte(sucursal: string, contadoPedido: number, 
   const r = await pool.query<{ id: number | null; diferencia: number }>(
     `with saldo as (
        select coalesce((select sum(c.efectivo_contado - c.fondo_siguiente) from cierres_caja c where c.sucursal_id = $1 and c.fondo_siguiente is not null), 0)
+            + coalesce((select sum(p.monto) from retiros_efectivo p where p.sucursal_id = $1 and p.a_caja_fuerte), 0)
             + coalesce((select sum(a.monto) from ajustes_caja_fuerte a where a.sucursal_id = $1), 0)
             - coalesce((select sum(x.monto) from retiros_efectivo x where x.sucursal_id = $1 and x.origen = 'caja_fuerte'), 0) as v),
      ins as (

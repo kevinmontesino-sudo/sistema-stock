@@ -752,13 +752,16 @@ try {
     igual("Caja fuerte: el retiro baja lo que tendria que haber", [desp.retirado - antes.retirado, antes.saldo - desp.saldo], [7400000, 7400000]);
     const mov = (await repo.retirosEfectivoLista(LOCAL, 1))[0];
     igual("Caja fuerte: queda quien se lo llevo, a donde y el monto", [mov.retiradoPor, mov.monto, mov.destino, mov.origen], ["ZZ Hugo", 7400000, "Depósito", "caja_fuerte"]);
-    // Cierre parcial: baja el efectivo esperado del dia y no toca la caja fuerte
+    // Cierre parcial = GUARDAR EN CAJA FUERTE: se descuenta de la caja del dia y SUMA a lo que tendria que haber en la caja fuerte.
     const hoyAr = await cierreMod.hoyAR();
     const sin = await cierreMod.resumenDia(LOCAL, hoyAr);
     if (!sin.cierre) {
+      const antesP = (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!;
       await cierreMod.retirarEfectivo(LOCAL, "caja", 500000, "ZZ Esteban", "Depósito", "", yo);
       const con = await cierreMod.resumenDia(LOCAL, hoyAr);
-      igual("Cierre parcial: el dia lo suma y no es de la caja fuerte", [con.retirosParciales.total - sin.retirosParciales.total, con.retirosParciales.lista.at(-1)?.retiradoPor, (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!.retirado], [500000, "ZZ Esteban", desp.retirado]);
+      const despP = (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!;
+      igual("Guardar en caja fuerte: se descuenta de la caja del dia", [con.retirosParciales.total - sin.retirosParciales.total, con.retirosParciales.lista.at(-1)?.retiradoPor], [500000, "ZZ Esteban"]);
+      igual("Guardar en caja fuerte: suma a la caja fuerte (el destino siempre es la caja fuerte) y no cuenta como salida", [despP.guardado - antesP.guardado, despP.saldo - antesP.saldo, despP.retirado - antesP.retirado, con.retirosParciales.lista.at(-1)?.destino], [500000, 500000, 0, "Caja fuerte"]);
     }
     let borro = true;
     try { await pool.query("delete from retiros_efectivo where id = $1", [mov.id]); } catch (e) { borro = !/no se editan ni se borran/.test((e as Error).message); }
