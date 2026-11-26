@@ -46,7 +46,7 @@ export default function Accesos() {
       <h1>Accesos a la API</h1>
       <p className="aviso" style={{ marginTop: -8 }}>
         Una llave permite consultar los informes (solo totales: sin datos personales ni contraseñas) desde otra herramienta, por ejemplo el Claude de César. Las llaves de alcance &quot;promos&quot; además pueden crear y desactivar promos.
-        Cada llave vence, se puede revocar en cualquier momento y cada consulta queda en la Auditoría.
+        Cada llave vence (salvo que elijas «sin vencimiento»), se puede revocar en cualquier momento y cada consulta queda en la Auditoría.
       </p>
       {msg && <p className={`alerta ${msg.mala ? "mala" : ""}`} role="alert">{msg.texto}</p>}
       {nuevo && (
@@ -81,7 +81,7 @@ export default function Accesos() {
       <form className="tarjeta" onSubmit={crear} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
         <input placeholder="Nombre (por ejemplo: Cesar - Claude)" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} required />
         <select value={form.dias} onChange={(e) => setForm({ ...form, dias: Number(e.target.value) })}>
-          <option value={30}>Vence en 30 días</option><option value={90}>Vence en 90 días</option><option value={180}>Vence en 180 días</option>
+          <option value={30}>Vence en 30 días</option><option value={90}>Vence en 90 días</option><option value={180}>Vence en 180 días</option><option value={3650}>Sin vencimiento (10 años; se revoca cuando quieras)</option>
         </select>
         <select value={form.alcance} onChange={(e) => setForm({ ...form, alcance: e.target.value })}>
           <option value="informes">Solo leer informes</option><option value="promos">Leer informes y administrar promos</option>

@@ -188,7 +188,7 @@ export async function crearTokenApi(a: { nombre: string; dias: number; alcance?:
   return admin(async (yo) => {
     const nombre = txt(a.nombre).trim();
     if (nombre.length < 3 || nombre.length > 60) throw new ErrorNegocio("Ponele un nombre a la llave (por ejemplo: Cesar - Claude).");
-    const dias = [30, 90, 180].includes(Number(a.dias)) ? Number(a.dias) : 90;
+    const dias = [30, 90, 180, 3650].includes(Number(a.dias)) ? Number(a.dias) : 90;
     const alcance = a.alcance === "promos" ? "promos" : a.alcance === "stock" ? "stock" : "informes";
     const t = await crearToken(nombre, dias, yo.id, alcance);
     await auditar("llave_api_creada", { id: t.id, nombre, dias, alcance });
