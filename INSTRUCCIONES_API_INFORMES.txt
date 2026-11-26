@@ -104,3 +104,28 @@ Directo (curl):
    curl -X POST -H "Authorization: Bearer $SISTEMA_TOKEN" -H "Content-Type: application/json" \
         -d '{"tipo":"nxm","n":3,"m":2,"sucursales":["white"],"desde":"2026-11-05","hasta":"2026-11-06"}' https://stock-caja-ventas.xmenosmasprendas.com/api/promos
    curl -X DELETE -H "Authorization: Bearer $SISTEMA_TOKEN" "https://stock-caja-ventas.xmenosmasprendas.com/api/promos?id=12"
+
+
+=== CONECTOR (MCP) VERSION 2.0 — 26/11/2026 ===
+El mismo archivo app/scripts/mcp-informes.mjs ahora tiene mas herramientas. Hay que reemplazar el archivo viejo por el nuevo y reiniciar Claude Desktop.
+
+Herramientas:
+  SOLO LECTURA
+  - consultar_informe: ventas, prendas mas/menos vendidas, stock, control diario, cierres de caja y TRES tipos nuevos:
+      caja_fuerte (cuanto tendria que haber por local, cada "guardado en caja fuerte" de los cierres parciales y cada salida, con responsable y destino, y los conteos),
+      anulaciones (ventas anuladas con motivo y quien anulo),
+      descuentos_cortesias (descuentos especiales y Curva Plus con quien autorizo, y cortesias empresariales).
+  - estado_del_dia: foto de HOY de todos los locales (control del dia + caja fuerte). Sirve para "como va el dia" o "como estan las cajas".
+  - ver_comisiones: comisiones por vendedor y por semana.
+  - ver_catalogo: lista de informes y definiciones.
+  STOCK (llave "Solo stock", opcional)
+  - buscar_prenda: stock por local y precios por medio de pago de una prenda.
+  ESCRITURA ACOTADA (llave de alcance "promos")
+  - ver_promos, crear_promo (ahora tambien promos por producto "skus" y promos "a mano" "manual": el vendedor toca "Aplicar" en la fila de la prenda; vale para porcentaje, precio fijo y NxM), desactivar_promo.
+
+El conector NUNCA mueve plata: no tiene herramientas de cierre de caja, retiros, caja fuerte ni ventas. Solo lee (y administra promos con la llave de promos).
+
+Llaves (cada una se crea en Oficina > Accesos API y se puede revocar al instante):
+  SISTEMA_TOKEN        llave de "informes" (solo lectura) o de "promos" (lectura + promos). Abre informes, comisiones y, si es de promos, promos.
+  SISTEMA_TOKEN_STOCK  llave "Solo stock" (opcional). Solo sirve para buscar_prenda; no abre informes ni promos, y las otras llaves no abren stock.
+  Una llave por persona. En "env" de la configuracion de Claude Desktop se agregan las dos variables (la de stock es opcional).

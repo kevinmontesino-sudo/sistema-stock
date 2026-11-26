@@ -772,6 +772,19 @@ try {
     igual("Conteo caja fuerte: el saldo pasa a lo contado", [cnt.diferencia, (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!.saldo], [1234567 - saldoAntes, 1234567]);
     const cnt2 = await cierreMod.contarCajaFuerte(LOCAL, 1234567, "ZZ conteo", yo);
     igual("Conteo caja fuerte: si coincide no anota nada", [cnt2.id, cnt2.diferencia], [null, 0]);
+    // Informes nuevos para el MCP (solo lectura): caja fuerte con guardados y salidas, anulaciones, descuentos y cortesias.
+    {
+      const pI = await inf.validarParams({ desde: hoyAr, hasta: hoyAr, sucursal: LOCAL });
+      const cf = await inf.informe("caja_fuerte", pI) as Awaited<ReturnType<typeof inf.cajaFuerteInforme>>;
+      const tiene = (tipo: string, quien: string) => cf.movimientos.some((x) => x.tipo.startsWith(tipo) && x.responsable === quien);
+      igual("Informe caja_fuerte: muestra el guardado y la salida con responsable", [tiene("guardado en caja fuerte", "ZZ Esteban"), tiene("salida de caja fuerte", "ZZ Hugo")], [!sin.cierre, true]);
+      igual("Informe caja_fuerte: el saldo coincide con la pantalla", cf.saldoPorSucursal.find((x) => x.sucursal === LOCAL)?.tendriaQueHaber, (await repo.cajaFuerteResumen()).find((x) => x.sucursal === LOCAL)!.saldo);
+      igual("Informe caja_fuerte: muestra el conteo", cf.conteos.some((x) => x.contado === 1234567), true);
+      const an = await inf.informe("anulaciones", await inf.validarParams({})) as { cantidad: number; ventas: unknown[] };
+      check("Informe anulaciones: responde con lista", Array.isArray(an.ventas) && an.cantidad === an.ventas.length);
+      const dc = await inf.informe("descuentos_cortesias", await inf.validarParams({})) as { descuentosEspeciales: { cantidad: number }; cortesias: { items: unknown[] } };
+      check("Informe descuentos_cortesias: responde con descuentos especiales y cortesias", typeof dc.descuentosEspeciales.cantidad === "number" && Array.isArray(dc.cortesias.items));
+    }
     const cl = await pool.connect();
     try { await cl.query("begin"); await cl.query("set local app.mantenimiento = 'on'"); await cl.query("delete from retiros_efectivo where retirado_por in ('ZZ Hugo', 'ZZ Esteban')"); await cl.query("delete from ajustes_caja_fuerte where motivo = 'ZZ conteo'"); await cl.query("commit"); } finally { cl.release(); }
   });

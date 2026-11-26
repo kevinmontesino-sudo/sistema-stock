@@ -1,6 +1,6 @@
 import { empresa } from "./empresa.config";
 import { pool } from "./db";
-import { ErrorNegocio } from "./repo";
+import { ErrorNegocio, cajaFuerteResumen } from "./repo";
 import { NO_ANULADA, nombreSucursal } from "./util";
 import { cierresEntre, controlDiario } from "./cierre";
 
@@ -241,6 +241,55 @@ export async function ingresos(p: ParamsInforme) {
   };
 }
 
+// ---- Caja fuerte: lo que tendria que haber, lo que se fue guardando (cierres parciales), las salidas y los conteos ----
+export async function cajaFuerteInforme(p: ParamsInforme) {
+  const resumen = (await cajaFuerteResumen()).filter((x) => !p.sucursal || x.sucursal === p.sucursal);
+  const mov = await pool.query<{ creado: Date; sucursal: string; origen: string; guardado: boolean; monto: number; responsable: string; destino: string | null; nota: string | null; registro: string }>(
+    `select r.creado_en as creado, r.sucursal_id as sucursal, r.origen, r.a_caja_fuerte as guardado, r.monto, r.retirado_por as responsable, r.destino, r.motivo as nota, r.registrado_por as registro
+     from retiros_efectivo r where ${rango("r.creado_en")} and ${filtroSuc("r.sucursal_id")} order by r.creado_en desc, r.id desc limit 500`, base(p));
+  const cont = await pool.query<{ creado: Date; sucursal: string; ajuste: number; contado: number; nota: string | null; registro: string }>(
+    `select a.creado_en as creado, a.sucursal_id as sucursal, a.monto as ajuste, a.contado, a.motivo as nota, a.registrado_por as registro
+     from ajustes_caja_fuerte a where ${rango("a.creado_en")} and ${filtroSuc("a.sucursal_id")} order by a.creado_en desc, a.id desc limit 200`, base(p));
+  const tipoMov = (x: { origen: string; guardado: boolean }) => (x.origen === "caja_fuerte" ? "salida de caja fuerte" : x.guardado ? "guardado en caja fuerte (cierre parcial)" : "retiro de caja anterior al cierre parcial (no suma a la caja fuerte)");
+  return {
+    nota: "saldo = tendria que haber en la caja fuerte (cierres + guardado en cierres parciales + conteos - salidas). Es lo que dice el sistema, no un conteo.",
+    saldoPorSucursal: resumen.map((x) => ({ sucursal: x.sucursal, nombre: nombreSucursal(x.sucursal), entradasPorCierres: x.entradas, guardadoEnCierresParciales: x.guardado, ajustesPorConteo: x.ajustes, salidas: x.retirado, tendriaQueHaber: x.saldo })),
+    movimientos: mov.rows.map((x) => ({ fecha: x.creado.toISOString(), sucursal: x.sucursal, tipo: tipoMov(x), monto: x.monto, responsable: x.responsable, destino: x.destino, nota: x.nota, registro: x.registro })),
+    conteos: cont.rows.map((x) => ({ fecha: x.creado.toISOString(), sucursal: x.sucursal, ajuste: x.ajuste, contado: x.contado, nota: x.nota, registro: x.registro })),
+  };
+}
+
+// ---- Ventas anuladas del periodo (por la fecha en que se anularon) ----
+export async function anulaciones(p: ParamsInforme) {
+  const r = await pool.query<{ sucursal: string; codigo: string; anulada: Date; vendida: Date; total: number; motivo: string; usuario: string | null }>(
+    `select v.sucursal_id as sucursal, v.codigo, va.creado_en as anulada, v.creado_en as vendida, v.total, va.motivo, u.nombre as usuario
+     from ventas_anuladas va join ventas v on v.id = va.venta_id left join usuarios u on u.id = va.usuario_id
+     where ${rango("va.creado_en")} and ${filtroSuc("v.sucursal_id")} order by va.creado_en desc limit 500`, base(p));
+  return {
+    cantidad: r.rows.length, montoTotal: r.rows.reduce((t, x) => t + x.total, 0),
+    ventas: r.rows.map((x) => ({ sucursal: x.sucursal, ticket: x.codigo, anulada: x.anulada.toISOString(), vendida: x.vendida.toISOString(), total: x.total, motivo: x.motivo, anuloPor: x.usuario })),
+  };
+}
+
+// ---- Descuentos especiales (incluye Curva Plus) y cortesias empresariales del periodo ----
+export async function descuentosYCortesias(p: ParamsInforme) {
+  const esp = await pool.query<{ sucursal: string; codigo: string; hora: Date; pct: number; motivo: string | null; autorizo: string | null; descuento: number; total: number; cajero: string | null }>(
+    `select v.sucursal_id as sucursal, v.codigo, v.creado_en as hora, v.especial_pct::float8 as pct, v.especial_motivo as motivo, v.especial_autorizo as autorizo,
+       v.descuento_promo::float8 as descuento, v.total, u.nombre as cajero
+     from ventas v left join usuarios u on u.id = v.usuario_id
+     where v.especial_pct is not null and ${rango("v.creado_en")} and ${NO_ANULADA} and ${filtroSuc("v.sucursal_id")} order by v.creado_en desc limit 500`, base(p));
+  const cor = await pool.query<{ fecha: Date; sucursal: string | null; usuario: string | null; sku: string; nombre: string; cantidad: number; valor: number; motivo: string }>(
+    `select m.creado_en as fecha, m.desde as sucursal, u.nombre as usuario, m.sku, pr.nombre, m.cantidad, (m.cantidad * pr.precio_lista)::float8 as valor,
+       regexp_replace(m.motivo, '^(Cortesía empresarial|Regalo de la empresa): ', '') as motivo
+     from movimientos m join productos pr on pr.sku = m.sku left join usuarios u on u.id = m.usuario_id
+     where m.tipo = 'ajuste' and (m.motivo like 'Cortesía empresarial: %' or m.motivo like 'Regalo de la empresa: %') and ${rango("m.creado_en")} and ${filtroSuc("m.desde")}
+     order by m.creado_en desc limit 500`, base(p));
+  return {
+    descuentosEspeciales: { cantidad: esp.rows.length, descuentoTotal: esp.rows.reduce((t, x) => t + x.descuento, 0), ventas: esp.rows.map((x) => ({ sucursal: x.sucursal, ticket: x.codigo, hora: x.hora.toISOString(), pct: x.pct, motivo: x.motivo, autorizo: x.autorizo, descuento: x.descuento, total: x.total, cajero: x.cajero })) },
+    cortesias: { unidades: cor.rows.reduce((t, x) => t + x.cantidad, 0), valorLista: cor.rows.reduce((t, x) => t + x.valor, 0), items: cor.rows.map((x) => ({ fecha: x.fecha.toISOString(), sucursal: x.sucursal, anotoPor: x.usuario, sku: x.sku, prenda: x.nombre, cantidad: x.cantidad, valorLista: x.valor, paraQuien: x.motivo })) },
+  };
+}
+
 export const DEFINICIONES = {
   lista: "Valor de las prendas a precio de lista (el precio que figura en la etiqueta como Lista; cada medio de pago lo ajusta con su porcentaje, que está en la base).",
   totalPagado: "Lo que efectivamente pagaron los clientes: lista con el descuento o recargo de cada medio de pago (según el porcentaje vigente de cada medio al momento de la venta). Incluye lo pagado con notas de credito.",
@@ -252,7 +301,7 @@ export const DEFINICIONES = {
   fechas: "Dia calendario de Argentina (America/Argentina/Buenos_Aires); el rango incluye 'desde' y 'hasta'.",
 } as const;
 
-export type TipoInforme = "resumen" | "periodo" | "prendas_mas_vendidas" | "prendas_menos_vendidas" | "notas_credito" | "stock" | "horarios" | "ingresos" | "control" | "cierres_caja" | "panel";
+export type TipoInforme = "resumen" | "periodo" | "prendas_mas_vendidas" | "prendas_menos_vendidas" | "notas_credito" | "stock" | "horarios" | "ingresos" | "control" | "cierres_caja" | "caja_fuerte" | "anulaciones" | "descuentos_cortesias" | "panel";
 export const TIPOS: Record<Exclude<TipoInforme, "panel">, { descripcion: string; usaFechas: boolean }> = {
   resumen: { descripcion: "Ventas, unidades, total pagado, cobrado en caja, ticket promedio y medios de pago, por sucursal y total.", usaFechas: true },
   periodo: { descripcion: "Evolucion de las ventas por dia, semana o mes (parametro agrupar), por sucursal.", usaFechas: true },
@@ -264,6 +313,9 @@ export const TIPOS: Record<Exclude<TipoInforme, "panel">, { descripcion: string;
   ingresos: { descripcion: "Mercaderia cargada en el deposito y enviada a cada local en el periodo.", usaFechas: true },
   control: { descripcion: "Informe de control de UN dia (parametro hasta = el dia; sin fecha, hoy): por local ventas, medios, cierre de caja y diferencia, notas de credito, descuentos especiales, ajustes de stock, envios sin recibir y alertas. Pensado para imprimir.", usaFechas: true },
   cierres_caja: { descripcion: "Cierres de caja del periodo: efectivo esperado vs contado y diferencia por local y dia.", usaFechas: true },
+  caja_fuerte: { descripcion: "Caja fuerte: cuanto tendria que haber por local (cierres + guardado en cierres parciales + conteos - salidas) y, en el periodo, cada guardado y cada salida con responsable y destino, y los conteos.", usaFechas: true },
+  anulaciones: { descripcion: "Ventas anuladas en el periodo: ticket, local, monto, motivo y quien anulo.", usaFechas: true },
+  descuentos_cortesias: { descripcion: "Descuentos especiales (incluye Curva Plus) con motivo y quien autorizo, y cortesias empresariales (prendas sin cobrar) del periodo.", usaFechas: true },
 };
 
 export async function informe(tipo: TipoInforme, p: ParamsInforme) {
@@ -278,6 +330,9 @@ export async function informe(tipo: TipoInforme, p: ParamsInforme) {
     case "ingresos": return ingresos(p);
     case "control": return controlDiario(p.hasta, p.sucursal);
     case "cierres_caja": return cierresEntre(p.desde, p.hasta, p.sucursal);
+    case "caja_fuerte": return cajaFuerteInforme(p);
+    case "anulaciones": return anulaciones(p);
+    case "descuentos_cortesias": return descuentosYCortesias(p);
     case "panel": return panelCompleto(p);
   }
 }
