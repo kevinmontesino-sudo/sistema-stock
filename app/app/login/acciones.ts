@@ -46,7 +46,7 @@ export async function iniciarSesion(_: EstadoForm, fd: FormData): Promise<Estado
   await crearSesion(u.id, u.rol, fase);
   if (fase === "activa") await pool.query("update usuarios set ultimo_login = now() where id = $1", [u.id]);
   await auditar(fase === "activa" ? "login_ok" : "login_clave_ok", { fase }, { usuarioId: u.id, email, ip });
-  if (fase === "2fa_pendiente") redirect("/login/verificar");
+  if (fase === "2fa_pendiente") redirect(destino !== "/" ? `/login/verificar?next=${encodeURIComponent(destino)}` : "/login/verificar");
   if (fase === "2fa_alta") redirect("/cuenta/doble-verificacion");
   redirect(u.debe ? "/cuenta/clave" : destino);
 }
@@ -75,7 +75,7 @@ export async function verificarCodigo(_: EstadoForm, fd: FormData): Promise<Esta
   await activarSesion(s.id, s.usuario.rol);
   await auditar("login_ok", { fase: "2fa" }, { usuarioId: s.usuario.id, email: s.usuario.email, ip });
   revalidatePath("/", "layout"); // el menu se calcula de nuevo con la sesion ya completa
-  redirect(s.usuario.debeCambiarClave ? "/cuenta/clave" : "/");
+  redirect(s.usuario.debeCambiarClave ? "/cuenta/clave" : destinoSeguro(txt(fd.get("next"))));
 }
 
 export async function confirmarDobleVerificacion(_: EstadoForm, fd: FormData): Promise<EstadoForm> {

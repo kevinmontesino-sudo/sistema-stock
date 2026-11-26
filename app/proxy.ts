@@ -12,7 +12,9 @@ export function proxy(req: NextRequest) {
   const esAccion = req.headers.has("next-action");
   // Las APIs de informes, promos y stock no usan cookie: se autentican con su propia llave (Bearer) y la verifica el mismo handler.
   const esApiInformes = pathname === "/api/informes" || pathname === "/api/promos" || pathname === "/api/stock" || pathname === "/api/comisiones";
-  if (!hayCookie && !esLogin && !esAccion && !esApiInformes) {
+  // MCP remoto y su login OAuth: los llaman Claude/ChatGPT sin cookie (se autentican con su token). /conectar SI pide sesion.
+  const esConector = pathname === "/mcp" || pathname.startsWith("/oauth/") || pathname.startsWith("/.well-known/");
+  if (!hayCookie && !esLogin && !esAccion && !esApiInformes && !esConector) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

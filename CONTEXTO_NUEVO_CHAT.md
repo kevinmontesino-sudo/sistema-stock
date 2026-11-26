@@ -68,7 +68,7 @@ Pegá en el primer mensaje del chat nuevo: **"Leé CONTEXTO_NUEVO_CHAT.md, PLAN_
 
 ## 8. Estado al 25/11/2026
 - Último push de Kevin: `78a1a64` (campos de plata con puntos automáticos). Commits recientes: `85a379e` promos por producto/a mano + "Más opciones"; `27f658a` 3x2 a mano + cortesía a la vista; `b9b0154` a mano sin productos; `457f5a0` precio de promo acepta cualquier entero; `adc6327` botón de promo sin texto repetido; `3544821` "no cargada" arriba, "Más opciones" solo si hay descuento especial; `78a1a64` puntos en campos de plata.
-- Base real con migraciones aplicadas hasta la **031**.
+- Base real con migraciones aplicadas hasta la **032** (MCP remoto con login OAuth: ver PLAN_MCP_REMOTO.md).
 - Kevin debe: Implementar el último push y probar.
 
 ## 9. Pendientes y cosas para retomar

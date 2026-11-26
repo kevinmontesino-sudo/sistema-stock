@@ -10,6 +10,7 @@ import { puede, ROLES, type Rol } from "@/lib/seguridad/permisos";
 import { empresa } from "@/lib/empresa.config";
 import { panelCompleto, validarParams } from "@/lib/informes";
 import { crearToken } from "@/lib/seguridad/token";
+import { listarConexiones, revocarConexion } from "@/lib/oauth";
 import { crearPromo, desactivarPromo, descuentosEspeciales, listarPromos, type PromoNueva } from "@/lib/promosAdmin";
 import { listarTipos, retirosEmpresa } from "@/lib/repo";
 import * as repo from "@/lib/repo";
@@ -214,6 +215,18 @@ export async function revocarToken(id: number) {
     const r = await pool.query<{ nombre: string }>("update tokens_api set revocado_en = now() where id = $1 and revocado_en is null returning nombre", [Number(id)]);
     if (!r.rows[0]) throw new ErrorNegocio("No existe esa llave o ya estaba revocada.");
     await auditar("llave_api_revocada", { id: Number(id), nombre: r.rows[0].nombre });
+    return {};
+  });
+}
+
+// ---- Conexiones del conector remoto (Claude / ChatGPT con login OAuth) ----
+export async function conexionesConector() {
+  return admin(async () => ({ conexiones: await listarConexiones() }));
+}
+export async function revocarConexionConector(id: number) {
+  return admin(async (yo) => {
+    if (!(await revocarConexion(Number(id), yo.id))) throw new ErrorNegocio("No existe esa conexión o ya estaba cortada.");
+    await auditar("conexion_claude_revocada", { id: Number(id) });
     return {};
   });
 }

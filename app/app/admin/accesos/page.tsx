@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { cambiarAlcanceToken, crearTokenApi, listarTokens, revocarToken, type TokenFila } from "@/app/admin/acciones";
+import { cambiarAlcanceToken, conexionesConector, crearTokenApi, listarTokens, revocarConexionConector, revocarToken, type TokenFila } from "@/app/admin/acciones";
 
 const fecha = (iso: string | null) => (iso ? new Date(iso).toLocaleString("es-AR", { hour12: false }) : "nunca");
 
@@ -10,10 +10,14 @@ export default function Accesos() {
   const [nuevo, setNuevo] = useState<{ token: string; nombre: string; vence: string; alcance: string } | null>(null);
   const [form, setForm] = useState({ nombre: "", dias: 90, alcance: "informes" });
   const [version, setVersion] = useState(0);
+  const [origen, setOrigen] = useState("");
+  useEffect(() => { setOrigen(window.location.origin); }, []);
+  const [conexiones, setConexiones] = useState<{ id: number; cliente: string; usuario: string; creado: string; ultimoUso: string | null; usos: number; revocado: string | null; motivo: string | null }[]>([]);
 
   useEffect(() => {
     let vivo = true;
     listarTokens().then((r) => { if (!vivo) return; if (r.ok) setLista(r.tokens); else setMsg({ texto: r.motivo, mala: true }); });
+    conexionesConector().then((r) => { if (vivo && r.ok) setConexiones(r.conexiones); });
     return () => { vivo = false; };
   }, [version]);
 
@@ -32,6 +36,12 @@ export default function Accesos() {
     if (!window.confirm(texto)) return;
     const r = await cambiarAlcanceToken(t.id, nuevo);
     setMsg(r.ok ? { texto: "Permiso actualizado.", mala: false } : { texto: r.motivo, mala: true });
+    setVersion((v) => v + 1);
+  }
+  async function cortar(c: { id: number; cliente: string; usuario: string }) {
+    if (!window.confirm(`¿Cortar la conexión de ${c.cliente} de ${c.usuario}? Deja de funcionar en el momento (para volver, hay que conectar de nuevo desde Claude).`)) return;
+    const r = await revocarConexionConector(c.id);
+    setMsg(r.ok ? { texto: "Conexión cortada.", mala: false } : { texto: r.motivo, mala: true });
     setVersion((v) => v + 1);
   }
   async function revocar(t: TokenFila) {
@@ -74,6 +84,25 @@ export default function Accesos() {
               </tr>
             ))}
             {lista.length === 0 && <tr><td colSpan={8} className="aviso">Todavía no hay llaves.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <h2>Conexiones de Claude / ChatGPT (conector con login)</h2>
+      <p className="aviso" style={{ marginTop: -8 }}>
+        Se agregan desde Claude o ChatGPT como conector personalizado con la dirección <strong className="mono">{origen}/mcp</strong>: piden iniciar sesión con la cuenta de un administrador y tocar «Permitir». Funcionan desde la web, la app y el celular. Solo leen (y administran promos); no mueven plata.
+      </p>
+      <div className="tarjeta" style={{ overflowX: "auto" }}>
+        <table>
+          <thead><tr><th>Aplicación</th><th>Persona</th><th>Conectada</th><th>Último uso</th><th className="der">Usos</th><th>Estado</th><th></th></tr></thead>
+          <tbody>
+            {conexiones.map((c) => (
+              <tr key={c.id}>
+                <td>{c.cliente}</td><td>{c.usuario}</td><td>{fecha(c.creado)}</td><td>{fecha(c.ultimoUso)}</td><td className="der">{c.usos}</td>
+                <td>{c.revocado ? <span className="aviso">Cortada {fecha(c.revocado)}{c.motivo ? ` (${c.motivo})` : ""}</span> : "Activa"}</td>
+                <td>{!c.revocado && <button className="chico" onClick={() => cortar(c)}>Cortar</button>}</td>
+              </tr>
+            ))}
+            {conexiones.length === 0 && <tr><td colSpan={7} className="aviso">Todavía nadie conectó Claude con login.</td></tr>}
           </tbody>
         </table>
       </div>

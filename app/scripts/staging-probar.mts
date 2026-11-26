@@ -846,6 +846,53 @@ try {
     await promosAdmin.desactivarPromo(p5.id);
   });
 
+  await paso("MCP remoto: login OAuth (PKCE) y herramientas", async () => {
+    const oa = await import("../lib/oauth");
+    const { createHash, randomBytes } = await import("node:crypto");
+    const { procesarMcp } = await import("../lib/mcp/servidor");
+    const base = "https://stock.ejemplo";
+    const fallaOA = async (prueba: string, fn: () => Promise<unknown>, texto: RegExp) => {
+      try { await fn(); check(prueba, false, "no dio error y tenia que darlo"); }
+      catch (e) { const m = (e as Error).message; check(prueba, e instanceof oa.ErrorOAuth && texto.test(m), m); }
+    };
+    const adm = (await pool.query("select id::int as id, nombre, email from usuarios where rol = 'admin' and activo order by id limit 1")).rows[0];
+    const enc = (await pool.query("select id::int as id from usuarios where rol <> 'admin' and activo order by id limit 1")).rows[0];
+    await fallaOA("OAuth: registro con direccion de vuelta ajena", () => oa.registrarCliente({ client_name: "ZZ malo", redirect_uris: ["https://evil.example/cb"] }), /no permitida/);
+    const cli = await oa.registrarCliente({ client_name: "ZZ Claude", redirect_uris: ["https://claude.ai/api/mcp/auth_callback"] });
+    const verif = randomBytes(32).toString("base64url"), desafio = createHash("sha256").update(verif).digest("base64url");
+    const q = (extra: Record<string, string> = {}) => new URLSearchParams({ response_type: "code", client_id: cli.client_id, redirect_uri: "https://claude.ai/api/mcp/auth_callback", code_challenge: desafio, code_challenge_method: "S256", state: "zz", resource: `${base}/mcp`, ...extra });
+    const sinPkce = await oa.iniciarAutorizacion(new URLSearchParams({ response_type: "code", client_id: cli.client_id, redirect_uri: "https://claude.ai/api/mcp/auth_callback", state: "zz" }), base);
+    check("OAuth: sin PKCE vuelve con error", sinPkce.tipo === "redirigir" && sinPkce.url.includes("error=invalid_request"), JSON.stringify(sinPkce));
+    await fallaOA("OAuth: direccion de vuelta distinta a la registrada", () => oa.iniciarAutorizacion(q({ redirect_uri: "https://claude.ai/otra" }), base), /no coincide/);
+    const ped = await oa.iniciarAutorizacion(q(), base);
+    if (ped.tipo !== "pedido") throw new Error("se esperaba un pedido");
+    if (enc) await fallaOA("OAuth: alguien que no es admin no puede autorizar", () => oa.aprobarPedido(ped.id, { id: enc.id, rol: "encargado" }), /administrador/);
+    const vuelta = new URL(await oa.aprobarPedido(ped.id, { id: adm.id, rol: "admin" }));
+    igual("OAuth: vuelve a Claude con codigo y el mismo state", [vuelta.origin + vuelta.pathname, vuelta.searchParams.get("state"), (vuelta.searchParams.get("code") ?? "").length > 30], ["https://claude.ai/api/mcp/auth_callback", "zz", true]);
+    await fallaOA("OAuth: el pedido no se puede aprobar dos veces", () => oa.aprobarPedido(ped.id, { id: adm.id, rol: "admin" }), /venció o ya se usó/);
+    const codigo = vuelta.searchParams.get("code")!;
+    const canje = (v: string) => oa.canjearCodigo(new URLSearchParams({ grant_type: "authorization_code", code: codigo, code_verifier: v, client_id: cli.client_id, redirect_uri: "https://claude.ai/api/mcp/auth_callback" }));
+    const t = await canje(verif);
+    check("OAuth: canje con PKCE correcto da tokens", t.access_token.startsWith("xmo_") && t.refresh_token.startsWith("xmr_") && t.expires_in === 3600, JSON.stringify({ ...t, access_token: "x", refresh_token: "x" }));
+    await fallaOA("OAuth: el codigo es de un solo uso", () => canje(verif), /no vale/);
+    const acc = await oa.verificarAcceso(`Bearer ${t.access_token}`);
+    igual("OAuth: el token identifica a la persona y la aplicacion", [acc?.usuario.id, acc?.cliente], [adm.id, "ZZ Claude"]);
+    const ctx = { usuario: acc!.usuario, cliente: acc!.cliente, ip: null };
+    const lista = await procesarMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx) as { result: { tools: { name: string }[] } };
+    check("MCP: lista las 8 herramientas y ninguna mueve plata", lista.result.tools.length === 8 && !lista.result.tools.some((x) => /cierre|retir|venta|caja_fuerte/.test(x.name)), lista.result.tools.map((x) => x.name).join(","));
+    const est = await procesarMcp({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "estado_del_dia", arguments: { sucursal: LOCAL } } }, ctx) as { result: { isError?: boolean; structuredContent: { control: unknown; cajaFuerte: unknown } } };
+    check("MCP: estado_del_dia responde control y caja fuerte", !est.result.isError && !!est.result.structuredContent.control && !!est.result.structuredContent.cajaFuerte);
+    const noti = await procesarMcp({ jsonrpc: "2.0", method: "notifications/initialized" }, ctx);
+    igual("MCP: las notificaciones no se contestan", noti, null);
+    const t2 = await oa.refrescarToken(new URLSearchParams({ grant_type: "refresh_token", refresh_token: t.refresh_token, client_id: cli.client_id }));
+    check("OAuth: el refresco rota los tokens", t2.refresh_token !== t.refresh_token && !!(await oa.verificarAcceso(`Bearer ${t2.access_token}`)));
+    await fallaOA("OAuth: reusar un refresco viejo corta la conexion", () => oa.refrescarToken(new URLSearchParams({ grant_type: "refresh_token", refresh_token: t.refresh_token, client_id: cli.client_id })), /cortó la conexión/);
+    igual("OAuth: despues del corte, el token nuevo ya no sirve", await oa.verificarAcceso(`Bearer ${t2.access_token}`), null);
+    const fila = (await oa.listarConexiones()).find((x) => x.cliente === "ZZ Claude");
+    check("OAuth: la conexion aparece cortada en Oficina con el motivo", !!fila?.revocado && /reutilizado/.test(fila.motivo ?? ""), JSON.stringify(fila));
+    await pool.query("delete from oauth_clientes where nombre like 'ZZ %'");
+  });
+
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;
     igual("Toda venta: pagos = total", await q(`select count(*)::int as n from ventas v
