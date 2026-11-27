@@ -16,6 +16,8 @@ export type DatosTicket = {
   ajuste: number;
   total: number;
   pagos: PagoCalculado[];
+  // Venta A CUENTA de un cliente mayorista (no se cobro nada): cliente, medio acordado y como queda su cuenta (valor de lista y en cada medio).
+  cuenta?: { cliente: string; medio: string; saldoLista: number; saldoTransferencia: number; saldoEfectivo: number };
   items: { sku: string; nombre: string; precio: number; cant: number; sinCambio?: boolean }[];
   // Prendas que la empresa regalo con esta compra (sin cobrar).
   regalos?: { sku: string; nombre: string; cant: number }[];
@@ -90,10 +92,17 @@ export function Ticket({ venta }: { venta: DatosTicket }) {
       <div className="linea"><span className="total-t">TOTAL</span><span className="total-t">{pesos(venta.total)}</span></div>
       {ahorro > 0 && <div className="linea"><span><strong>AHORRASTE</strong></span><span><strong>{pesos(ahorro)}</strong></span></div>}
       <hr />
-      {venta.pagos.map((p) => (
+      {venta.cuenta ? (
+        <>
+          <div className="linea"><span><strong>A CUENTA de {venta.cuenta.cliente}</strong></span><span><strong>{pesos(venta.total)}</strong></span></div>
+          <div className="linea"><span>Precio acordado pagando en {venta.cuenta.medio}</span><span /></div>
+          <div className="linea"><span>Debe en total</span><span>{pesos(venta.cuenta.medio === "efectivo" ? venta.cuenta.saldoEfectivo : venta.cuenta.saldoTransferencia)}</span></div>
+          <div className="centro">No se cobró nada: queda en su cuenta.</div>
+        </>
+      ) : venta.pagos.map((p) => (
         <div key={p.medioId} className="linea"><span>Paga {p.nombre}{textoPct(p.pct, p.medioId)}</span><span>{pesos(p.monto)}</span></div>
       ))}
-      {venta.recibido !== undefined && efectivo && (
+      {!venta.cuenta && venta.recibido !== undefined && efectivo && (
         <>
           <div className="linea"><span>Efectivo recibido</span><span>{pesos(venta.recibido)}</span></div>
           <div className="linea"><span className="total-t">VUELTO</span><span className="total-t">{pesos(venta.recibido - efectivo.monto)}</span></div>

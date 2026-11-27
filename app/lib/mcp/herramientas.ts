@@ -27,7 +27,7 @@ export const HERRAMIENTAS = [
     description: "Informe de X Menos Mas Prendas (solo lectura). Tipos: resumen (ventas, total pagado, cobrado en caja, ticket promedio y medios de pago por sucursal), periodo (evolucion por dia/semana/mes), " +
       "prendas_mas_vendidas, prendas_menos_vendidas, notas_credito, stock (stock valorizado), horarios, ingresos (mercaderia cargada y enviada), control (control de UN dia: hasta=ese dia), cierres_caja, " +
       "caja_fuerte (cuanto tendria que haber por local, cada guardado de los cierres parciales y cada salida con responsable y destino, y los conteos), anulaciones (ventas anuladas con motivo y quien), " +
-      "descuentos_cortesias (descuentos especiales y Curva Plus con quien autorizo, y cortesias), panel (todo junto). Fechas AAAA-MM-DD; sin fechas = ultimos 30 dias.",
+      "descuentos_cortesias (descuentos especiales y Curva Plus con quien autorizo, y cortesias), cuentas_clientes (deuda de los clientes mayoristas del Deposito por vendedor y cliente, limite, dias sin pagar y comisiones del mes), panel (todo junto). Fechas AAAA-MM-DD; sin fechas = ultimos 30 dias.",
     inputSchema: {
       type: "object",
       properties: {

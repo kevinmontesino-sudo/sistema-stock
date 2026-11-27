@@ -81,8 +81,13 @@ export function renglonesVenta(venta: DatosTicket): Renglon[] {
     r.push({ t: "izqDer", izq: "TOTAL", der: pesos(venta.total), destacado: true });
     if (ahorro > 0) r.push({ t: "izqDer", izq: "AHORRASTE", der: pesos(ahorro) });
     r.push({ t: "regla" });
-    for (const p of venta.pagos) r.push({ t: "izqDer", izq: `Paga ${p.nombre}${textoPct(p.pct, p.medioId)}`, der: pesos(p.monto) });
-    if (venta.recibido !== undefined && efectivo) {
+    if (venta.cuenta) {
+      r.push({ t: "izqDer", izq: `A CUENTA de ${venta.cuenta.cliente}`, der: pesos(venta.total), destacado: true });
+      r.push({ t: "centro", s: `Precio acordado pagando en ${venta.cuenta.medio}` });
+      r.push({ t: "izqDer", izq: "Debe en total", der: pesos(venta.cuenta.medio === "efectivo" ? venta.cuenta.saldoEfectivo : venta.cuenta.saldoTransferencia) });
+      r.push({ t: "centro", s: "No se cobro nada: queda en su cuenta." });
+    } else for (const p of venta.pagos) r.push({ t: "izqDer", izq: `Paga ${p.nombre}${textoPct(p.pct, p.medioId)}`, der: pesos(p.monto) });
+    if (!venta.cuenta && venta.recibido !== undefined && efectivo) {
       r.push({ t: "izqDer", izq: "Efectivo recibido", der: pesos(venta.recibido) });
       r.push({ t: "izqDer", izq: "VUELTO", der: pesos(venta.recibido - efectivo.monto), destacado: true });
     }

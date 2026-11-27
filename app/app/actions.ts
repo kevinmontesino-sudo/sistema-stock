@@ -2,6 +2,7 @@
 import * as repo from "@/lib/repo";
 import * as cierre from "@/lib/cierre";
 import * as ficha from "@/lib/ficha";
+import * as cuentas from "@/lib/cuentas";
 import { nombreSucursal, preciosDe, type Reparto } from "@/lib/util";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
 import type { DatosEtiqueta } from "@/components/Etiqueta";
@@ -181,8 +182,11 @@ export async function cobrarVenta(
   totalEsperado?: number,
   regalos?: { sku: string; cant: number; origen?: string }[],
   vendedorId?: number | null,
+  cuenta?: { clienteId: number; medio: string; autorizo?: string } | null,
 ) {
   return seguro("vender", async (u) => {
+    // Venta A CUENTA de un cliente mayorista (solo Deposito): hace falta el permiso de cuentas; el servidor controla el local, el cliente, el medio y el limite.
+    if (cuenta && !puede(u.rol, "cuentas_mayoristas")) throw new repo.ErrorNegocio("Tu usuario no puede vender a cuenta.");
     const regalosOk = (Array.isArray(regalos) ? regalos : []).map((g) => ({ sku: txt(g.sku), cant: ent(g.cant), origen: g.origen ? txt(g.origen) : undefined }));
     if (regalosOk.length && !puede(u.rol, "retiro_empresa")) throw new repo.ErrorNegocio("Tu usuario no puede hacer regalos de la empresa.");
     // Curva Plus: la puede aplicar cualquiera que cobre en Deposito (el servidor controla el local y el porcentaje).
@@ -201,10 +205,58 @@ export async function cobrarVenta(
       regalosOk,
       origenesStock(u.rol, u.sucursalId),
       Number.isInteger(vendedorId) && (vendedorId as number) > 0 ? (vendedorId as number) : null,
+      cuenta ? { clienteId: ent(cuenta.clienteId), medio: txt(cuenta.medio), autorizo: txt(cuenta.autorizo).slice(0, 80) } : null,
     );
     const { nueva: _nueva, ...datos } = venta;
     void _nueva;
     return { venta: datos };
+  });
+}
+
+// ---- Clientes mayoristas del Deposito (cuentas, pagos, comision 0,5% al cobrar) ----
+export async function datosMayoristas() {
+  return seguro("cuentas_mayoristas", async (u) => ({
+    clientes: await cuentas.listarClientes(), vendedores: await cuentas.vendedoresDeposito(), comisiones: await cuentas.comisionesMayoristas(null), esAdmin: u.rol === "admin",
+  }));
+}
+export async function estadoCuentaMayorista(clienteId: number) {
+  return seguro("cuentas_mayoristas", async () => ({ cuenta: await cuentas.estadoDeCuenta(ent(clienteId)) }));
+}
+export async function comisionesMayoristasMes(mes: string) {
+  return seguro("cuentas_mayoristas", async () => ({ comisiones: await cuentas.comisionesMayoristas(txt(mes) || null) }));
+}
+export async function crearClienteMayorista(d: { nombre: string; telefono?: string; nota?: string; vendedorId: number; limite?: number | string | null }) {
+  return seguro("cuentas_mayoristas", async (u) => {
+    const r = await cuentas.crearCliente({ nombre: d.nombre, telefono: d.telefono, nota: d.nota, vendedorId: d.vendedorId, limite: d.limite }, { id: u.id, nombre: u.nombre });
+    await auditar("cliente_mayorista_creado", { id: r.id, nombre: txt(d.nombre), vendedorId: d.vendedorId, limite: d.limite ?? null });
+    return r;
+  });
+}
+// Telefono, nota y limite los puede cambiar el Deposito; pasar el cliente a otro vendedor, el nivel de precio y dar de baja, solo un administrador.
+export async function editarClienteMayorista(clienteId: number, d: { telefono?: string; nota?: string; limite?: number | string | null; nivelPrecio?: string; activo?: boolean; vendedorId?: number }, motivo = "") {
+  return seguro("cuentas_mayoristas", async (u) => {
+    const soloAdmin = d.vendedorId !== undefined || d.nivelPrecio !== undefined || d.activo !== undefined;
+    if (soloAdmin && u.rol !== "admin") throw new repo.ErrorNegocio("Cambiar el vendedor del cliente, el nivel de precio o dar de baja lo hace un administrador.");
+    if (d.vendedorId !== undefined && txt(motivo).length < 5) throw new repo.ErrorNegocio("Escribí el motivo del cambio de vendedor (5 letras o más).");
+    const r = await cuentas.editarCliente(ent(clienteId), d);
+    if (r.cambiado) await auditar("cliente_mayorista_editado", { id: ent(clienteId), ...d, motivo: txt(motivo), vendedorAnterior: r.vendedorAnterior });
+    return {};
+  });
+}
+// Entra plata de un cliente: baja su deuda, entra a la caja del dia del Deposito y le suma comision (0,5%) al vendedor dueño del cliente.
+export async function cobrarACliente(clienteId: number, medio: string, monto: unknown, motivo = "") {
+  return seguro("cuentas_mayoristas", async (u) => {
+    const r = await cuentas.registrarPago(ent(clienteId), txt(medio), ent(monto), { id: u.id, nombre: u.nombre }, txt(motivo));
+    await auditar("cuenta_pago", { clienteId: ent(clienteId), cliente: r.cliente, medio: txt(medio), monto: ent(monto), valorLista: r.valorLista, comision: r.comision, saldo: r.saldo });
+    return r;
+  });
+}
+export async function ajustarCuentaMayorista(clienteId: number, valorLista: unknown, motivo: string) {
+  return seguro("cuentas_mayoristas", async (u) => {
+    if (u.rol !== "admin") throw new repo.ErrorNegocio("Los ajustes de una cuenta los hace un administrador.");
+    const r = await cuentas.ajustarCuenta(ent(clienteId), Number(valorLista), txt(motivo), { id: u.id, nombre: u.nombre });
+    await auditar("cuenta_ajuste", { clienteId: ent(clienteId), valorLista: Number(valorLista), motivo: txt(motivo), saldo: r.saldo });
+    return r;
   });
 }
 

@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buscarProductos, cajaDeHoy, cobrarVenta, marcarRegaloAccion, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion, vendedoresDeCaja } from "@/app/actions";
+import { buscarProductos, cajaDeHoy, cobrarVenta, datosMayoristas, marcarRegaloAccion, obtenerMediosPago, obtenerNota, obtenerProducto, productoSinCargar, promosDeHoy, retiroEmpresaAccion, vendedoresDeCaja } from "@/app/actions";
 import type { Vendedor } from "@/lib/repo";
 import { Ticket, TicketCortesia, type DatosTicket } from "@/components/Ticket";
 import { DEPOSITO, empresa } from "@/lib/empresa.config";
@@ -85,6 +85,10 @@ export default function VentaPage() {
   // Promos de hoy en este local (se aplican solas) y descuento especial (a mano, con motivo y quien lo autorizo).
   const [promosHoy, setPromosHoy] = useState<{ suc: string; promos: Promo[]; especial: boolean; curvaPlus: boolean }>({ suc: "", promos: [], especial: false, curvaPlus: false });
   const [formEsp, setFormEsp] = useState({ pct: "", motivo: "", autorizo: "" });
+  // Venta a cuenta de un cliente mayorista (solo la caja del Deposito): se elige el cliente, se acuerda el medio y la plata queda como deuda del cliente.
+  const [mayoristas, setMayoristas] = useState<{ id: number; nombre: string; vendedor: string; saldo: number; limite: number | null; nivelPrecio: string }[]>([]);
+  const [clienteCuenta, setClienteCuenta] = useState<number | null>(null);
+  const [autorizoCuenta, setAutorizoCuenta] = useState("");
   const [especialSel, setEspecial] = useState<{ pct: number; motivo: string; autorizo: string; curvaPlus?: boolean } | null>(null);
   // Curva Plus es solo de Deposito: si se cambia de local, no cuenta.
   const especial = especialSel?.curvaPlus && sucursal !== DEPOSITO ? null : especialSel;
@@ -121,6 +125,20 @@ export default function VentaPage() {
     obtenerMediosPago().then((r) => vivo && r.ok && setMedios(r.medios));
     return () => { vivo = false; };
   }, []);
+
+  // Al elegir un cliente con precio Curva Plus (lo habitual) se aplica solo en cuanto hay prendas: el precio mayorista del cliente.
+  useEffect(() => {
+    if (!clienteCuenta || sucursal !== DEPOSITO) return;
+    const c = mayoristas.find((x) => x.id === clienteCuenta);
+    if (c && c.nivelPrecio === "curva_plus" && lineas.length > 0 && !especialSel) setEspecial({ pct: empresa.curvaPlus.pct, motivo: empresa.curvaPlus.nombre, autorizo: "", curvaPlus: true });
+  }, [clienteCuenta, mayoristas, lineas.length, especialSel, sucursal]);
+
+  useEffect(() => {
+    let vivo = true;
+    if (sucursal !== DEPOSITO) { setMayoristas([]); setClienteCuenta(null); return; }
+    datosMayoristas().then((r) => { if (vivo) setMayoristas(r.ok ? r.clientes.filter((c) => c.activo) : []); });
+    return () => { vivo = false; };
+  }, [sucursal, version]);
 
   useEffect(() => {
     let vivo = true;
@@ -362,7 +380,9 @@ export default function VentaPage() {
   }
 
   // Vuelto: si hay una parte en efectivo, el cajero escribe cuanto entrega el cliente.
-  const pagoEfectivo = calc && calc.ok ? calc.pagos.find((p) => p.medioId === "efectivo") : undefined;
+  const cliente = clienteCuenta ? mayoristas.find((c) => c.id === clienteCuenta) ?? null : null;
+  const superaLimite = !!cliente && cliente.limite !== null && cliente.saldo + neto > cliente.limite;
+  const pagoEfectivo = !cliente && calc && calc.ok ? calc.pagos.find((p) => p.medioId === "efectivo") : undefined;
   const recibidoNum = parseInt(recibido) || 0;
   const vuelto = pagoEfectivo && recibidoNum > 0 ? recibidoNum - pagoEfectivo.monto : null;
   const billetes = pagoEfectivo
@@ -390,9 +410,11 @@ export default function VentaPage() {
   async function cobrar() {
     if (cobrando || !calc || !calc.ok) return;
     if (vuelto !== null && vuelto < 0) return setAviso(`El cliente entrega menos de lo que falta en efectivo (${pesos(pagoEfectivo!.monto)})`);
+    if (cliente && nota) return setAviso("Una venta a cuenta no se paga con nota de crédito: sacá la nota o elegí «venta normal».");
+    if (cliente && superaLimite && autorizoCuenta.trim().length < 2) return setAviso(`${cliente.nombre} se pasa de su límite de deuda: anotá quién lo autorizó (su vendedor o Tomás).`);
     setCobrando(true);
     const cobradas = pagas.filter((l) => l.cant > 0);
-    const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null, promoManualId: manualPromo(l)?.id ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null, manualPromo(l)?.id ?? null]), pagos, especial, calc.total, regalosCarrito, vendedorId]))}`, especial, calc.total, regalosCarrito, vendedorId);
+    const r = await cobrarVenta(sucursal, cobradas.map((l) => ({ sku: l.producto.sku, cant: l.cant, origen: l.origen, faltante: l.faltante ?? null, promoManualId: manualPromo(l)?.id ?? null })), pagos, `${claveCobro.current}-${hashTexto(JSON.stringify([sucursal, cobradas.map((l) => [l.producto.sku, l.cant, l.origen, l.faltante ?? null, manualPromo(l)?.id ?? null]), pagos, especial, calc.total, regalosCarrito, vendedorId]))}`, especial, calc.total, regalosCarrito, vendedorId, cliente && medioSel ? { clienteId: cliente.id, medio: medioSel, autorizo: superaLimite ? autorizoCuenta.trim() : undefined } : null);
     setCobrando(false);
     // Si fallo (por ejemplo, cambiaron las promos), se vuelven a pedir: la pantalla muestra el total nuevo.
     if (!r.ok) { setRecargaPromos((x) => x + 1); return setAviso(r.motivo); }
@@ -407,12 +429,15 @@ export default function VentaPage() {
       const g = await marcarRegaloAccion(r.venta.codigo);
       if (g.ok) { plazoRegalo = g.dias; comoImprimir = "ambos"; } else setAviso(`No se pudo marcar el regalo (${g.motivo}): se imprime el ticket normal.`);
     }
+    if (cliente) setAviso(`Venta a cuenta registrada: ${pesos(r.venta.total)} (${medioSel === "efectivo" ? "efectivo" : "transferencia"} acordado) quedan en la cuenta de ${cliente.nombre}. No entró plata a la caja.`);
+    setClienteCuenta(null);
+    setAutorizoCuenta("");
     setVendedorId(null);
     setUltima({ ...r.venta, sucursal, plazoRegalo, recibido: pagoEfectivo && recibidoNum >= pagoEfectivo.monto ? recibidoNum : undefined });
     setImprimirComo(comoImprimir);
     setEsRegalo(false);
     if (autoTicket) setAImprimir(true);
-    if (!esRegalo || comoImprimir === "ambos") setAviso("");
+    if (!esRegalo || comoImprimir === "ambos") { if (!cliente) setAviso(""); }
     setLineas(() => []);
     setEspecial(null);
     setFormEsp({ pct: "", motivo: "", autorizo: "" });
@@ -453,6 +478,7 @@ export default function VentaPage() {
   const textoCobrar = !lineas.length ? "Cobrar"
     : !calc ? (mixto ? "Escribí cuánto entrega el cliente" : "Elegí cómo paga")
     : !calc.ok ? "Completá el pago"
+    : cliente ? `Registrar ${pesos(calc.total)} a cuenta de ${cliente.nombre} · ${calc.pagos[0].nombre} acordado`
     : `Cobrar ${pesos(calc.total)} · ${calc.pagos.map((p) => p.nombre).join(" + ")}`;
 
   function aplicarEspecial(e: React.FormEvent) {
@@ -645,11 +671,34 @@ export default function VentaPage() {
           </div>
         )}
 
+        {sucursal === DEPOSITO && mayoristas.length > 0 && (
+          <div className="tarjeta" style={{ margin: "16px 0 0", display: "grid", gap: 8 }}>
+            <strong>Venta por teléfono a cuenta (cliente mayorista)</strong>
+            <select value={clienteCuenta ?? ""} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setClienteCuenta(v); setAutorizoCuenta(""); setMedioSel(null); setMixto(false); setRecibido(""); if (v) setNota(null); }}>
+              <option value="">No: venta normal</option>
+              {[...new Set(mayoristas.map((c) => c.vendedor))].map((vn) => (
+                <optgroup key={vn} label={`Clientes de ${vn}`}>
+                  {mayoristas.filter((c) => c.vendedor === vn).map((c) => <option key={c.id} value={c.id}>{c.nombre} · debe {pesos(c.saldo)}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            {cliente && (
+              <>
+                <span className="aviso">A cuenta de <strong>{cliente.nombre}</strong> (cliente de {cliente.vendedor}). Debe {pesos(cliente.saldo)} de lista{cliente.limite !== null ? ` · límite ${pesos(cliente.limite)}` : ""}. <strong>Elegí abajo el medio que acordaron</strong>: el precio sale con ese medio y la plata no entra a la caja, queda como deuda.</span>
+                {superaLimite && (
+                  <label className="campo" style={{ margin: 0 }}><span className="error">Se pasa del límite de deuda. ¿Quién lo autorizó? (su vendedor o Tomás)</span>
+                    <input value={autorizoCuenta} onChange={(e) => setAutorizoCuenta(e.target.value)} maxLength={80} placeholder="ej. Santiago" /></label>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {lineas.length > 0 && !mixto && restoLista > 0 && (
           <>
-            <p className="rotulo" style={{ margin: "16px 0 8px" }}>¿Cómo paga?</p>
+            <p className="rotulo" style={{ margin: "16px 0 8px" }}>{cliente ? "¿Qué medio acordaron?" : "¿Cómo paga?"}</p>
             <div className="medios">
-              {mediosVenta.map((m) => (
+              {mediosVenta.filter((m) => !cliente || m.id === "efectivo" || m.id === "transferencia").map((m) => (
                 <button key={m.id} className={`medio ${m.id === medioSel ? "elegido" : ""}`} onClick={() => { setMedioSel(m.id); setRecibido(""); }} aria-pressed={m.id === medioSel}>
                   <span className="medio-nombre">{m.nombre}</span>
                   <span className="medio-monto">{pesos(precioMedio(restoLista, m.ajustePct))}</span>
@@ -657,9 +706,11 @@ export default function VentaPage() {
                 </button>
               ))}
             </div>
-            <button className="chico" style={{ marginTop: 8 }} onClick={() => { setMixto(true); setMedioSel(null); setRecibido(""); setPago1("efectivo"); setPago2("transferencia"); setEntrega1(""); }}>
-              Pagar con más de un medio
-            </button>
+            {!cliente && (
+              <button className="chico" style={{ marginTop: 8 }} onClick={() => { setMixto(true); setMedioSel(null); setRecibido(""); setPago1("efectivo"); setPago2("transferencia"); setEntrega1(""); }}>
+                Pagar con más de un medio
+              </button>
+            )}
           </>
         )}
 
@@ -882,7 +933,8 @@ export default function VentaPage() {
               ))}
               <tr><td className="aviso">Subtotal a precio de lista</td><td className="der">{pesos(ultima.subtotal)}</td></tr>
               {ultima.promo && <tr><td className="aviso">{ultima.promo.nombre}</td><td className="der">−{pesos(ultima.promo.monto)}</td></tr>}
-              {ultima.pagos.map((p) => (
+              {ultima.cuenta && <tr><td className="aviso"><strong>A CUENTA de {ultima.cuenta.cliente}</strong> · precio acordado pagando en {ultima.cuenta.medio}. Debe en total {pesos(ultima.cuenta.medio === "efectivo" ? ultima.cuenta.saldoEfectivo : ultima.cuenta.saldoTransferencia)}. No se cobró nada.</td><td className="der">{pesos(ultima.total)}</td></tr>}
+              {!ultima.cuenta && ultima.pagos.map((p) => (
                 <tr key={p.medioId}><td className="aviso">Pagó con {p.nombre}{p.medioId.startsWith("nota:") ? "" : ` (${etiquetaPct(p.pct)})`}{ultima.pagos.length > 1 ? `, cubre ${pesos(p.valorLista)} de lista` : ""}</td><td className="der">{pesos(p.monto)}</td></tr>
               ))}
             </tbody>

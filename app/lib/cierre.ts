@@ -1,5 +1,6 @@
 import { empresa } from "./empresa.config";
 import { pool } from "./db";
+import { cobrosCuentasDelDia } from "./cuentas";
 import { ErrorNegocio } from "./repo";
 import { NO_ANULADA, nombreSucursal } from "./util";
 
@@ -24,6 +25,7 @@ export type ResumenDia = {
   sucursal: string; dia: string; ventas: number; unidades: number; totalCobrado: number; medios: MedioDia[];
   pagadoConNotas: number; notasEmitidas: number; notasMonto: number;
   cierre: CierreCaja | null; ventasDespuesDelCierre: number;
+  vendidoACuenta: { monto: number; ventas: number }; // ventas a cuenta de clientes mayoristas del dia (no es plata cobrada)
   fondoSugerido: number | null; // lo que dejo el ultimo cierre anterior de este local (con eso se abre la caja)
 };
 
@@ -60,7 +62,15 @@ export async function resumenDia(sucursal: string, dia: string): Promise<Resumen
   const m = await pool.query<MedioDia>(
     `select pg.medio_pago_id as id, m.nombre, count(distinct pg.venta_id)::int as ventas, sum(pg.monto)::float8 as monto
      from venta_pagos pg join ventas v on v.id = pg.venta_id join medios_pago m on m.id = pg.medio_pago_id
-     where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and pg.nota_credito_id is null group by 1, 2 order by m.nombre`, [sucursal, dia]);
+     where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and pg.nota_credito_id is null and pg.medio_pago_id <> 'a_cuenta' group by 1, 2 order by m.nombre`, [sucursal, dia]);
+  // Lo vendido A CUENTA a clientes mayoristas no es plata cobrada: se muestra aparte. Lo que pagan los clientes (efectivo / transferencia) SI entra a la caja del dia.
+  const aCuenta = (await pool.query<{ monto: number; ventas: number }>(
+    `select coalesce(sum(pg.monto), 0)::float8 as monto, count(distinct pg.venta_id)::int as ventas from venta_pagos pg join ventas v on v.id = pg.venta_id
+     where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and pg.medio_pago_id = 'a_cuenta'`, [sucursal, dia])).rows[0];
+  for (const x of await cobrosCuentasDelDia(sucursal, dia)) {
+    const f = m.rows.find((y) => y.id === x.id);
+    if (f) f.monto += x.monto; else m.rows.push({ id: x.id, nombre: x.nombre, ventas: 0, monto: x.monto });
+  }
   const n = await pool.query<{ monto: number }>(
     `select coalesce(sum(pg.monto), 0)::float8 as monto from venta_pagos pg join ventas v on v.id = pg.venta_id
      where v.sucursal_id = $1 and ${rango("v.creado_en")} and ${NO_ANULADA} and pg.nota_credito_id is not null`, [sucursal, dia]);
@@ -82,6 +92,7 @@ export async function resumenDia(sucursal: string, dia: string): Promise<Resumen
     fondoSugerido: ant.rows[0]?.f ?? null,
     retirosParciales: { total: parciales.reduce((t, x) => t + x.monto, 0), lista: parciales }, retirosCajaFuerte: retiros.filter((x) => x.origen === "caja_fuerte"),
     sucursal, dia, ventas: v.rows[0].ventas, unidades: v.rows[0].unidades, medios: m.rows, totalCobrado: m.rows.reduce((s, x) => s + x.monto, 0),
+    vendidoACuenta: { monto: aCuenta.monto, ventas: aCuenta.ventas },
     pagadoConNotas: n.rows[0].monto, notasEmitidas: e.rows[0].n, notasMonto: e.rows[0].monto, cierre, ventasDespuesDelCierre: despues,
   };
 }

@@ -29,6 +29,7 @@ export const MOMENTOS: Momento[] = [
       { href: "/ventas", texto: "Ventas", ayuda: "Buscar una venta por día o mes", permiso: "devolver" },
       { href: "/devolucion", texto: "Cambio o devolución", ayuda: "Nota de crédito con el ticket", permiso: "devolver" },
       { href: "/empleado", texto: "Compra de empleado", ayuda: "Prendas que se lleva un empleado: a su cuenta", permiso: "compra_empleado" },
+      { href: "/mayoristas", texto: "Clientes mayoristas", ayuda: "Cuentas de los clientes por teléfono (a cuenta): deuda, cobros y comisión", permiso: "cuentas_mayoristas" },
       { href: "/cierre-parcial", texto: "Guardar en caja fuerte", ayuda: "Cierre parcial: la plata sale de la caja del día y va a la caja fuerte; también la salida de caja fuerte", permiso: "vender" },
       { href: "/cierre", texto: "Cierre de caja", ayuda: "Contar la plata y cerrar el día", permiso: "vender" },
     ],

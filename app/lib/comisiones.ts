@@ -46,7 +46,7 @@ export async function comisiones(raw: { desde?: string | null; hasta?: string | 
   const ventas = await pool.query<{ semana: string; vid: number; nombre: string; suc: string; n: number; vendido: number }>(
     `select ${inicioSemana.replace("X", "v.creado_en")}::text as semana, v.vendedor_id::int as vid, max(v.vendedor_nombre) as nombre, max(v.vendedor_sucursal_id) as suc,
        count(*)::int as n, sum(v.total)::float8 as vendido
-     from ventas v where v.vendedor_id is not null and ${NO_ANULADA} and ${rango("v.creado_en")} group by 1, 2`,
+     from ventas v where v.vendedor_id is not null and v.cliente_mayorista_id is null and ${NO_ANULADA} and ${rango("v.creado_en")} group by 1, 2`,
     [desde, hasta],
   );
   const notas = await pool.query<{ semana: string; vid: number; nombre: string; suc: string; devuelto: number }>(

@@ -3,6 +3,7 @@ import { pool } from "./db";
 import { ErrorNegocio, cajaFuerteResumen } from "./repo";
 import { NO_ANULADA, nombreSucursal } from "./util";
 import { cierresEntre, controlDiario } from "./cierre";
+import { informeCuentas } from "./cuentas";
 
 // Informes de SOLO LECTURA (solo SELECT). Los usan la pantalla de administracion y la API de informes, asi los numeros coinciden.
 // Todas las fechas son de Argentina (America/Argentina/Buenos_Aires) y el rango "desde-hasta" incluye ambos dias.
@@ -60,10 +61,11 @@ export async function resumen(p: ParamsInforme) {
   const filas = ventas.rows.map((v) => {
     const mios = medios.rows.filter((m) => m.sucursal === v.sucursal);
     const conNotas = mios.find((m) => m.medio === "nota_credito")?.monto ?? 0;
-    const cobrado = mios.filter((m) => m.medio !== "nota_credito").reduce((s, m) => s + m.monto, 0);
+    const aCuenta = mios.find((m) => m.medio === "a_cuenta")?.monto ?? 0; // vendido a clientes mayoristas: no es plata cobrada
+    const cobrado = mios.filter((m) => m.medio !== "nota_credito" && m.medio !== "a_cuenta").reduce((s, m) => s + m.monto, 0);
     return {
       sucursal: v.sucursal, nombre: nombreSucursal(v.sucursal), ventas: v.ventas, unidades: v.unidades, lista: v.lista,
-      totalPagado: v.total_pagado, cobradoEnCaja: cobrado, pagadoConNotas: conNotas,
+      totalPagado: v.total_pagado, cobradoEnCaja: cobrado, vendidoACuenta: aCuenta, pagadoConNotas: conNotas,
       ticketPromedio: v.ventas ? Math.round(v.total_pagado / v.ventas) : 0, descuentoPromos: v.promos, ajusteMediosDePago: v.total_pagado - (v.lista - v.promos),
       porMedio: mios.map((m) => ({ medio: m.medio, nombre: m.nombre, monto: m.monto, ventas: m.ventas })),
     };
@@ -78,7 +80,7 @@ export async function resumen(p: ParamsInforme) {
     porSucursal: filas,
     total: {
       ventas: suma("ventas"), unidades: suma("unidades"), lista: suma("lista"), totalPagado: suma("totalPagado"),
-      cobradoEnCaja: suma("cobradoEnCaja"), pagadoConNotas: suma("pagadoConNotas"),
+      cobradoEnCaja: suma("cobradoEnCaja"), vendidoACuenta: filas.reduce((t, f) => t + f.vendidoACuenta, 0), pagadoConNotas: suma("pagadoConNotas"),
       ticketPromedio: suma("ventas") ? Math.round(suma("totalPagado") / suma("ventas")) : 0,
       porMedio: [...porMedioTotal.values()],
     },
@@ -301,7 +303,7 @@ export const DEFINICIONES = {
   fechas: "Dia calendario de Argentina (America/Argentina/Buenos_Aires); el rango incluye 'desde' y 'hasta'.",
 } as const;
 
-export type TipoInforme = "resumen" | "periodo" | "prendas_mas_vendidas" | "prendas_menos_vendidas" | "notas_credito" | "stock" | "horarios" | "ingresos" | "control" | "cierres_caja" | "caja_fuerte" | "anulaciones" | "descuentos_cortesias" | "panel";
+export type TipoInforme = "resumen" | "periodo" | "prendas_mas_vendidas" | "prendas_menos_vendidas" | "notas_credito" | "stock" | "horarios" | "ingresos" | "control" | "cierres_caja" | "caja_fuerte" | "anulaciones" | "descuentos_cortesias" | "cuentas_clientes" | "panel";
 export const TIPOS: Record<Exclude<TipoInforme, "panel">, { descripcion: string; usaFechas: boolean }> = {
   resumen: { descripcion: "Ventas, unidades, total pagado, cobrado en caja, ticket promedio y medios de pago, por sucursal y total.", usaFechas: true },
   periodo: { descripcion: "Evolucion de las ventas por dia, semana o mes (parametro agrupar), por sucursal.", usaFechas: true },
@@ -314,6 +316,7 @@ export const TIPOS: Record<Exclude<TipoInforme, "panel">, { descripcion: string;
   control: { descripcion: "Informe de control de UN dia (parametro hasta = el dia; sin fecha, hoy): por local ventas, medios, cierre de caja y diferencia, notas de credito, descuentos especiales, ajustes de stock, envios sin recibir y alertas. Pensado para imprimir.", usaFechas: true },
   cierres_caja: { descripcion: "Cierres de caja del periodo: efectivo esperado vs contado y diferencia por local y dia.", usaFechas: true },
   caja_fuerte: { descripcion: "Caja fuerte: cuanto tendria que haber por local (cierres + guardado en cierres parciales + conteos - salidas) y, en el periodo, cada guardado y cada salida con responsable y destino, y los conteos.", usaFechas: true },
+  cuentas_clientes: { descripcion: "Cuentas de clientes mayoristas del Deposito: deuda por vendedor y por cliente (en valor de lista y en pesos de cada medio), limite, dias sin pagar, y las comisiones del mes (0,5% de lo que pagan los clientes, para el vendedor dueño).", usaFechas: false },
   anulaciones: { descripcion: "Ventas anuladas en el periodo: ticket, local, monto, motivo y quien anulo.", usaFechas: true },
   descuentos_cortesias: { descripcion: "Descuentos especiales (incluye Curva Plus) con motivo y quien autorizo, y cortesias empresariales (prendas sin cobrar) del periodo.", usaFechas: true },
 };
@@ -332,6 +335,7 @@ export async function informe(tipo: TipoInforme, p: ParamsInforme) {
     case "cierres_caja": return cierresEntre(p.desde, p.hasta, p.sucursal);
     case "caja_fuerte": return cajaFuerteInforme(p);
     case "anulaciones": return anulaciones(p);
+    case "cuentas_clientes": return informeCuentas();
     case "descuentos_cortesias": return descuentosYCortesias(p);
     case "panel": return panelCompleto(p);
   }

@@ -893,6 +893,95 @@ try {
     await pool.query("delete from oauth_clientes where nombre like 'ZZ %'");
   });
 
+  await paso("Cuentas de clientes mayoristas (venta a cuenta, pagos, comision al cobrar)", async () => {
+    const cu = await import("../lib/cuentas");
+    const cierreMod = await import("../lib/cierre");
+    const DEPO = "deposito";
+    const yo = { id: (await pool.query("select id::int as id from usuarios where rol = 'admin' and activo order by id limit 1")).rows[0].id as number, nombre: "ZZ Staging" };
+    const vend = (await pool.query("insert into vendedores (nombre, sucursal_id) values ($1, 'deposito') returning id::int as id", [`ZZ Vendedor ${sello}`])).rows[0].id as number;
+    const vend2 = (await pool.query("insert into vendedores (nombre, sucursal_id) values ($1, 'deposito') returning id::int as id", [`ZZ Vendedor2 ${sello}`])).rows[0].id as number;
+    const P = (await repo.cargar({ categoria: "Remera", nombre: `ZZ Mayorista ${sello}`, precio: 10000, cantidad: 30, reparto: {} })).sku;
+    const cp = { pct: 0, motivo: "", autorizo: "ZZ Staging", curvaPlus: true };
+    const stockDep = async () => stockDe(P, DEPO);
+    await debeFallar("Cliente: nombre corto", () => cu.crearCliente({ nombre: "A", vendedorId: vend }, yo), /nombre/);
+    await debeFallar("Cliente: vendedor que no es del Deposito", () => cu.crearCliente({ nombre: "ZZ Cliente X", vendedorId: 999999 }, yo), /vendedor/);
+    const cli = (await cu.crearCliente({ nombre: `ZZ Cliente ${sello}`, telefono: "2915550000", vendedorId: vend, limite: 15000 }, yo)).id;
+    await debeFallar("Cliente: nombre repetido", () => cu.crearCliente({ nombre: `zz cliente ${sello}`, vendedorId: vend }, yo), /ya hay un cliente/i);
+    const cobradoAntes = (await cierreMod.resumenDia(DEPO, await cierreMod.hoyAR())).totalCobrado;
+    const efectivoAntes = (await cierreMod.resumenDia(DEPO, await cierreMod.hoyAR())).medios.find((m) => m.id === "efectivo")?.monto ?? 0;
+
+    // Venta a cuenta con Curva Plus acordada en EFECTIVO: 2 x $10.000 = 20.000 lista -25% = 15.000 de lista -20% efectivo = 12.000
+    await debeFallar("Venta a cuenta: solo en el Deposito", () => repo.registrarVenta(LOCAL, [{ sku: A, cant: 1 }], [{ medioId: "efectivo", monto: null }], undefined, undefined, undefined, [], null, null, { clienteId: cli, medio: "efectivo" }), /solo se hace en la caja del Dep/);
+    await debeFallar("Venta a cuenta: el medio acordado es efectivo o transferencia", () => repo.registrarVenta(DEPO, [{ sku: P, cant: 1 }], [], undefined, cp, undefined, [], null, null, { clienteId: cli, medio: "tarjeta" }), /efectivo o en transferencia/);
+    await debeFallar("Venta a cuenta: cliente inexistente", () => repo.registrarVenta(DEPO, [{ sku: P, cant: 1 }], [], undefined, cp, undefined, [], null, null, { clienteId: 999999, medio: "efectivo" }), /No existe ese cliente/);
+    // Limite: 15.000 de lista; esta compra suma 15.000 -> justo en el limite, entra.
+    const stk0 = await stockDep();
+    const v1 = await repo.registrarVenta(DEPO, [{ sku: P, cant: 2 }], [], undefined, cp, undefined, [], null, null, { clienteId: cli, medio: "efectivo" });
+    igual("Venta a cuenta: total en el medio acordado (efectivo)", v1.total, pc(15000, "efectivo"));
+    igual("Venta a cuenta: baja el stock del Deposito", await stockDep(), stk0 - 2);
+    const fila1 = (await pool.query("select medio_pago_id, cliente_mayorista_id::int as c, medio_acordado from ventas where codigo = $1", [v1.codigo])).rows[0];
+    igual("Venta a cuenta: queda como A CUENTA con el cliente y el medio acordado", [fila1.medio_pago_id, fila1.c, fila1.medio_acordado], ["a_cuenta", cli, "efectivo"]);
+    let est = await cu.estadoDeCuenta(cli);
+    igual("Cuenta: la deuda queda en valor de lista", est.cliente.saldo, 15000);
+    igual("Cuenta: equivalentes por medio (efectivo -20%)", [est.cliente.equivalentes.transferencia, est.cliente.equivalentes.efectivo], [15000, pc(15000, "efectivo")]);
+    const rDia = await cierreMod.resumenDia(DEPO, await cierreMod.hoyAR());
+    igual("Cierre: lo vendido a cuenta NO es plata cobrada", [rDia.totalCobrado - cobradoAntes, rDia.vendidoACuenta.monto >= pc(15000, "efectivo")], [0, true]);
+    // Supera el limite: hace falta autorizacion
+    await debeFallar("Limite de deuda: se pasa y no hay autorizacion", () => repo.registrarVenta(DEPO, [{ sku: P, cant: 1 }], [], undefined, cp, undefined, [], null, null, { clienteId: cli, medio: "transferencia" }), /se pasa del límite/);
+    const v2 = await repo.registrarVenta(DEPO, [{ sku: P, cant: 1 }], [], undefined, cp, undefined, [], null, null, { clienteId: cli, medio: "transferencia", autorizo: "ZZ Santiago" });
+    igual("Venta a cuenta: transferencia acordada = valor de lista", v2.total, 7500);
+    const lim = await pool.query("select 1 from auditoria where accion = 'cuenta_limite_superado' and detalle->>'venta' = $1", [v2.codigo]);
+    igual("Limite superado y autorizado: queda auditado", lim.rowCount, 1);
+    est = await cu.estadoDeCuenta(cli);
+    igual("Cuenta: saldo = suma de movimientos", [est.cliente.saldo, est.movimientos.length], [22500, 2]);
+    // Devolucion normal bloqueada
+    await debeFallar("Venta a cuenta: la devolucion normal no se habilita todavia", () => repo.emitirNota(DEPO, v1.codigo, [{ itemId: 0, cant: 1, falladas: 0 }], null), /fue a cuenta de un cliente mayorista/);
+
+    // Pagos
+    await debeFallar("Pago: medio invalido", () => cu.registrarPago(cli, "tarjeta", 1000, yo), /efectivo o en transferencia/);
+    await debeFallar("Pago: monto invalido", () => cu.registrarPago(cli, "efectivo", 0, yo), /número entero/);
+    await debeFallar("Pago: no puede pagar mas de lo que debe", () => cu.registrarPago(cli, "transferencia", 30000, yo), /pagando más de lo que debe/i);
+    const p1 = await cu.registrarPago(cli, "efectivo", pc(15000, "efectivo"), yo);
+    igual("Pago en efectivo: cubre su equivalente en lista", [p1.valorLista, p1.saldo], [15000, 7500]);
+    igual("Comision: 0,5% de lo que entro, para el vendedor dueno", p1.comision, Math.round(pc(15000, "efectivo") * 0.005));
+    const efectivoDespues = (await cierreMod.resumenDia(DEPO, await cierreMod.hoyAR())).medios.find((m) => m.id === "efectivo")?.monto ?? 0;
+    igual("Cierre: el pago en efectivo del cliente entra a la caja del dia", efectivoDespues - efectivoAntes, pc(15000, "efectivo"));
+    // Paga el resto con OTRO medio (acordo transferencia 7.500 y paga transferencia): saldo 0
+    const p2 = await cu.registrarPago(cli, "transferencia", 7500, yo);
+    igual("Pago por transferencia: saldo en cero", [p2.valorLista, p2.saldo], [7500, 0]);
+    await debeFallar("Pago: con deuda en cero no se puede pagar", () => cu.registrarPago(cli, "efectivo", 100, yo), /no debe nada/);
+    const com = await cu.comisionesMayoristas(null);
+    const mio = com.porVendedor.find((x) => x.vendedorId === vend);
+    igual("Comision del mes: cobrado y 0,5% del vendedor dueno", [mio?.cobrado, mio?.comision], [pc(15000, "efectivo") + 7500, Math.round(pc(15000, "efectivo") * 0.005) + Math.round(7500 * 0.005)]);
+    // Las ventas a cuenta no comisionan por la via semanal de los locales
+    const semanal = await (await import("../lib/comisiones")).comisiones({ desde: null, hasta: null, ganador: null });
+    check("Comisiones de los locales: no incluyen ventas a cuenta", !JSON.stringify(semanal).includes(`ZZ Vendedor ${sello}`));
+
+    // Anulacion de una venta a cuenta: se saca de la deuda (si el cliente no pago de mas)
+    const v3 = await repo.registrarVenta(DEPO, [{ sku: P, cant: 1 }], [], undefined, cp, undefined, [], null, null, { clienteId: cli, medio: "transferencia" });
+    igual("Cuenta: nueva venta suma deuda", (await cu.estadoDeCuenta(cli)).cliente.saldo, 7500);
+    await repo.anularVenta(v3.codigo, "ZZ prueba de anulacion", { soloSucursal: null, admin: true });
+    igual("Anular una venta a cuenta la saca de la deuda", (await cu.estadoDeCuenta(cli)).cliente.saldo, 0);
+
+    // Ajuste (carga de saldo inicial) solo admin con motivo; sin saldo a favor
+    await debeFallar("Ajuste: hace falta motivo", () => cu.ajustarCuenta(cli, 5000, "", yo), /motivo/);
+    await debeFallar("Ajuste: no deja saldo a favor", () => cu.ajustarCuenta(cli, -5000, "ZZ prueba", yo), /saldo a favor/);
+    const aj = await cu.ajustarCuenta(cli, 40000, "ZZ deuda inicial de prueba", yo);
+    igual("Ajuste: carga la deuda inicial", aj.saldo, 40000);
+    // Cambio de dueno
+    await cu.editarCliente(cli, { vendedorId: vend2 });
+    const pp = await cu.registrarPago(cli, "transferencia", 1000, yo);
+    const mov = (await pool.query("select vendedor_id::int as v from cuenta_movimientos where id = $1", [pp.id])).rows[0];
+    igual("Cambio de dueno: el pago nuevo comisiona al vendedor nuevo", mov.v, vend2);
+    // Informe para Claude
+    const ic = await inf.informe("cuentas_clientes", await inf.validarParams({})) as { clientes: { cliente: string; deudaLista: number }[] };
+    igual("Informe cuentas_clientes: muestra al cliente con su deuda (40.000 de ajuste - 1.000 de pago en transferencia)", ic.clientes.find((x) => x.cliente === `ZZ Cliente ${sello}`)?.deudaLista, 39000);
+    // Los movimientos no se pueden borrar
+    let borro = true;
+    try { await pool.query("delete from cuenta_movimientos where cliente_id = $1", [cli]); } catch (e) { borro = !/no se editan ni se borran/.test((e as Error).message); }
+    igual("Movimientos de la cuenta: no se pueden borrar", borro, false);
+  });
+
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;
     igual("Toda venta: pagos = total", await q(`select count(*)::int as n from ventas v

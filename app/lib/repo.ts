@@ -5,6 +5,7 @@ import { type Db, pool, tx } from "./db";
 import { usuarioEnCurso } from "./seguridad/contexto";
 import { aplicaManual, descuentoEspecial, esManualNxm, mediosParaPromo, mejorPromoConManuales, precioConManual, promosParaMedios, TOPE_PCT, valeConMedios, type Promo } from "./promos";
 import { auditar } from "./seguridad/auditoria";
+import { anotarAnulacion, anotarVentaACuenta, cobrosCuentasDelDia, prepararVentaACuenta } from "./cuentas";
 import {
   capitalizar, nombreSucursal, normalizar, tipoDesdeNombre, totalReparto,
   calcularPagos, mediosDelCarrito, NO_ANULADA, precioDeMedio, DIAS_DEVOLUCION, DIAS_DEVOLUCION_REGALO, ES_CODIGO_VENTA, type MedioPago, type NotaCredito, type VentaDevolvible, type VentaListada, type PagoEntrada, type Producto, type Reparto, type Tipo, type Traslado,
@@ -648,8 +649,12 @@ export async function vendedorActualizar(id: number, datos: { nombre: string; su
 // regalosPedidos: prendas que la empresa le regala al cliente CON esta compra (salen sin cobrar, como retiro de la empresa ligado a la
 // venta; salen en el ticket como REGALO). Tiene que haber al menos una prenda paga: no se puede regalar todo.
 export async function registrarVenta(sucursal: string, itemsPedidos: { sku: string; cant: number; origen?: string; faltante?: Faltante | null; promoManualId?: number | null }[], pagos: PagoEntrada[], clave?: string, especialPedido?: Especial, totalEsperado?: number,
-  regalosPedidos: { sku: string; cant: number; origen?: string }[] = [], permitidos?: string[] | null, vendedorId?: number | null) {
+  regalosPedidos: { sku: string; cant: number; origen?: string }[] = [], permitidos?: string[] | null, vendedorId?: number | null,
+  cuenta?: { clienteId: number; medio: string; autorizo?: string } | null) {
   if (!esSucursal(sucursal)) falla("Sucursal inexistente");
+  // Venta A CUENTA de un cliente mayorista (solo Deposito): el medio se acuerda al vender y el precio sale con ese medio; no entra plata a la caja
+  // (queda como deuda del cliente en valor de lista). No se mezcla con notas de credito ni con pagos en partes.
+  if (cuenta) pagos = [{ medioId: cuenta.medio, monto: null }];
   const especial = especialPedido ? validarEspecial(especialPedido, sucursal) : null;
   if (itemsPedidos.length === 0) falla("No hay prendas en la venta");
   for (const i of itemsPedidos) {
@@ -679,6 +684,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       }
     }
     const vend = await vendedorDeVenta(c, vendedorId);
+    const cli = cuenta ? await prepararVentaACuenta(c, sucursal, cuenta.clienteId, cuenta.medio) : null;
     const mr = await c.query<MedioPago>('select id, nombre, ajuste_pct::float8 as "ajustePct" from medios_pago where activo');
     const prods: Producto[] = [];
     for (const i of items) {
@@ -774,20 +780,29 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
     const unico = calc.pagos.length === 1 ? calc.pagos[0] : null;
     const v = await c.query<{ id: number; codigo: string; creado_en: Date }>(
       `insert into ventas (sucursal_id, subtotal_lista, medio_pago_id, ajuste_medio_pago, ajuste_pct_usado, total, clave, usuario_id,
-         descuento_promo, promo_id, promo_nombre, especial_pct, especial_motivo, especial_autorizo, vendedor_id, vendedor_nombre, vendedor_sucursal_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) returning id, codigo, creado_en`,
-      [sucursal, subtotal, unico ? (unico.medioId.startsWith("nota:") ? "nota_credito" : unico.medioId) : null, total - neto, unico?.pct ?? null, total, clave ?? null, usuarioEnCurso()?.id ?? null,
+         descuento_promo, promo_id, promo_nombre, especial_pct, especial_motivo, especial_autorizo, vendedor_id, vendedor_nombre, vendedor_sucursal_id, cliente_mayorista_id, medio_acordado)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) returning id, codigo, creado_en`,
+      [sucursal, subtotal, cli ? "a_cuenta" : unico ? (unico.medioId.startsWith("nota:") ? "nota_credito" : unico.medioId) : null, total - neto, unico?.pct ?? null, total, clave ?? null, usuarioEnCurso()?.id ?? null,
         descuento, auto.promo?.id ?? null, promoNombre, especial?.pct ?? null, especial?.motivo ?? null, especial?.autorizo ?? null,
-        vend?.id ?? null, vend?.nombre ?? null, vend?.sucursalId ?? null],
+        vend?.id ?? null, vend?.nombre ?? null, vend?.sucursalId ?? null, cli?.id ?? null, cli ? cuenta!.medio : null],
     );
     const ventaId = Number(v.rows[0].id);
     for (const p of calc.pagos) {
       const nota = p.medioId.startsWith("nota:") ? notas.get(p.medioId.slice(5)) : undefined;
       await c.query(
         "insert into venta_pagos (venta_id, medio_pago_id, monto, valor_lista, ajuste_pct_usado, nota_credito_id) values ($1, $2, $3, $4, $5, $6)",
-        [ventaId, nota ? "nota_credito" : p.medioId, p.monto, p.valorLista, p.pct, nota?.id ?? null],
+        [ventaId, nota ? "nota_credito" : cli ? "a_cuenta" : p.medioId, p.monto, p.valorLista, p.pct, nota?.id ?? null],
       );
       if (nota) await c.query("update notas_credito set saldo = saldo - $2 where id = $1", [nota.id, p.monto]);
+    }
+    let cuentaTicket: { cliente: string; medio: string; saldoLista: number; saldoTransferencia: number; saldoEfectivo: number } | undefined;
+    if (cli) {
+      const u = usuarioEnCurso();
+      const anotada = await anotarVentaACuenta(c, { cliente: cli, ventaId, valorLista: calc.pagos[0].valorLista, monto: total, medio: cuenta!.medio, autorizo: cuenta!.autorizo, usuario: { id: u?.id ?? null, nombre: u?.nombre ?? "sistema" } });
+      if (anotada.superoLimite) await auditar("cuenta_limite_superado", { cliente: cli.nombre, clienteId: cli.id, venta: v.rows[0].codigo, valorLista: calc.pagos[0].valorLista, autorizo: cuenta!.autorizo }, { db: c });
+      const saldoLista = cli.saldo + calc.pagos[0].valorLista;
+      const pe = mr.rows.find((m) => m.id === "efectivo")?.ajustePct ?? 0, pt = mr.rows.find((m) => m.id === "transferencia")?.ajustePct ?? 0;
+      cuentaTicket = { cliente: cli.nombre, medio: cuenta!.medio, saldoLista, saldoTransferencia: Math.round(saldoLista * (1 + pt / 100)), saldoEfectivo: Math.round(saldoLista * (1 + pe / 100)) };
     }
     const sinCambio = prods.map((_, i) => !!(auto.promo?.sinCambio && auto.detalle?.entran[i]) || !!(manuales[i] && !esManualNxm(manuales[i]!) && manuales[i]!.sinCambio));
     for (const [idx, p] of prods.entries()) {
@@ -827,6 +842,7 @@ export async function registrarVenta(sucursal: string, itemsPedidos: { sku: stri
       ajuste: total - neto,
       total,
       pagos: calc.pagos,
+      cuenta: cuentaTicket,
       items: prods.map((p, i) => ({ sku: p.sku, nombre: p.nombre, precio: p.precio, cant: items[i].cant, sinCambio: sinCambio[i] || undefined })),
       regalos: regalosTicket.length ? regalosTicket : undefined,
     };
@@ -933,9 +949,14 @@ export async function ventasDeHoy(sucursal: string) {
   const r = await pool.query<{ id: string; nombre: string; ventas: number; total: number }>(
     `select pg.medio_pago_id as id, m.nombre, count(distinct pg.venta_id)::int as ventas, coalesce(sum(pg.monto), 0)::float8 as total
      from venta_pagos pg join ventas v on v.id = pg.venta_id join medios_pago m on m.id = pg.medio_pago_id
-     where v.sucursal_id = $1 and ${hoy} and ${NO_ANULADA} group by pg.medio_pago_id, m.nombre order by m.nombre`,
+     where v.sucursal_id = $1 and ${hoy} and ${NO_ANULADA} and pg.medio_pago_id <> 'a_cuenta' group by pg.medio_pago_id, m.nombre order by m.nombre`,
     [sucursal],
   );
+  // Plata que pagaron hoy los clientes mayoristas (efectivo y transferencia): entra a la caja del Deposito.
+  for (const x of await cobrosCuentasDelDia(sucursal, new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }))) {
+    const f = r.rows.find((y) => y.id === x.id);
+    if (f) f.total += x.monto; else r.rows.push({ id: x.id, nombre: x.nombre, ventas: 0, total: x.monto });
+  }
   const n = await pool.query<{ n: number }>(`select count(*)::int as n from ventas v where v.sucursal_id = $1 and ${hoy} and ${NO_ANULADA}`, [sucursal]);
   return { filas: r.rows, ventas: n.rows[0].n };
 }
@@ -1190,6 +1211,8 @@ export async function anularVenta(ventaCodigo: string, motivoPedido: string, o: 
     const it = await c.query<{ sku: string; cantidad: number; stock_de: string | null }>(
       "select sku, cantidad, stock_de from venta_items where venta_id = $1 order by sku, id", [venta.id]);
     await c.query("insert into ventas_anuladas (venta_id, usuario_id, motivo) values ($1, $2, $3)", [venta.id, usuarioEnCurso()?.id ?? null, motivo]);
+    // Si era una venta a cuenta de un cliente mayorista, se saca de su deuda (movimiento nuevo).
+    await anotarAnulacion(c, venta.id, motivo, { id: usuarioEnCurso()?.id ?? null, nombre: usuarioEnCurso()?.nombre ?? "sistema" });
     let unidades = 0;
     for (const x of it.rows) {
       const destino = x.stock_de ?? venta.sucursal_id;
@@ -1230,6 +1253,10 @@ export async function emitirNota(sucursal: string, ventaCodigo: string, items: {
     if (!v.rows[0]) return falla("No existe esa venta");
     const ventaId = v.rows[0].id;
     if ((await c.query("select 1 from ventas_anuladas where venta_id = $1", [ventaId])).rowCount) return falla("Esa venta fue anulada: no se puede devolver");
+    // Venta a cuenta de un cliente mayorista: la devolucion (excepcion, con autorizacion) va a la cuenta del cliente y todavia no esta habilitada.
+    if ((await c.query("select 1 from ventas where id = $1 and cliente_mayorista_id is not null", [ventaId])).rowCount) {
+      return falla("Esa venta fue a cuenta de un cliente mayorista: la devolución se hace contra su cuenta y todavía no está habilitada. Avisá a la oficina.");
+    }
     // Un local solo devuelve compras de su propio local: si no, se podria "crear" stock y vales con ventas ajenas.
     if (soloSucursal && v.rows[0].sucursal_id !== soloSucursal) return falla(`Esa compra se hizo en ${nombreSucursal(v.rows[0].sucursal_id)}: la devolución se hace en ese local.`);
     if (v.rows[0].fuera) return falla(`Pasaron más de ${DIAS_DEVOLUCION} días desde la compra (más de ${DIAS_DEVOLUCION_REGALO} si era un ticket de regalo): ya no se acepta la devolución`);

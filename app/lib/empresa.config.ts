@@ -46,6 +46,8 @@ export const empresa = {
     // Cada entrada es una lista de palabras que tienen que estar en el nombre (sin importar mayusculas ni tildes): ["guillermo", "ramirez"] = Guillermo Ramirez.
     sinComision: [["cesar"], ["guille"], ["guillermo", "ramirez"]] as string[][],
   },
+  // Cuentas de clientes mayoristas del Deposito: el vendedor dueno del cliente comisiona este % de lo que el cliente PAGA (cuando entra la plata).
+  comisionMayorista: { pct: 0.5 },
   // Etiquetas: "agente" (recomendado) usa el agente de impresion instalado en esa PC (Windows o Mac); "servidor" imprime desde la maquina donde corre el sistema (solo sirve en desarrollo local); "directa" manda la etiqueta en el lenguaje de la impresora (TSPL) con QZ Tray; "ventana" usa la ventana de impresion del navegador.
   impresionEtiquetas: "agente" as "agente" | "directa" | "ventana" | "servidor",
   // Parte del nombre de la impresora de etiquetas tal como la ve el sistema (ej. "Xprinter XP-410B" o "Xprinter_XP_410B").

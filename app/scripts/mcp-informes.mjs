@@ -16,7 +16,7 @@ import { createInterface } from "node:readline";
 const URL_BASE = (process.env.SISTEMA_URL || "").replace(/\/+$/, "");
 const TOKEN = process.env.SISTEMA_TOKEN || "";
 const TOKEN_STOCK = process.env.SISTEMA_TOKEN_STOCK || "";
-const TIPOS = ["resumen", "periodo", "prendas_mas_vendidas", "prendas_menos_vendidas", "notas_credito", "stock", "horarios", "ingresos", "control", "cierres_caja", "caja_fuerte", "anulaciones", "descuentos_cortesias", "panel"];
+const TIPOS = ["resumen", "periodo", "prendas_mas_vendidas", "prendas_menos_vendidas", "notas_credito", "stock", "horarios", "ingresos", "control", "cierres_caja", "caja_fuerte", "anulaciones", "descuentos_cortesias", "cuentas_clientes", "panel"];
 
 const herramientas = [
   {
