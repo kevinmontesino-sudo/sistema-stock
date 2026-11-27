@@ -26,7 +26,7 @@ export default function Carga() {
   // El precio se puede escribir como lista o como efectivo: el otro se calcula solo (efectivo ÷ 0,8 = lista; el 0,8 sale de la base).
   const [escribeEfectivo, setEscribeEfectivo] = useState(false);
   const [cantidad, setCantidad] = useState("1");
-  // Producto unico (casos especiales): lista = transferencia = tarjeta, y el efectivo se escribe a mano. Siempre lleva SKU propio.
+  // Producto unico (casos especiales): lista = transferencia = tarjeta, y el efectivo se escribe a mano. Se reconoce por categoría + nombre + lista + efectivo: si coinciden, suma al mismo código.
   const [unico, setUnico] = useState(false);
   const [efvoUnico, setEfvoUnico] = useState("");
   const [foto, setFoto] = useState<string | undefined>();
@@ -62,6 +62,7 @@ export default function Carga() {
   const dPrecio = useDebounced(precioNum);
   const dCategoria = useDebounced(categoria);
   const dUnico = useDebounced(unico);
+  const dEfvoUnico = useDebounced(efvoUnicoNum);
 
   useEffect(() => {
     let vivo = true;
@@ -128,9 +129,9 @@ export default function Carga() {
 
   useEffect(() => {
     let vivo = true;
-    vistaPreviaCarga({ categoria: dCategoria, nombre: dNombre, precio: dPrecio, unico: dUnico }).then((r) => vivo && r.ok && setVista({ ...r, clave: [dCategoria, dNombre, dPrecio, dUnico].join("|") }));
+    vistaPreviaCarga({ categoria: dCategoria, nombre: dNombre, precio: dPrecio, unico: dUnico, efectivoUnico: dUnico ? dEfvoUnico : undefined }).then((r) => vivo && r.ok && setVista({ ...r, clave: [dCategoria, dNombre, dPrecio, dUnico, dUnico ? dEfvoUnico : 0].join("|") }));
     return () => { vivo = false; };
-  }, [dCategoria, dNombre, dPrecio, dUnico]);
+  }, [dCategoria, dNombre, dPrecio, dUnico, dEfvoUnico]);
 
   function elegir(p: Producto) {
     setNombre(p.nombre);
@@ -224,7 +225,7 @@ export default function Carga() {
   const enviando = LOCALES.reduce((s, l) => s + (parseInt(reparto[l.id] ?? "") || 0), 0);
   const queda = Math.max(0, (parseInt(cantidad) || 0) - enviando);
   // La vista previa llega un instante despues de escribir: si todavia es de otra categoria/nombre/precio, no se muestra un codigo viejo.
-  const vistaAlDia = vista && vista.clave === [categoria, nombre, precioNum, unico].join("|") ? vista : null;
+  const vistaAlDia = vista && vista.clave === [categoria, nombre, precioNum, unico, unico ? efvoUnicoNum : 0].join("|") ? vista : null;
   const etiqueta: DatosEtiqueta = { sku: vistaAlDia?.sku ?? "", nombre: capitalizar(nombre) || vista?.tipo.nombre || "", precios: preciosDe(precioNum, medios, fijos), altoMm: altoEtiq };
 
   return (
@@ -306,7 +307,7 @@ export default function Carga() {
                 Sale así: {preciosDe(precioNum, medios, fijos).map((p) => textoPrecioEtiqueta(p)).join(" · ")}
               </p>
             )}
-            <p className="nota">Se crea con un SKU propio, aunque haya otra prenda con el mismo nombre.</p>
+            <p className="nota">Si ya cargaste esta misma prenda (misma categoría, nombre, lista y efectivo), suma al mismo código. Si algo cambia, se crea un código nuevo.</p>
           </div>
           ) : (
           <div className="campo">

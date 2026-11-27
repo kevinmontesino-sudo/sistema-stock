@@ -982,6 +982,29 @@ try {
     igual("Movimientos de la cuenta: no se pueden borrar", borro, false);
   });
 
+  await paso("Producto unico: volver a cargarlo suma al mismo codigo", async () => {
+    const nombre = `ZZ Unico ${sello}`;
+    const u1 = await repo.cargar({ categoria: "Chaleco", nombre, precio: 42800, cantidad: 3, reparto: {}, efectivoUnico: 30000 });
+    const u2 = await repo.cargar({ categoria: "Chaleco", nombre: `  ${nombre.toLowerCase()} `, precio: 42800, cantidad: 2, reparto: {}, efectivoUnico: 30000 });
+    igual("Producto unico: la misma prenda reutiliza el codigo y suma el stock", [u2.sku, await stockDe(u1.sku, "deposito")], [u1.sku, 5]);
+    const u3 = await repo.cargar({ categoria: "Chaleco", nombre, precio: 42800, cantidad: 1, reparto: {}, efectivoUnico: 28000 });
+    check("Producto unico: otro precio de efectivo = otro codigo", u3.sku !== u1.sku, u3.sku);
+    const u4 = await repo.cargar({ categoria: "Chaleco", nombre, precio: 45000, cantidad: 1, reparto: {}, efectivoUnico: 30000 });
+    check("Producto unico: otro precio de lista = otro codigo", u4.sku !== u1.sku && u4.sku !== u3.sku, u4.sku);
+    const n1 = await repo.cargar({ categoria: "Chaleco", nombre, precio: 42800, cantidad: 1, reparto: {} });
+    check("Prenda normal con el mismo nombre y lista no se mezcla con la unica", n1.sku !== u1.sku, n1.sku);
+    const n2 = await repo.cargar({ categoria: "Chaleco", nombre, precio: 42800, cantidad: 2, reparto: {} });
+    igual("Prenda normal: volver a cargarla suma al mismo codigo", [n2.sku, await stockDe(n1.sku, "deposito")], [n1.sku, 3]);
+    const vp = await repo.vistaPrevia({ categoria: "Chaleco", nombre, precio: 42800, unico: true, efectivoUnico: 30000 });
+    igual("Vista previa de producto unico: muestra el codigo que ya existe (no uno nuevo)", [vp.sku, vp.existe, vp.existente?.stockTotal], [u1.sku, true, 5]);
+    const vp2 = await repo.vistaPrevia({ categoria: "Chaleco", nombre, precio: 42800, unico: true, efectivoUnico: 29000 });
+    igual("Vista previa de producto unico con otro efectivo: es un codigo nuevo", vp2.existe, false);
+    const vp3 = await repo.vistaPrevia({ categoria: "Chaleco", nombre, precio: 42800 });
+    igual("Vista previa de prenda normal: encuentra la normal, no la unica", [vp3.sku, vp3.existe], [n2.sku, true]);
+    const pu = await repo.productoPorSku(u1.sku);
+    igual("Producto unico: conserva su efectivo a mano", pu?.preciosMedio?.efectivo, 30000);
+  });
+
   await paso("Controles de toda la base", async () => {
     const q = async (sql: string) => (await pool.query<{ n: number }>(sql)).rows[0].n;
     igual("Toda venta: pagos = total", await q(`select count(*)::int as n from ventas v

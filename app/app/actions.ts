@@ -95,8 +95,8 @@ export async function ingresosProducto(sku: string) {
 }
 
 // ---- Carga y movimientos de mercaderia ----
-export async function vistaPreviaCarga(a: { categoria: string; nombre: string; precio: number; unico?: boolean }) {
-  return seguro("cargar", () => repo.vistaPrevia({ categoria: txt(a.categoria), nombre: txt(a.nombre), precio: ent(a.precio) || 0, unico: a.unico === true }));
+export async function vistaPreviaCarga(a: { categoria: string; nombre: string; precio: number; unico?: boolean; efectivoUnico?: number }) {
+  return seguro("cargar", () => repo.vistaPrevia({ categoria: txt(a.categoria), nombre: txt(a.nombre), precio: ent(a.precio) || 0, unico: a.unico === true, efectivoUnico: ent(a.efectivoUnico) || undefined }));
 }
 
 export async function cargarProducto(a: {

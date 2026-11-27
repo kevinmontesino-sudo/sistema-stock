@@ -111,18 +111,23 @@ async function resolverTipo(db: Db, categoria: string, crear: boolean) {
   return { codigo, nombre, nuevo: true };
 }
 
-export async function vistaPrevia(a: { categoria: string; nombre: string; precio: number; unico?: boolean }) {
+export async function vistaPrevia(a: { categoria: string; nombre: string; precio: number; unico?: boolean; efectivoUnico?: number }) {
   const t = await resolverTipo(pool, a.categoria, false);
-  // Producto unico: siempre SKU nuevo, no se compara con lo ya cargado.
-  const k = a.unico ? "" : normalizar(a.nombre);
-  const ex = await pool.query<{ sku: string; total: number; ultimo: Date | null }>(
-    `select p.sku, coalesce(sum(s.cantidad), 0)::int as total, (select max(c.creado_en) from cargas c where c.sku = p.sku) as ultimo
-     from productos p left join stock s on s.sku = p.sku
-     where p.activo and p.precios_medio is null and p.tipo = $1 and p.nombre_norm = $2 and p.precio_lista = $3 group by p.sku`,
-    [t.codigo, k, a.precio],
-  );
+  // Misma regla que cargar(): una prenda unica solo se reconoce si coincide tambien el precio de efectivo escrito a mano (sin efectivo todavia, no se compara).
+  const k = normalizar(a.nombre);
+  const buscaUnico = a.unico === true;
+  const ex = buscaUnico && !(Number.isInteger(a.efectivoUnico) && (a.efectivoUnico ?? 0) > 0)
+    ? { rows: [] as { sku: string; total: number; ultimo: Date | null }[] }
+    : await pool.query<{ sku: string; total: number; ultimo: Date | null }>(
+      `select p.sku, coalesce(sum(s.cantidad), 0)::int as total, (select max(c.creado_en) from cargas c where c.sku = p.sku) as ultimo
+       from productos p left join stock s on s.sku = p.sku
+       where p.activo and p.tipo = $1 and p.nombre_norm = $2 and p.precio_lista = $3
+         and ${buscaUnico ? "p.precios_medio is not null and (p.precios_medio->>'efectivo')::int = $4" : "p.precios_medio is null and $4::int is null"}
+       group by p.sku order by p.sku limit 1`,
+      [t.codigo, k, a.precio, buscaUnico ? a.efectivoUnico : null],
+    );
   const c = await pool.query<{ siguiente: number }>("select ultimo + 1 as siguiente from contadores_sku where tipo = $1", [t.codigo]);
-  const otros = k && a.precio > 0
+  const otros = !buscaUnico && k && a.precio > 0
     ? await pool.query<{ precio: number }>(
         "select precio_lista as precio from productos where activo and precios_medio is null and tipo = $1 and nombre_norm = $2 and precio_lista <> $3 order by precio_lista",
         [t.codigo, k, a.precio],
@@ -206,10 +211,17 @@ export async function cargar(a: {
   return tx(async (c) => {
     const k = normalizar(nombre);
     const tipo = (await resolverTipo(c, a.categoria, true)).codigo;
-    const ex = unico ? { rows: [] as { sku: string }[] } : await c.query<{ sku: string }>(
-      "select sku from productos where activo and precios_medio is null and tipo = $1 and nombre_norm = $2 and precio_lista = $3 for update",
-      [tipo, k, a.precio],
-    );
+    // Una prenda normal se reconoce por categoria + nombre + precio de lista. Un "producto unico" tambien, pero ademas tiene que coincidir el precio de
+    // efectivo cargado a mano: asi, volver a cargar la MISMA prenda unica suma stock a su codigo en vez de crear uno nuevo cada vez.
+    const ex = unico
+      ? await c.query<{ sku: string }>(
+        "select sku from productos where activo and precios_medio is not null and tipo = $1 and nombre_norm = $2 and precio_lista = $3 and (precios_medio->>'efectivo')::int = $4 order by sku limit 1 for update",
+        [tipo, k, a.precio, a.efectivoUnico],
+      )
+      : await c.query<{ sku: string }>(
+        "select sku from productos where activo and precios_medio is null and tipo = $1 and nombre_norm = $2 and precio_lista = $3 for update",
+        [tipo, k, a.precio],
+      );
     let sku = ex.rows[0]?.sku;
     if (!sku) {
       let fijos: Record<string, number> | null = null;
