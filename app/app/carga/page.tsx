@@ -138,6 +138,10 @@ export default function Carga() {
     setCatManual(nombreTipo(p.tipo, tipos));
     setEscribeEfectivo(false);
     setPrecio(String(p.precio));
+    // Si la prenda elegida es un "producto unico" (efectivo a mano), se tilda solo y se pone SU efectivo: asi la recarga suma al mismo codigo.
+    const efvo = p.preciosMedio?.efectivo;
+    setUnico(typeof efvo === "number");
+    setEfvoUnico(typeof efvo === "number" ? String(efvo) : "");
     setVerSug(false);
     setSel(-1);
     precioRef.current?.focus();
@@ -249,7 +253,7 @@ export default function Carga() {
                 {sugeridas.map((p, i) => (
                   <button key={p.sku} role="option" aria-selected={i === sel} className={i === sel ? "sel" : ""}
                     onMouseDown={(e) => e.preventDefault()} onClick={() => elegir(p)}>
-                    <span>{p.nombre} <small>· último ing {fechaCorta(p.ultimoIngreso)} · stock {Object.values(p.stock).reduce((s, n) => s + n, 0)} · {p.sku}</small></span>
+                    <span>{p.nombre} <small>· último ing {fechaCorta(p.ultimoIngreso)} · stock {Object.values(p.stock).reduce((s, n) => s + n, 0)} · {p.sku}{p.preciosMedio?.efectivo ? ` · ÚNICO, efectivo ${pesos(p.preciosMedio.efectivo)}` : ""}</small></span>
                     <strong>{pesos(p.precio)}</strong>
                   </button>
                 ))}
